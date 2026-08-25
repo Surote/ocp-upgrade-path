@@ -1,0 +1,8 @@
+$ export CURRENT_VERSION=4.2.18;
+$ export CHANNEL_NAME=fast-4.3;
+$
+$ curl -sH 'Accept:application/json' "https://api.openshift.com/api/upgrades_info/v1/graph?channel=${CHANNEL_NAME}" | jq -r --arg CURRENT_VERSION "${CURRENT_VERSION}" '. as $graph | $graph.nodes | map(.version=='\"$CURRENT_VERSION\"') | index(true) as $orig | $graph.edges | map(select(.[0] == $orig)[1]) | map($graph.nodes[.].version) | sort_by(.)'
+[
+  "4.2.19",
+  "4.3.1"
+]

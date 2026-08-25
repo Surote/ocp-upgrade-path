@@ -1,0 +1,938 @@
+/*
+ * Phase 4 — the design phase. Plain CSS, no framework. Organised by region;
+ * class selectors throughout (never bare-element rules fighting a class for
+ * the same property — the classic specificity failure mode at this size).
+ */
+
+main {
+  max-width: 1040px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.app-header {
+  margin-bottom: 24px;
+}
+
+.app-tagline {
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+/* ------------------------------------------------------------ control rail */
+
+.control-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 12px;
+  z-index: 10;
+}
+
+@media (max-width: 760px) {
+  .control-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: static;
+  }
+}
+
+@media (max-width: 460px) {
+  .control-rail {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field label {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field select {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-h);
+}
+
+.field select:disabled {
+  opacity: 0.55;
+}
+
+.field-error {
+  color: var(--risk-always);
+  font-size: 0.85rem;
+}
+
+.field-error button {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-h);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.notices {
+  border: 1px solid var(--risk-conditional);
+  background: var(--risk-conditional-bg);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 16px 0;
+}
+
+.notices ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.freshness {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 8px 2px 0;
+}
+
+.freshness button {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-h);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+  margin-left: 6px;
+}
+
+/* ----------------------------------------------------------- result shell */
+
+.result-section {
+  margin-top: 28px;
+}
+
+.path-result-hint {
+  color: var(--text-muted);
+  padding: 32px 0;
+  text-align: center;
+}
+
+.path-result-error {
+  color: var(--risk-always);
+  background: var(--risk-always-bg);
+  border: 1px solid var(--risk-always);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.stitch-banner {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  color: var(--text-h);
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+
+.stitch-banner p {
+  margin: 0;
+}
+
+.stitch-banner p + p {
+  margin-top: 6px;
+}
+
+/* A class fallback (eus -> stable) is a support-posture change, not just an
+   audit note -- given the same visual weight as an "always" risk so it reads
+   as a warning, not a footnote (plan.md §6 requirement 5). */
+.stitch-banner__fallback {
+  color: var(--risk-always);
+}
+
+/* ------------------------------------------------------------- route summary */
+
+.route-summary {
+  margin-bottom: 8px;
+}
+
+.route-summary ol {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.route-summary li + li::before {
+  content: '→';
+  color: var(--text-muted);
+  margin-right: 6px;
+  font-weight: 400;
+}
+
+.route-summary__meta {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+/* --------------------------------------------------------------------- map */
+
+.map-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 16px 8px 12px;
+  margin: 12px 0 20px;
+}
+
+.map-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.upgrade-map {
+  display: block;
+}
+
+.upgrade-map text {
+  font-family: var(--sans);
+  fill: var(--text-h);
+}
+
+.station__label {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.station__risk-count {
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.station__risk-count--always {
+  fill: var(--risk-always);
+}
+
+.station__risk-count--conditional {
+  fill: var(--risk-conditional);
+}
+
+.station__caption {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  fill: var(--text-muted);
+}
+
+.interchange-tag {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  fill: var(--accent);
+}
+
+/* lane colours -- deterministic per minor, design/lanes.ts */
+.lane-0 {
+  stroke: var(--lane-0);
+  fill: var(--lane-0);
+}
+.lane-1 {
+  stroke: var(--lane-1);
+  fill: var(--lane-1);
+}
+.lane-2 {
+  stroke: var(--lane-2);
+  fill: var(--lane-2);
+}
+.lane-3 {
+  stroke: var(--lane-3);
+  fill: var(--lane-3);
+}
+.lane-4 {
+  stroke: var(--lane-4);
+  fill: var(--lane-4);
+}
+.lane-5 {
+  stroke: var(--lane-5);
+  fill: var(--lane-5);
+}
+
+.hop-segment__line {
+  /* Bold, transit-map-weight lane stroke -- not a hairline rule with dots on it. */
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+.hop-segment__hit {
+  stroke: transparent;
+  stroke-width: 27;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.hop-segment {
+  cursor: pointer;
+}
+
+.hop-segment:focus-visible .hop-segment__line,
+.hop-segment.is-selected .hop-segment__line {
+  stroke-width: 12;
+}
+
+.hop-segment:focus-visible .hop-segment__hit {
+  stroke: color-mix(in srgb, var(--focus) 35%, transparent);
+}
+
+/* A visible focus indicator that works regardless of the element's own lane
+   colour (a stroke-colour-only ring is too low-contrast against a lane hue
+   that happens to be close to --focus, e.g. lane-0's indigo) -- `outline`
+   draws around the whole element's bounding box independent of its fill/
+   stroke, so it reads the same on every lane and every risk state. */
+.hop-segment:focus-visible,
+.station:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.station {
+  cursor: pointer;
+}
+
+.station__dot {
+  stroke-width: 3;
+  stroke: var(--surface);
+}
+
+.station--terminal .station__dot {
+  stroke-width: 3.5;
+}
+
+.station:focus-visible .station__dot,
+.station.is-selected .station__dot {
+  stroke: var(--focus);
+  stroke-width: 3.5;
+}
+
+.station__no-advisory-ring {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+/* Interchange = a ring around the station -- the standard transit-map mark
+   for "this stop connects to a different line", drawn where the ring is
+   part of the station itself rather than a small glyph floating above the
+   row (which read as detached and crowded the TARGET caption). */
+.interchange-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-dasharray: 4 3;
+}
+
+/* Risk pill riding directly ON the segment line (same y as the line, drawn
+   after it) -- an opaque capsule inset into the route, not a tinted overlay
+   the thick lane stroke would bleed through. Shape (▲/◆/✓) plus the word in
+   the aria-label carry severity alongside colour, never colour alone. */
+.risk-pill rect {
+  fill: var(--surface);
+  stroke-width: 2;
+}
+
+.risk-pill text {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.risk-pill--always rect {
+  stroke: var(--risk-always);
+}
+.risk-pill--always text {
+  fill: var(--risk-always);
+}
+
+.risk-pill--conditional rect {
+  stroke: var(--risk-conditional);
+}
+.risk-pill--conditional text {
+  fill: var(--risk-conditional);
+}
+
+.risk-pill--clean rect {
+  stroke: var(--clean);
+}
+.risk-pill--clean text {
+  fill: var(--clean);
+}
+
+.map-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 10px 4px 0;
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.map-legend__item--always {
+  color: var(--risk-always);
+}
+.map-legend__item--conditional {
+  color: var(--risk-conditional);
+}
+.map-legend__item--clean {
+  color: var(--clean);
+}
+
+/* ------------------------------------------------------------------ panels */
+
+.detail-grid {
+  display: grid;
+  /* minmax(0, 1fr), not a bare 1fr: a grid track's automatic minimum is its
+     items' min-content width, which for an unbreakable long token (a
+     digest, an errata URL) can be wider than the viewport -- minmax(0, ..)
+     lets the track (and the panel inside it) actually shrink to fit,
+     instead of forcing the whole page to scroll sideways. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 760px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  /* Same min-width:0 reasoning as .detail-grid above -- a flex/grid item
+     otherwise refuses to shrink below its content's min-content width. */
+  min-width: 0;
+}
+
+.panel a {
+  overflow-wrap: anywhere;
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel__hint {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------- hop detail */
+
+.interchange-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent-bg);
+  color: var(--text-h);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  margin: 10px 0;
+}
+
+.interchange-note__icon {
+  font-size: 1.1rem;
+}
+
+.hop-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 16px;
+}
+
+.command-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.command-line code {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
+.command-line .copy-button {
+  flex-shrink: 0;
+}
+
+.command-line--secondary code {
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------------ risks */
+
+.risk-card-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.risk-card {
+  border-radius: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+}
+
+.risk-card--always {
+  border-color: var(--risk-always);
+  background: var(--risk-always-bg);
+}
+
+.risk-card--conditional {
+  border-color: var(--risk-conditional);
+  background: var(--risk-conditional-bg);
+}
+
+.risk-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.risk-badge {
+  font-size: 0.9rem;
+}
+
+.risk-card--always .risk-badge,
+.risk-card--always .risk-card__class {
+  color: var(--risk-always);
+}
+
+.risk-card--conditional .risk-badge,
+.risk-card--conditional .risk-card__class {
+  color: var(--risk-conditional);
+}
+
+.risk-card__class {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+}
+
+.risk-card__name {
+  color: var(--text-h);
+}
+
+.risk-card__message {
+  margin: 6px 0;
+  font-size: 0.9rem;
+}
+
+.risk-card__footer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.risk-card__promql {
+  width: 100%;
+}
+
+.risk-card__promql summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.promql-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.promql-block__code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1 1 260px;
+}
+
+.risk-clean {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--clean);
+  background: var(--clean-bg);
+  border: 1px solid var(--clean);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+.risk-clean__icon {
+  font-size: 1rem;
+}
+
+/* -------------------------------------------------------------- node detail */
+
+.node-detail-list {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.node-detail-list dt {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.node-detail-list dd {
+  margin: 0;
+}
+
+.digest {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.chip-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.chip {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+/* --------------------------------------------------------------- commands */
+
+.script-block {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 10px 0 0;
+}
+
+.script-block code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  white-space: pre;
+}
+
+/* ------------------------------------------------------- guidance panels */
+/* Shared look for anything that is this tool's own addition on top of the
+   graph, not something Cincinnati asserts -- the EUS/Control-Plane-Only
+   advisory and the admin-acks panel both use this (plan.md §6). */
+
+.panel--guidance {
+  border: 1.5px dashed var(--risk-conditional);
+  background: var(--surface-2);
+}
+
+.guidance-label {
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+/* --------------------------------------------------------- admin acks */
+
+.admin-acks-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-acks-item {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.admin-acks-item:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.admin-acks-item h3 {
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+}
+
+.admin-acks-command {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 8px 0 0;
+}
+
+.admin-acks-unknown {
+  color: var(--risk-always);
+  font-weight: 500;
+  margin: 4px 0;
+}
+
+/* ---------------------------------------------------------------- alternates */
+
+.alternates-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alternate-route {
+  opacity: 0.82;
+  border-left: 3px solid var(--border-strong);
+  padding-left: 12px;
+}
+
+.alternate-route__meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.alternate-route__stops {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.alternate-route__stops li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.alternate-route__stops li + li::before {
+  content: '→';
+  color: var(--text-muted);
+  margin-right: 5px;
+}
+
+.stop-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* -------------------------------------------------------------- copy button */
+
+.copy-button {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-h);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.copy-button:hover {
+  background: var(--surface-2);
+}
+
+/* ------------------------------------------------------------------- focus */
+
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* -------------------------------------------------------------------- motion */
+
+@media (prefers-reduced-motion: no-preference) {
+  .hop-segment__line,
+  .station__dot {
+    transition:
+      stroke-width 0.12s ease,
+      stroke 0.12s ease;
+  }
+}
+
+/* ---------------------------------------------------------------- AI banner */
+/* Persistent, non-dismissible notice (App.tsx) -- deliberately its own
+   visual register: not a risk colour (nothing is wrong), not the accent
+   colour used for interactive chrome and interchange marks, so it can't be
+   mistaken for either. Sits first in <main>, above the page header, so it is
+   always in view without scrolling on load. */
+
+.ai-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 20px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.ai-banner p {
+  margin: 0;
+}
+
+.ai-banner__badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 570px) {
+  .ai-banner {
+    font-size: 0.8rem;
+  }
+}
+
+/* -------------------------------------------------------------- method footer */
+
+.method-footer {
+  margin-top: 40px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.method-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-h);
+  padding: 4px 0;
+}
+
+.method-details[open] summary {
+  margin-bottom: 8px;
+}
+
+.method-body {
+  max-width: 68ch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.method-body h3 {
+  margin-top: 6px;
+}
+
+.method-body p,
+.method-body li {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.method-body ol {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+@media (max-width: 570px) {
+  .method-body {
+    max-width: 100%;
+  }
+}

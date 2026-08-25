@@ -1,0 +1,7 @@
+FROM --platform=linux/amd64 gcr.io/distroless/nodejs22-debian12
+WORKDIR /app
+COPY dist ./dist
+COPY server.js ./server.js
+EXPOSE 8080
+ENV PORT=8080
+CMD ["server.js"]

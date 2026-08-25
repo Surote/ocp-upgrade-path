@@ -1,0 +1,6 @@
+node_modules
+.git
+*.md
+src/__fixtures__
+src/**/__tests__
+src/test-utils
