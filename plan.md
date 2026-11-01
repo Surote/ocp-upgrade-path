@@ -161,7 +161,8 @@ only "capped at three" without saying three of what; the implementation returns 
 alternates alongside the primary.)
 
 **Stitching** is target-channel-first. Fetch the target's channel; if the start version
-isn't in it, walk back fetching `<prefix>-4.<n-1>` until it is. Where two graphs disagree
+isn't in it, walk back to the same class one stream older (the highest older stream among
+the current graph's own nodes, see §6 "Major-version boundaries") until it is. Where two graphs disagree
 about an overlapping release, the later channel wins. We never union edges across graphs
 — that could synthesise a transition Red Hat has not published in any single channel. A
 banner names which channels were stitched, so the path stays auditable.
@@ -249,9 +250,13 @@ Verified against the live API:
 walked *backward* when the start is missing and *forward* when the target is.
 
 **Forward channel preference.** Prefer the same class (`eus-4.20 → eus-4.22`). Where that
-class has no channel at a needed minor — EUS is even-only, so `eus-4.21` does not exist —
-fall back to `stable` at that minor and **say so in the UI**, because moving an operator
-from `eus` to `stable` changes their support posture and is not a silent detail.
+class has no channel at a needed stream — EUS is even-only, so `eus-4.21` does not exist —
+fall back to `stable`, then `fast`, then `candidate` at that stream, and **say so in the
+UI**, because moving an operator from `eus` to `stable` (or onto `candidate`) changes their
+support posture and is not a silent detail. The `candidate` tail exists for new streams:
+it reaches a target that is published *only* in candidate (5.0 at first). That is not the
+silent auto-promotion §4 rules out: the operator picked a candidate-only release, and the
+banner says the plan relies on a pre-release channel.
 
 **This requires per-hop segment provenance in the engine.** `stitchPrimaryAcrossSegments`
 currently flattens every segment's hops into one `Path`, so nothing records which graph a
@@ -262,14 +267,44 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > the stitcher returns, single- or multi-graph alike. `stitchAndFindPath`
 > (engine/stitch.ts) is bidirectional: it fetches the anchor once, then walks backward to
 > cover `start` and/or forward to cover `target` as needed, in the same fetch. Forward
-> walking starts at the *target's own minor* (not one minor past the anchor), so a channel
+> walking starts at the *target's own stream* (not one past the anchor), so a channel
 > that already reaches back far enough — `eus-4.22` sharing the 4.20.x band with
 > `eus-4.20` — joins directly with no unnecessary intermediate channel, exactly matching
-> the table above. The `eus → stable` fallback (`StitchInfo.classFallbacks`) is surfaced
-> in both the target dropdown (`TargetSelect`, "drops to stable") and the result banner
+> the table above. A class fallback (`StitchInfo.classFallbacks`) is surfaced in both the
+> target dropdown (`TargetSelect`, "drops to <class>") and the result banner
 > (`StitchBanner`) when it's used. See the forward-walk tests in
 > `engine/__tests__/stitch.test.ts` for the exact algorithm, including the
-> multi-minor-with-fallback case.
+> multi-stream-with-fallback case.
+
+### Major-version boundaries (4.22 → 5.0)
+
+Channel names are `<class>-<major>.<minor>`, parsed in one place (`design/channels.ts`,
+`ChannelName = { cls, major, minor }`) and ordered by `(major, minor)`. Verified against
+the live API on 2026-11-01:
+
+| Channel | Nodes | Content |
+|---|---:|---|
+| `stable-4.22`, `fast-4.22`, `eus-4.22` | 104 | 4.20.0 … 4.22.20 |
+| `candidate-4.23` | 36 | 4.22.z plus 4.23.0-ec.* |
+| `candidate-5.0` | 51 | 4.22.z plus 5.0.0-ec.*, 5.0.0-rc.0 … rc.8, 5.0.0 |
+| `candidate-5.1` | 20 | 4.23.0-ec.*, 5.0.0-ec/rc, 5.1.0-ec.* |
+| `stable-4.23`, `fast-4.23`, `stable-5.0`, `fast-5.0`, `eus-5.0`, `stable-5.1` | 0 | empty |
+
+**Stream succession is read from data, never computed.** "The stream before 5.0" is not
+`5.-1`, and "the stream after 4.22" is both 4.23 and 5.0. Two facts in every graph answer
+it directly:
+
+- *Walking toward older streams* (the stitcher's backward walk, and its forward walk
+  stepping down from the target): a channel's nodes include its upgrade sources, so the
+  previous stream is the highest stream among its own nodes below its own
+  (`candidate-5.0` → 4.22).
+- *Walking toward newer streams* (look-ahead discovery): each node's membership lists the
+  newer channels it is an upgrade source for (`stable-4.22` nodes name `candidate-4.23`
+  and `candidate-5.0`). Discovery fetches only those named channels, lowest stream first.
+
+So `stable-4.22`, start 4.22.z, target 5.0.0-rc.x stitches `stable-4.22` → `candidate-5.0`
+and emits `oc adm upgrade channel candidate-5.0` at the first 4.22.z station
+`candidate-5.0` lists, with the banner marking the candidate fallback.
 
 ### Formerly: "Known limitation: the UI cannot reach the stitcher"
 
@@ -313,7 +348,7 @@ the stitch result.
 
 ### Channel ordering is an opinion
 
-Channels sort by minor, then by class `stable → eus → fast → candidate`. That class order
+Channels sort by stream (major, then minor, newest first), then by class `stable → eus → fast → candidate`. That class order
 is a **UI judgment about production risk appetite, not something the API encodes** — the
 wire data carries no ordering signal at all. Worth revisiting if it reads wrong to
 operators.

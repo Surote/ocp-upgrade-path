@@ -1,14 +1,18 @@
 import type { Stream } from '../engine/version';
 import { formatChannelName } from './channels';
 
-const FALLBACK_CLASSES = ['stable'] as const;
+/** Most conservative support posture first. */
+const FALLBACK_CLASSES = ['stable', 'fast', 'candidate'] as const;
 
 /**
  * Candidate channel names for reaching a stream while walking *forward*
  * from an anchor channel, most-preferred first -- plan.md §6 "Forward
  * channel preference": the anchor's own class first (`eus-4.20` walking
- * forward tries `eus-4.22` before anything else), then `stable` (EUS is
- * even-minor only -- design/eus.ts -- so `eus-4.21` never exists).
+ * forward tries `eus-4.22` before anything else), then `stable`, `fast`,
+ * `candidate`. EUS is even-minor only (design/eus.ts), so `eus-4.21` falls
+ * through to `stable-4.21`. A new major's first stream can be populated
+ * only in `candidate` (5.0 was, at first), so without that tail 5.0 would be
+ * unreachable.
  *
  * This function only *names* candidates; it does not check existence.
  * Callers must use the first one that is real -- an unknown Cincinnati

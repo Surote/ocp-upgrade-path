@@ -353,10 +353,10 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(result.error.kind).toBe('targetNeverFound');
     if (result.error.kind !== 'targetNeverFound') return;
     expect(result.error.target).toBe(v('4.30.0'));
-    // Neither the same-class nor the stable fallback exists at 4.30 -- the
-    // walk gives up at the very first minor rather than guessing further.
-    expect(result.error.channelsTried).toEqual(['eus-4.30', 'stable-4.30']);
-    expect(channelsFetched).toEqual(['eus-4.20', 'eus-4.30', 'stable-4.30']);
+    // No class exists at 4.30 -- the walk gives up at the very first stream
+    // rather than guessing further.
+    expect(result.error.channelsTried).toEqual(['eus-4.30', 'stable-4.30', 'fast-4.30', 'candidate-4.30']);
+    expect(channelsFetched).toEqual(['eus-4.20', 'eus-4.30', 'stable-4.30', 'fast-4.30', 'candidate-4.30']);
   });
 
   it('a genuine loadFailed during the forward walk (not a mere "channel does not exist") is surfaced immediately', async () => {

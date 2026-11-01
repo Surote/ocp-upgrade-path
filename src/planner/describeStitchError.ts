@@ -1,3 +1,4 @@
+import { formatChannelName, parseChannelName } from '../design/channels';
 import { describeGraphError } from '../graph/errors';
 import type { StitchError } from '../engine/types';
 
@@ -14,7 +15,9 @@ export function describeStitchError(error: StitchError): string {
     case 'invalidChannel':
       return `"${error.channel}" is not a recognised channel name (expected "<class>-<major>.<minor>", e.g. "stable-4.22").`;
     case 'loadFailed':
-      return `Failed to load channel "${error.channel}": ${describeGraphError(error.error)}`;
+      return error.error.kind === 'empty'
+        ? `Channel "${error.channel}" has no releases published${candidateHint(error.channel)}.`
+        : `Failed to load channel "${error.channel}": ${describeGraphError(error.error)}`;
     case 'startNeverFound':
       return `Start version ${error.start} was not found in any of: ${error.channelsTried.join(', ')}.`;
     case 'targetNeverFound':
@@ -28,4 +31,11 @@ export function describeStitchError(error: StitchError): string {
         ? `No path found from ${error.start} to ${error.target}. Nearest reachable version: ${error.nearestReachable}.`
         : `No path found from ${error.start} to ${error.target}.`;
   }
+}
+
+/** A new stream is published to `candidate` before `fast`/`stable` (5.0 was candidate-only at first), so point there. */
+function candidateHint(channel: string): string {
+  const parsed = parseChannelName(channel);
+  if (!parsed || parsed.cls === 'candidate') return '';
+  return ` yet -- a new stream often appears only in "${formatChannelName({ ...parsed, cls: 'candidate' })}" first`;
 }

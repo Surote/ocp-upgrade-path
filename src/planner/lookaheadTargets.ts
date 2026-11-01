@@ -2,53 +2,54 @@ import { useCallback } from 'react';
 import { parseChannelName } from '../design/channels';
 import { candidateChannelsForStream } from '../design/forwardChannel';
 import { reachableFrom } from '../engine/reachability';
-import { compareVersions } from '../engine/version';
+import { compareStreams, compareVersions, formatStream, type Stream } from '../engine/version';
 import type { GraphClient } from '../graph/client';
 import type { Arch, Graph, Version } from '../graph/types';
 import { ok, type Result } from '../lib/result';
 import { type AsyncResult, useAsyncResult } from './useAsyncResult';
 
 /**
- * Bound on how many extra minors beyond the anchor channel's own maximum
- * minor are probed for look-ahead targets (plan.md §6 "Look-ahead targets
- * (bidirectional stitching)": "be pragmatic about fetch cost -- do not fetch
- * every channel in existence on page load"). Each step probes at most two
- * candidates (the anchor's own class, then `stable` -- `candidateChannelsForMinor`),
- * so this bounds discovery to at most `2 * LOOKAHEAD_STEPS` extra network
- * requests, and only once the user has actually selected a channel (never on
- * page load, never for every channel that exists) -- cached by `GraphClient`'s
- * own two-tier cache afterward, so re-visiting the same channel, or the
- * engine's own later forward walk for whatever target the user actually
- * picks, costs nothing further.
+ * Bound on how many streams beyond the anchor's own are fetched for
+ * look-ahead targets (plan.md §6 "Look-ahead targets (bidirectional
+ * stitching)": "be pragmatic about fetch cost -- do not fetch every channel
+ * in existence on page load"). Only channels that real membership data
+ * already names are fetched, so this is at most `LOOKAHEAD_STEPS` extra
+ * requests, only once the user has selected a channel, and cached by
+ * `GraphClient` afterward -- including for the engine's later forward walk.
  */
 const LOOKAHEAD_STEPS = 3;
 
 export interface LookaheadSegment {
   readonly channel: string;
   readonly graph: Graph;
-  /** True when this segment came from the `stable` fallback rather than the anchor's own class (plan.md §6 "Forward channel preference"). */
+  /** True when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
   readonly classFallback: boolean;
-  /** The class that was preferred but unavailable at this minor -- present iff `classFallback` is true. */
+  /** The anchor's class, which had no channel at this stream -- present iff `classFallback` is true. */
   readonly requestedClass?: string;
 }
 
 /**
- * Lazily discovers up to `LOOKAHEAD_STEPS` channels beyond the anchor's own
- * maximum minor, walking outward one minor at a time (same-class preferred,
- * `stable` fallback), stopping early the first minor where *neither* variant
- * exists -- taken as a signal there is nothing released that far ahead yet,
- * not a reason to keep probing. Shares `candidateChannelsForMinor` with the
- * engine's own forward walk (engine/stitch.ts) so the two can never name a
- * channel differently.
+ * Lazily discovers up to `LOOKAHEAD_STEPS` channels in streams newer than
+ * the anchor's, lowest stream first. Which streams come next is read from
+ * channel membership, not computed: a node's metadata lists every channel it
+ * belongs to, including the next streams' channels it is an upgrade source
+ * for (4.22.z lists `candidate-4.23` and `candidate-5.0`). Neither "4.23"
+ * nor "5.0" can be derived from "4.22" arithmetically, and both are real
+ * successors. Each fetched segment's own membership extends the frontier, so
+ * 5.1 is found through `candidate-5.0`.
+ *
+ * At each stream the class is chosen by `candidateChannelsForStream` (shared
+ * with engine/stitch.ts so the two prefer channels identically), restricted
+ * to names membership attests.
  *
  * Uses `GraphClient` directly rather than the engine's `GraphLoader`
  * injection seam: this is a UI-only concern (populating a dropdown before
- * any actual path search has run), not part of the pure path-search engine,
- * and it specifically needs the client's own two-tier cache.
+ * any path search has run), and it needs the client's two-tier cache.
  *
- * Returns an empty list (no fetches at all) when `anchorChannel` doesn't
- * match Cincinnati's `<class>-<major>.<minor>` naming convention -- there is no
- * minor to walk forward from.
+ * Returns an empty list when `anchorChannel` doesn't match Cincinnati's
+ * `<class>-<major>.<minor>` naming convention, and degrades to the segments
+ * found so far on any fetch failure -- this is a dropdown convenience, not a
+ * place to surface hard errors.
  */
 export async function discoverLookaheadSegments(
   client: GraphClient,
@@ -58,36 +59,41 @@ export async function discoverLookaheadSegments(
 ): Promise<readonly LookaheadSegment[]> {
   const anchor = parseChannelName(anchorChannel);
   if (!anchor) return [];
-  const preferredClass = anchor.cls;
+  const anchorResult = await client.getGraph({ channel: anchorChannel, arch }, { signal });
+  if (!anchorResult.ok) return [];
 
+  const attested = new Set(anchorResult.value.graph.channelNames);
+  const visitedStreams = new Set<string>([formatStream(anchor)]);
   const segments: LookaheadSegment[] = [];
-  for (let step = 1; step <= LOOKAHEAD_STEPS; step += 1) {
-    const candidates = candidateChannelsForStream(preferredClass, { major: anchor.major, minor: anchor.minor + step });
-    let found: LookaheadSegment | undefined;
 
-    for (let ci = 0; ci < candidates.length; ci += 1) {
-      const channel = candidates[ci] as string;
+  while (segments.length < LOOKAHEAD_STEPS) {
+    const stream = lowestNewerStream(attested, anchor, visitedStreams);
+    if (!stream) break;
+    visitedStreams.add(formatStream(stream));
+
+    for (const channel of candidateChannelsForStream(anchor.cls, stream).filter((name) => attested.has(name))) {
       const result = await client.getGraph({ channel, arch }, { signal });
-      if (result.ok) {
-        found = {
-          channel,
-          graph: result.value.graph,
-          classFallback: ci > 0,
-          requestedClass: ci > 0 ? preferredClass : undefined,
-        };
-        break;
+      if (!result.ok) {
+        if (result.error.kind === 'empty') continue;
+        return segments;
       }
-      // 'empty' = the channel genuinely doesn't exist (Cincinnati's HTTP
-      // 200 + empty-arrays signal) -- try the next candidate. Anything else
-      // is a real failure; discovery degrades quietly rather than surfacing
-      // a hard error for what is, at this point, only a dropdown convenience.
-      if (result.error.kind !== 'empty') return segments;
+      const classFallback = parseChannelName(channel)?.cls !== anchor.cls;
+      segments.push({ channel, graph: result.value.graph, classFallback, requestedClass: classFallback ? anchor.cls : undefined });
+      for (const name of result.value.graph.channelNames) attested.add(name);
+      break;
     }
-
-    if (!found) break;
-    segments.push(found);
   }
   return segments;
+}
+
+function lowestNewerStream(channelNames: ReadonlySet<string>, than: Stream, exclude: ReadonlySet<string>): Stream | undefined {
+  let lowest: Stream | undefined;
+  for (const name of channelNames) {
+    const parsed = parseChannelName(name);
+    if (!parsed || compareStreams(parsed, than) <= 0 || exclude.has(formatStream(parsed))) continue;
+    if (!lowest || compareStreams(parsed, lowest) < 0) lowest = { major: parsed.major, minor: parsed.minor };
+  }
+  return lowest;
 }
 
 export interface LookaheadTargetOption {
@@ -96,17 +102,20 @@ export interface LookaheadTargetOption {
   readonly reason?: string;
   /** The channel this candidate was actually found in -- always beyond the anchor's own graph, so choosing it requires a real channel switch. */
   readonly viaChannel: string;
-  /** True when reaching `viaChannel` required the eus -> stable class fallback (plan.md §6) -- surfaced so the UI can call it out explicitly, per requirement 5. */
+  /** True when `viaChannel` is a different class than the anchor's (plan.md §6) -- surfaced so the UI can call it out explicitly, per requirement 5. */
   readonly classFallback: boolean;
 }
 
 /**
  * Builds look-ahead target options from already-discovered `segments`
- * (ascending-minor order, as `discoverLookaheadSegments` returns them):
+ * (ascending-stream order, as `discoverLookaheadSegments` returns them):
  * every version in a segment's graph not already present in `anchorGraph`,
  * marked reachable/unreachable by carrying a "reachable so far" frontier
- * from `start` through the anchor and then through each segment in turn,
- * using only that segment's own edges at each step -- mirroring the
+ * from `start` through the anchor and then into each segment in turn,
+ * using only that segment's own edges at each step. The frontier is the
+ * union over every earlier segment, not just the previous one, because
+ * successor streams can be siblings (4.23 and 5.0 both follow 4.22) rather
+ * than a chain. This mirrors the
  * stitcher's "never union edges across graphs" rule (plan.md §4) rather than
  * assuming every listed version is reachable just because a channel exists.
  */
@@ -146,7 +155,7 @@ export function buildLookaheadTargetOptions(
       });
     }
 
-    frontier = reachableInSegment;
+    frontier = new Set([...frontier, ...reachableInSegment]);
   }
 
   return [...options].sort((a, b) => compareVersions(b.version, a.version));
