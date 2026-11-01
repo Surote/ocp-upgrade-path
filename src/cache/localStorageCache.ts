@@ -3,7 +3,10 @@ import { toStorable } from '../graph/serialize';
 import type { Graph } from '../graph/types';
 import type { CacheEntry, CacheKey } from './types';
 
-const PREFIX = 'oup:graph:v1:';
+// v2: graphs cached before conditional edges became traversable carry the
+// old edge semantics, so v1 entries must not be served.
+const PREFIX = 'oup:graph:v2:';
+const LEGACY_PREFIX = 'oup:graph:v1:';
 const MANIFEST_KEY = `${PREFIX}manifest`;
 const TTL_MS = 60 * 60 * 1000; // 1 hour, per plan.md §3
 const MAX_ENTRIES = 8; // LRU cap, per plan.md §3 (~1.75 MB of trimmed graphs)
@@ -53,6 +56,7 @@ export class LocalStorageGraphCache {
 
   constructor(storage: Storage = globalThis.localStorage) {
     this.storage = storage;
+    this.dropLegacyKeys();
   }
 
   get(key: CacheKey): CacheEntry<Graph> | undefined {
@@ -166,6 +170,17 @@ export class LocalStorageGraphCache {
       this.storage.removeItem(entryKey(key));
     }
     this.storage.removeItem(MANIFEST_KEY);
+  }
+
+  private dropLegacyKeys(): void {
+    try {
+      const keys = Array.from({ length: this.storage.length }, (_, i) => this.storage.key(i));
+      for (const key of keys) {
+        if (key?.startsWith(LEGACY_PREFIX)) this.storage.removeItem(key);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   private readManifest(): CacheKey[] {

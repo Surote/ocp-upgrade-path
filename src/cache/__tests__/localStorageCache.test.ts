@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toStorable } from '../../graph/serialize';
 import { buildGraph } from '../../test-utils/buildGraph';
 import { FakeStorage, QuotaOnceThenOkStorage, ThrowingReadStorage, ThrowingWriteStorage } from '../../test-utils/fakeStorage';
 import { LocalStorageGraphCache } from '../localStorageCache';
@@ -134,7 +135,7 @@ describe('LocalStorageGraphCache — resilience to a hostile/broken Storage', ()
 
   it('treats corrupt JSON already in storage as a miss, and cleans it up', () => {
     const storage = new FakeStorage();
-    storage.setItem('oup:graph:v1:entry:stable-4.20|amd64', 'not valid json {{{');
+    storage.setItem('oup:graph:v2:entry:stable-4.20|amd64', 'not valid json {{{');
     const cache = new LocalStorageGraphCache(storage);
 
     expect(cache.get(makeCacheKey('stable-4.20', 'amd64'))).toBeUndefined();
@@ -143,7 +144,7 @@ describe('LocalStorageGraphCache — resilience to a hostile/broken Storage', ()
   it('treats a value of the wrong shape (e.g. from a future/incompatible app version) as a miss', () => {
     const storage = new FakeStorage();
     storage.setItem(
-      'oup:graph:v1:entry:stable-4.20|amd64',
+      'oup:graph:v2:entry:stable-4.20|amd64',
       JSON.stringify({ fetchedAt: Date.now(), value: { totallyDifferent: true } }),
     );
     const cache = new LocalStorageGraphCache(storage);
@@ -153,7 +154,7 @@ describe('LocalStorageGraphCache — resilience to a hostile/broken Storage', ()
 
   it('treats a stale entry from the pre-channel-membership (Phase 1) shape as a miss and evicts it', () => {
     const storage = new FakeStorage();
-    const key = 'oup:graph:v1:entry:stable-4.20|amd64';
+    const key = 'oup:graph:v2:entry:stable-4.20|amd64';
     // The exact shape the old code persisted: nodes without `channels`, no
     // top-level `channelNames` -- plan.md §3's amendment made both required,
     // so this must be rejected cleanly rather than parsed into a Graph that's
@@ -184,6 +185,36 @@ describe('LocalStorageGraphCache — resilience to a hostile/broken Storage', ()
     expect(() => cache.set(key, { value: graph, fetchedAt: Date.now() })).not.toThrow();
 
     expect(cache.get(key)?.value).toEqual(graph);
+  });
+});
+
+describe('LocalStorageGraphCache — entries written before the conditional-edge fix (v1)', () => {
+  function seedV1(storage: Storage) {
+    const graph = buildGraph(['4.20.1', '4.20.2'], [[0, 1]]);
+    storage.setItem(
+      'oup:graph:v1:entry:stable-4.20|amd64',
+      JSON.stringify({ fetchedAt: Date.now(), value: toStorable(graph) }),
+    );
+    storage.setItem('oup:graph:v1:manifest', JSON.stringify(['stable-4.20|amd64']));
+  }
+
+  it('does not serve a fresh, well-formed v1 entry', () => {
+    const storage = new FakeStorage();
+    seedV1(storage);
+    const cache = new LocalStorageGraphCache(storage);
+
+    expect(cache.get(makeCacheKey('stable-4.20', 'amd64'))).toBeUndefined();
+  });
+
+  it('removes leftover v1 keys and leaves unrelated keys alone', () => {
+    const storage = new FakeStorage();
+    seedV1(storage);
+    storage.setItem('someone-else', 'keep');
+    new LocalStorageGraphCache(storage);
+
+    expect(storage.getItem('oup:graph:v1:entry:stable-4.20|amd64')).toBeNull();
+    expect(storage.getItem('oup:graph:v1:manifest')).toBeNull();
+    expect(storage.getItem('someone-else')).toBe('keep');
   });
 });
 
