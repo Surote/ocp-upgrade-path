@@ -6,12 +6,12 @@ import { toStorable } from '../serialize';
 const CTX = { channel: 'stable-4.20', arch: 'amd64' } as const;
 
 describe('parseRawGraph — real fixtures', () => {
-  it('parses the pinned stable-4.20 fixture (124 nodes / 2422 edges)', () => {
+  it('parses the pinned stable-4.20 fixture (124 nodes / 2422 unconditional + 1175 conditional edges)', () => {
     const result = parseRawGraph(loadFixture('stable-4.20.json'), CTX);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.nodes).toHaveLength(124);
-    expect(result.value.edges).toHaveLength(2422);
+    expect(result.value.edges).toHaveLength(2422 + 1175);
     expect(result.value.conditionalEdges).toHaveLength(72);
   });
 
@@ -40,6 +40,21 @@ describe('parseRawGraph — real fixtures', () => {
       expect(to).toBeGreaterThanOrEqual(0);
       expect(to).toBeLessThan(nodes.length);
     }
+  });
+
+  it('rejects a conditional edge naming a version that is not a node', () => {
+    const result = parseRawGraph(
+      {
+        version: 1,
+        nodes: [{ version: '1.0.0', payload: 'p' }],
+        edges: [],
+        conditionalEdges: [{ edges: [{ from: '1.0.0', to: '9.9.9' }], risks: [] }],
+      },
+      CTX,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('validation');
   });
 
   it('brands conditionalEdges as version strings, distinct from the index-addressed edges', () => {

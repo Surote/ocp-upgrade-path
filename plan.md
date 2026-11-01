@@ -68,6 +68,7 @@ Established by querying the live endpoint, not from documentation.
 | Payload shape | `{version, nodes[], edges[], conditionalEdges[]}` | Two addressing schemes in one document |
 | Node | `{version, payload, metadata{…}}` | Errata URL present on all `stable`/`fast` nodes, **but absent on 17/171 `candidate-4.20` nodes** — type it optional |
 | Bad channel | HTTP **200** with empty arrays | Validate on content, not status code |
+| Conditional updates | Listed **only** in `conditionalEdges`, never also in `edges` (0 overlap across all 7 pinned fixtures) | Fold them into the traversable edge set at parse time; `conditionalEdges` stays the per-edge risk table. Skipping them hid every risk and made e.g. all 4.21→4.22 updates in `stable-4.22` unreachable |
 | Graph size | 267 KB → 219 KB trimmed → 27 KB gzip | Whole channel set fits in server memory |
 | Risk density | 1175 / 2422 edges (~49%) | Ranking on risk has real signal |
 | Risk types | 36 `Always` vs 202 `PromQL` | Hiding conditional risks would hide ~85% of them |

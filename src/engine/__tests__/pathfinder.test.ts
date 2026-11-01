@@ -302,3 +302,50 @@ describe('findPathsInGraph — trivial and edge cases', () => {
     expect(result.value.primary.cost.hops).toBe(2);
   });
 });
+
+describe('findPathsInGraph — conditional edges (live stable-4.22)', () => {
+  // Live Cincinnati lists conditional updates only in `conditionalEdges`,
+  // never also in `edges`; in stable-4.22 every 4.21 -> 4.22 update is conditional.
+  function loadStable422() {
+    const result = parseRawGraph(loadFixture('stable-4.22.json'), { channel: 'stable-4.22', arch: 'amd64' });
+    if (!result.ok) throw result.error;
+    return result.value;
+  }
+
+  it('plans through a conditional-only update and reports its risks', () => {
+    const result = findPathsInGraph(loadStable422(), v('4.21.0'), v('4.22.20'));
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    const crossing = result.value.primary.hops.find((h) => h.from.startsWith('4.21.') && h.to.startsWith('4.22.'));
+    expect(crossing?.risks.length).toBeGreaterThan(0);
+    expect(result.value.primary.riskSummary.length).toBeGreaterThan(0);
+  });
+
+  it('still prefers an unconditional update over an equally short conditional one', () => {
+    const raw = {
+      version: 1,
+      nodes: [
+        { version: '1.0.0', payload: 'p0' },
+        { version: '1.0.9', payload: 'p1' },
+        { version: '1.0.1', payload: 'p2' },
+        { version: '2.0.0', payload: 'p3' },
+      ],
+      edges: [
+        [0, 1],
+        [0, 2],
+        [2, 3],
+      ],
+      conditionalEdges: [
+        {
+          edges: [{ from: '1.0.9', to: '2.0.0' }],
+          risks: [{ url: 'u', name: 'Risky', message: 'm', matchingRules: [{ type: 'PromQL', promql: { promql: 'up' } }] }],
+        },
+      ],
+    };
+    const parsed = parseRawGraph(raw, { channel: 'test', arch: 'amd64' });
+    if (!parsed.ok) throw parsed.error;
+    const result = findPathsInGraph(parsed.value, v('1.0.0'), v('2.0.0'));
+    if (!result.ok) throw result.error;
+    expect(result.value.primary.versions).toEqual([v('1.0.0'), v('1.0.1'), v('2.0.0')]);
+    expect(result.value.alternates.map((p) => p.versions)).toEqual([]);
+  });
+});

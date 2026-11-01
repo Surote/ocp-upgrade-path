@@ -153,6 +153,30 @@ export function parseRawGraph(
 
   const conditionalEdges: ConditionalEdgeGroup[] = raw.conditionalEdges.map(mapConditionalEdgeGroup);
 
+  // Cincinnati lists a conditional update only in `conditionalEdges`, never
+  // also in `edges` (0 overlap across every captured fixture), so without
+  // folding them in, conditional updates are untraversable and their risks
+  // never reach a path. `conditionalEdges` stays as the per-edge risk table.
+  const indexOfVersion = new Map(nodes.map((n, i) => [n.version, i] as const));
+  const edgeKeys = new Set(edges.map(([from, to]) => `${from},${to}`));
+  for (const group of conditionalEdges) {
+    for (const edge of group.edges) {
+      const from = indexOfVersion.get(edge.from);
+      const to = indexOfVersion.get(edge.to);
+      if (from === undefined || to === undefined) {
+        return err({
+          kind: 'validation',
+          message: `Conditional edge ${edge.from} -> ${edge.to} names a version that is not a node.`,
+        });
+      }
+      const key = `${from},${to}`;
+      if (!edgeKeys.has(key)) {
+        edgeKeys.add(key);
+        edges.push([mintNodeIndex(from), mintNodeIndex(to)]);
+      }
+    }
+  }
+
   return ok({ nodes, edges, conditionalEdges, channelNames });
 }
 

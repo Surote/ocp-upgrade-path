@@ -79,11 +79,12 @@ describe('reachableFrom — pinned stable-4.20 fixture', () => {
   });
 
   it('a node present in the graph but with no forward edge from 4.18.2 is correctly excluded', () => {
-    // 4.18.5 is a real node in this fixture but has no directed path from
-    // 4.18.2 (verified against the raw fixture data directly, independent of
-    // this module, before writing this assertion).
+    // 4.18.1 is a real node in this fixture with no directed path from
+    // 4.18.2, unconditional or conditional (verified against the raw fixture
+    // data directly). 4.18.5 is reachable, but only via a conditional update.
     const reachable = reachableFrom(loadStable420(), v('4.18.2'));
-    expect(reachable.has(v('4.18.5'))).toBe(false);
+    expect(reachable.has(v('4.18.1'))).toBe(false);
+    expect(reachable.has(v('4.18.5'))).toBe(true);
   });
 
   it('agrees with findPathsInGraph on a sample of reachable/unreachable versions', async () => {
@@ -91,7 +92,7 @@ describe('reachableFrom — pinned stable-4.20 fixture', () => {
     const graph = loadStable420();
     const reachable = reachableFrom(graph, v('4.18.2'));
 
-    for (const candidate of ['4.20.32', '4.19.40', '4.18.5', '4.20.1'] as const) {
+    for (const candidate of ['4.20.32', '4.19.40', '4.18.5', '4.18.1', '4.20.1'] as const) {
       const target = v(candidate);
       const pathResult = findPathsInGraph(graph, v('4.18.2'), target);
       expect(reachable.has(target)).toBe(pathResult.ok);
