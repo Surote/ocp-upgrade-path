@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { channelClassOf, channelMinorOf } from '../design/channels';
-import { candidateChannelsForMinor } from '../design/forwardChannel';
+import { parseChannelName } from '../design/channels';
+import { candidateChannelsForStream } from '../design/forwardChannel';
 import { reachableFrom } from '../engine/reachability';
 import { compareVersions } from '../engine/version';
 import type { GraphClient } from '../graph/client';
@@ -47,7 +47,7 @@ export interface LookaheadSegment {
  * and it specifically needs the client's own two-tier cache.
  *
  * Returns an empty list (no fetches at all) when `anchorChannel` doesn't
- * match Cincinnati's `<class>-4.<minor>` naming convention -- there is no
+ * match Cincinnati's `<class>-<major>.<minor>` naming convention -- there is no
  * minor to walk forward from.
  */
 export async function discoverLookaheadSegments(
@@ -56,14 +56,13 @@ export async function discoverLookaheadSegments(
   arch: Arch,
   signal?: AbortSignal,
 ): Promise<readonly LookaheadSegment[]> {
-  const preferredClass = channelClassOf(anchorChannel);
-  const anchorMinor = channelMinorOf(anchorChannel);
-  if (preferredClass === undefined || anchorMinor === undefined) return [];
+  const anchor = parseChannelName(anchorChannel);
+  if (!anchor) return [];
+  const preferredClass = anchor.cls;
 
   const segments: LookaheadSegment[] = [];
   for (let step = 1; step <= LOOKAHEAD_STEPS; step += 1) {
-    const minor = anchorMinor + step;
-    const candidates = candidateChannelsForMinor(preferredClass, minor);
+    const candidates = candidateChannelsForStream(preferredClass, { major: anchor.major, minor: anchor.minor + step });
     let found: LookaheadSegment | undefined;
 
     for (let ci = 0; ci < candidates.length; ci += 1) {

@@ -1,6 +1,6 @@
 import type { Path } from '../engine/types';
 import type { GraphNode, Version } from '../graph/types';
-import { channelClassOf, channelNamesForNode } from './channels';
+import { channelNamesForNode, parseChannelName } from './channels';
 
 export interface HopCommand {
   readonly from: Version;
@@ -59,7 +59,7 @@ export interface ChannelContext {
 /**
  * Preference order for which real channel to switch into once a switch is
  * genuinely required (plan.md §6): prefer a channel of the same class as the
- * one currently active (`stable` -> another `stable-4.N`, etc.) -- that
+ * one currently active (`stable` -> another `stable-X.Y`, etc.) -- that
  * keeps the operator's risk posture consistent across the plan rather than
  * bouncing them onto e.g. `fast` or `candidate` mid-upgrade. If the
  * destination isn't a member of any channel in that class, fall back to the
@@ -70,7 +70,7 @@ export interface ChannelContext {
 function pickSwitchChannel(memberChannels: readonly string[], preferredClass: string | undefined): string | undefined {
   if (memberChannels.length === 0) return undefined;
   if (preferredClass) {
-    const sameClass = memberChannels.find((name) => channelClassOf(name) === preferredClass);
+    const sameClass = memberChannels.find((name) => parseChannelName(name)?.cls === preferredClass);
     if (sameClass) return sameClass;
   }
   return memberChannels[0];
@@ -140,7 +140,7 @@ export function buildHopCommands(
         // memberChannels empty (no channel data recorded for this node) ->
         // pickSwitchChannel returns undefined -> no real name to switch to,
         // so nothing is emitted rather than a guess.
-        channelSwitchTo = pickSwitchChannel(memberChannels, channelClassOf(currentChannel));
+        channelSwitchTo = pickSwitchChannel(memberChannels, parseChannelName(currentChannel)?.cls);
       }
     }
 

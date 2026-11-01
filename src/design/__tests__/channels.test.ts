@@ -1,30 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import type { GraphNode, Version } from '../../graph/types';
-import { channelClassOf, channelMinorOf, channelNamesForNode } from '../channels';
+import { channelNamesForNode, formatChannelName, parseChannelName } from '../channels';
 
-describe('channelClassOf', () => {
-  it('extracts the class prefix from a well-formed channel name', () => {
-    expect(channelClassOf('stable-4.20')).toBe('stable');
-    expect(channelClassOf('eus-4.18')).toBe('eus');
-    expect(channelClassOf('candidate-4.9')).toBe('candidate');
+describe('parseChannelName', () => {
+  it('parses class, major and minor from a 4.x name', () => {
+    expect(parseChannelName('stable-4.20')).toEqual({ cls: 'stable', major: 4, minor: 20 });
+    expect(parseChannelName('fast-4.9')).toEqual({ cls: 'fast', major: 4, minor: 9 });
+  });
+
+  it('parses names in a later major', () => {
+    expect(parseChannelName('candidate-5.0')).toEqual({ cls: 'candidate', major: 5, minor: 0 });
+    expect(parseChannelName('eus-5.12')).toEqual({ cls: 'eus', major: 5, minor: 12 });
   });
 
   it('returns undefined for a name that does not match the convention', () => {
-    expect(channelClassOf('not-a-channel')).toBeUndefined();
-    expect(channelClassOf('')).toBeUndefined();
+    expect(parseChannelName('not-a-channel')).toBeUndefined();
+    expect(parseChannelName('stable-5')).toBeUndefined();
+    expect(parseChannelName('')).toBeUndefined();
   });
 });
 
-describe('channelMinorOf', () => {
-  it('extracts the minor number from a well-formed channel name', () => {
-    expect(channelMinorOf('stable-4.20')).toBe(20);
-    expect(channelMinorOf('eus-4.18')).toBe(18);
-    expect(channelMinorOf('fast-4.9')).toBe(9);
-  });
-
-  it('returns undefined for a name that does not match the convention', () => {
-    expect(channelMinorOf('not-a-channel')).toBeUndefined();
-    expect(channelMinorOf('')).toBeUndefined();
+describe('formatChannelName', () => {
+  it('round-trips a parsed name', () => {
+    for (const name of ['stable-4.22', 'candidate-5.0', 'eus-4.6']) {
+      const parsed = parseChannelName(name);
+      expect(parsed && formatChannelName(parsed)).toBe(name);
+    }
   });
 });
 

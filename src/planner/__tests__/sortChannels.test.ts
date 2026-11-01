@@ -29,6 +29,11 @@ describe('sortChannels', () => {
     ]);
   });
 
+  it('orders streams by major before minor, so 5.x sorts ahead of 4.22', () => {
+    const result = sortChannels(['stable-4.22', 'candidate-5.0', 'candidate-4.23', 'candidate-5.1', 'stable-4.9']);
+    expect(result).toEqual(['candidate-5.1', 'candidate-5.0', 'candidate-4.23', 'stable-4.22', 'stable-4.9']);
+  });
+
   it('places an unrecognised channel-name shape after every recognised one, without crashing', () => {
     const result = sortChannels(['stable-4.18', 'some-weird-channel', 'candidate-4.18']);
     expect(result).toEqual(['stable-4.18', 'candidate-4.18', 'some-weird-channel']);

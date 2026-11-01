@@ -45,7 +45,7 @@ function makeClient(responses: Map<string, Handler>): GraphClient {
 }
 
 describe('discoverLookaheadSegments', () => {
-  it('makes no network calls at all for a channel name that does not match the <class>-4.<minor> convention', async () => {
+  it('makes no network calls at all for a channel name that does not match the <class>-<major>.<minor> convention', async () => {
     const client = makeClient(new Map()) as GraphClient & { __calls: string[] };
     const segments = await discoverLookaheadSegments(client, 'chan-a', 'amd64');
     expect(segments).toEqual([]);

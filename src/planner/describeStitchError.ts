@@ -12,7 +12,7 @@ import type { StitchError } from '../engine/types';
 export function describeStitchError(error: StitchError): string {
   switch (error.kind) {
     case 'invalidChannel':
-      return `"${error.channel}" is not a recognised channel name (expected "<prefix>-4.<minor>").`;
+      return `"${error.channel}" is not a recognised channel name (expected "<class>-<major>.<minor>", e.g. "stable-4.22").`;
     case 'loadFailed':
       return `Failed to load channel "${error.channel}": ${describeGraphError(error.error)}`;
     case 'startNeverFound':

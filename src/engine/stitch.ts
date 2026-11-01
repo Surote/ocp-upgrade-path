@@ -1,19 +1,22 @@
-import { candidateChannelsForMinor } from '../design/forwardChannel';
-import { channelClassOf } from '../design/channels';
+import { candidateChannelsForStream } from '../design/forwardChannel';
+import { formatChannelName, parseChannelName } from '../design/channels';
 import type { Arch, Graph, GraphNode, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { findPathsInGraph } from './pathfinder';
 import { dedupeRisks } from './risks';
-import { parseVersion } from './version';
+import { compareStreams, type Stream, streamOf } from './version';
 import type { ClassFallback, GraphLoader, Path, PathCost, PathHop, StitchError, StitchedPathResult } from './types';
 
 /**
  * Stitching, per plan.md §4 and §6 "Look-ahead targets (bidirectional
  * stitching)". The selected channel is an **anchor**: the graph the cluster
  * is actually on right now. It is fetched first; the stitcher then walks
- * **backward** (to strictly older-minor channels of the same prefix) when the
- * anchor doesn't contain `start`, and **forward** (to higher-minor channels,
- * same class preferred, `stable` fallback) when it doesn't contain `target`.
+ * **backward** (to older-stream channels of the same class) when the anchor
+ * doesn't contain `start`, and **forward** (to newer-stream channels, same
+ * class preferred, then the `candidateChannelsForStream` fallbacks) when it
+ * doesn't contain `target`. Each step's stream comes from the previous
+ * segment's own content (`predecessorStream`), never from minor arithmetic,
+ * so a walk crosses a major boundary (4.22 -> 5.0) like any other.
  * Both walks can fire on the same query -- a channel in the middle of a long
  * range can need both.
  *
@@ -46,7 +49,6 @@ import type { ClassFallback, GraphLoader, Path, PathCost, PathHop, StitchError, 
  * table, never to traversal.
  */
 
-const CHANNEL_PATTERN = /^(.+)-4\.(\d+)$/;
 const MAX_WALK_BACK = 12; // safety bound: no real Cincinnati channel history is this deep
 const MAX_WALK_FORWARD = 12; // mirrors MAX_WALK_BACK -- no real Cincinnati channel future is this deep either
 
@@ -59,6 +61,22 @@ interface LoadedSegment {
 
 function versionsOf(graph: Graph): ReadonlySet<Version> {
   return new Set(graph.nodes.map((n) => n.version));
+}
+
+/**
+ * The stream a channel upgrades *from*: the highest stream among its nodes
+ * below the channel's own. Read from graph content because stream succession
+ * is not arithmetic -- `candidate-5.0` carries 4.22.z as its upgrade sources,
+ * so 5.0's predecessor is 4.22, not "5.-1". Undefined when the channel holds
+ * nothing older than its own stream.
+ */
+function predecessorStream(graph: Graph, own: Stream): Stream | undefined {
+  let best: Stream | undefined;
+  for (const node of graph.nodes) {
+    const stream = streamOf(node.version);
+    if (compareStreams(stream, own) < 0 && (!best || compareStreams(stream, best) > 0)) best = stream;
+  }
+  return best;
 }
 
 function intersects(a: ReadonlySet<Version>, b: ReadonlySet<Version>): boolean {
@@ -103,13 +121,10 @@ async function loadSegmentsBidirectional(
   start: Version,
   target: Version,
 ): Promise<Result<BidirectionalLoadResult, StitchError>> {
-  const match = CHANNEL_PATTERN.exec(anchorChannel);
-  if (!match) {
+  const anchor = parseChannelName(anchorChannel);
+  if (!anchor) {
     return err({ kind: 'invalidChannel', channel: anchorChannel });
   }
-  const [, rawPrefix, minorStr] = match;
-  const prefix = rawPrefix as string; // capture group 1 of `(.+)` -- always present when `match` succeeded
-  const anchorMinor = Number(minorStr);
 
   const anchorLoaded = await loader(anchorChannel, arch);
   if (!anchorLoaded.ok) {
@@ -121,14 +136,18 @@ async function loadSegmentsBidirectional(
   const hasStart = anchorVersions.has(start);
   const hasTarget = anchorVersions.has(target);
 
-  // --- Backward walk: unchanged shape/bound from the original single-direction stitcher, minus the now-shared anchor fetch. ---
+  // --- Backward walk: same class, one stream older each step, where "older"
+  // is whatever the current segment's own upgrade sources say it is. ---
   const backSegments: LoadedSegment[] = []; // anchor-adjacent-first ... start-containing-last
   if (!hasStart) {
     const channelsTried = [anchorChannel];
-    let minor = anchorMinor - 1;
+    let current: LoadedSegment = anchorSegment;
+    let currentStream: Stream = anchor;
     let found = false;
-    for (let step = 0; step < MAX_WALK_BACK && minor >= 0; step += 1) {
-      const channel = `${prefix}-4.${minor}`;
+    for (let step = 0; step < MAX_WALK_BACK; step += 1) {
+      const previous = predecessorStream(current.graph, currentStream);
+      if (!previous) break;
+      const channel = formatChannelName({ cls: anchor.cls, ...previous });
       channelsTried.push(channel);
       const loaded = await loader(channel, arch);
       if (!loaded.ok) {
@@ -140,28 +159,30 @@ async function loadSegmentsBidirectional(
         found = true;
         break;
       }
-      minor -= 1;
+      current = segment;
+      currentStream = previous;
     }
     if (!found) {
       return err({ kind: 'startNeverFound', start, channelsTried });
     }
   }
 
-  // --- Forward walk (new, plan.md §6): starts at the *target's own* minor --
-  // not one minor past the anchor -- so a channel that already reaches back
-  // far enough (e.g. `eus-4.22` sharing 32 releases with `eus-4.20`) joins
-  // directly, with no unnecessary intermediate channel. Only steps down
-  // toward the anchor when the first candidate doesn't yet overlap it. ---
+  // --- Forward walk (plan.md §6): starts at the *target's own* stream --
+  // not one past the anchor -- so a channel that already reaches back far
+  // enough (e.g. `eus-4.22` sharing 32 releases with `eus-4.20`) joins
+  // directly, with no unnecessary intermediate channel. Only steps down to
+  // the found segment's predecessor stream when it doesn't yet overlap the
+  // anchor. ---
   const forwardSegments: LoadedSegment[] = []; // target-adjacent-first ... anchor-adjacent-last
   const classFallbacks: ClassFallback[] = [];
   if (!hasTarget) {
-    const preferredClass = channelClassOf(anchorChannel) ?? prefix;
+    const preferredClass = anchor.cls;
     const channelsTried: string[] = [];
-    let minor = parseVersion(target).minor;
+    let stream: Stream | undefined = streamOf(target);
     let joined = false;
 
-    for (let step = 0; step < MAX_WALK_FORWARD && minor > anchorMinor; step += 1) {
-      const candidates = candidateChannelsForMinor(preferredClass, minor);
+    for (let step = 0; step < MAX_WALK_FORWARD && stream && compareStreams(stream, anchor) > 0; step += 1) {
+      const candidates = candidateChannelsForStream(preferredClass, stream);
       let segment: LoadedSegment | undefined;
 
       for (let ci = 0; ci < candidates.length; ci += 1) {
@@ -185,7 +206,7 @@ async function loadSegmentsBidirectional(
         }
       }
 
-      if (!segment) break; // neither the preferred class nor `stable` exists at this minor -- nothing further to try
+      if (!segment) break; // no candidate class exists at this stream -- nothing further to try
       forwardSegments.push(segment);
       if (segment.classFallback) {
         classFallbacks.push({ channel: segment.channel, requestedClass: segment.classFallback.requestedClass });
@@ -195,7 +216,7 @@ async function loadSegmentsBidirectional(
         joined = true;
         break;
       }
-      minor -= 1;
+      stream = predecessorStream(segment.graph, stream);
     }
 
     if (!joined) {
