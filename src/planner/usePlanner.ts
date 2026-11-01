@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StitchedPathResult, StitchError } from '../engine/types';
 import type { GraphClient } from '../graph/client';
-import { describeGraphError } from '../graph/errors';
+import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
 import { parseUrlState, resolveUrlArch, syncUrlState } from '../url/urlState';
@@ -239,7 +239,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
       disabled: !channel,
       error:
         graphState.status === 'error'
-          ? `Channel "${channel}" (${arch}): ${describeGraphError(graphState.error)}`
+          ? describeChannelLoadError(channel ?? '', graphState.error)
           : undefined,
       onChange: setStart,
       onRetry: graphState.retry,

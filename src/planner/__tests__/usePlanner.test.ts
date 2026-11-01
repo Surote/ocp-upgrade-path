@@ -298,3 +298,17 @@ describe('usePlanner — look-ahead targets (plan.md §6)', () => {
     expect(lookaheadTarget?.viaChannel).toBe('eus-4.22');
   });
 });
+
+describe('usePlanner — a stream not yet published outside candidate', () => {
+  it('explains an empty stable-5.0 and points at candidate-5.0 instead of failing opaquely', async () => {
+    setUrl('?channel=stable-5.0&arch=amd64');
+    const empty = { version: 1, nodes: [], edges: [], conditionalEdges: [] };
+    const client = makeClient(withSeed(new Map([['stable-5.0|amd64', jsonHandler(empty)]])));
+
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.start.error).toBeDefined());
+    expect(result.current.start.error).toMatch(/stable-5\.0.*no releases published/);
+    expect(result.current.start.error).toContain('candidate-5.0');
+  });
+});
