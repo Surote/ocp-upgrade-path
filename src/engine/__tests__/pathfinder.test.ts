@@ -178,6 +178,22 @@ describe('findPathsInGraph — cost tuple ordering', () => {
 });
 
 describe('findPathsInGraph — waypoint alternates (synthetic)', () => {
+  it('offers 4.22 waypoint alternates on a 4.21 -> 5.0 path, ordering streams by major first', () => {
+    const graph = buildGraph(
+      ['4.21.0', '4.22.10', '4.22.20', '5.0.0'],
+      [
+        [0, 1],
+        [0, 2],
+        [1, 3],
+        [2, 3],
+      ],
+    );
+    const result = findPathsInGraph(graph, v('4.21.0'), v('5.0.0'));
+    if (!result.ok) throw result.error;
+    expect(result.value.primary.versions).toEqual([v('4.21.0'), v('4.22.20'), v('5.0.0')]);
+    expect(result.value.alternates.map((p) => p.versions)).toEqual([[v('4.21.0'), v('4.22.10'), v('5.0.0')]]);
+  });
+
   it('offers the best path per distinct intermediate-minor waypoint, capped at 3 total', () => {
     // OpenShift's "minor" is the middle field of major.minor.patch (4.Y.Z) --
     // keep major fixed and vary Y, mirroring the real versioning scheme.

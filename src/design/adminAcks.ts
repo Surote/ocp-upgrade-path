@@ -1,4 +1,4 @@
-import { parseVersion } from '../engine/version';
+import { formatStream, type Stream, streamOf } from '../engine/version';
 import type { Version } from '../graph/types';
 
 /**
@@ -17,13 +17,14 @@ import type { Version } from '../graph/types';
  * version's own "Preparing to update a cluster" docs, checked individually).
  * This table is the *only* source of truth -- every entry was read off the
  * real docs page for that destination minor, not derived from a rule.
+ * Keyed by `formatStream` so a later major (5.14) never picks up a 4.x entry.
  */
-const ACK_KEYS: ReadonlyMap<number, readonly string[]> = new Map([
-  [14, ['ack-4.13-kube-1.27-api-removals-in-4.14']],
-  [16, ['ack-4.15-kube-1.29-api-removals-in-4.16']],
-  [19, ['ack-4.18-gateway-api-management-in-4.19', 'ack-4.18-kube-1.32-api-removals-in-4.19']],
-  [20, ['ack-4.19-admissionregistration-v1beta1-api-removals-in-4.20']],
-  [22, ['ack-4.21-boot-image-opt-out-in-4.22']],
+const ACK_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['4.14', ['ack-4.13-kube-1.27-api-removals-in-4.14']],
+  ['4.16', ['ack-4.15-kube-1.29-api-removals-in-4.16']],
+  ['4.19', ['ack-4.18-gateway-api-management-in-4.19', 'ack-4.18-kube-1.32-api-removals-in-4.19']],
+  ['4.20', ['ack-4.19-admissionregistration-v1beta1-api-removals-in-4.20']],
+  ['4.22', ['ack-4.21-boot-image-opt-out-in-4.22']],
 ]);
 
 /**
@@ -33,18 +34,18 @@ const ACK_KEYS: ReadonlyMap<number, readonly string[]> = new Map([
  * than guessing an article number, since access.redhat.com article ids are
  * not sequential or derivable from the minor.
  */
-const KCS_ARTICLE_IDS: ReadonlyMap<number, string> = new Map([
-  [9, '6329921'],
-  [12, '6955381'],
-  [13, '6958394'],
-  [14, '6958395'],
-  [16, '7031404'],
-  [19, '7112216'],
-  [20, '7130599'],
+const KCS_ARTICLE_IDS: ReadonlyMap<string, string> = new Map([
+  ['4.9', '6329921'],
+  ['4.12', '6955381'],
+  ['4.13', '6958394'],
+  ['4.14', '6958395'],
+  ['4.16', '7031404'],
+  ['4.19', '7112216'],
+  ['4.20', '7130599'],
 ]);
 
 /**
- * The ack keys documented for entering minor `minor`. Returns an empty array
+ * The ack keys documented for entering `stream`. Returns an empty array
  * both when the destination page was checked and genuinely lists none (4.17,
  * 4.18, 4.21) and when the minor has never been checked at all (anything not
  * in `ACK_KEYS`) -- deliberately: absence of a key on a docs page is not
@@ -54,8 +55,8 @@ const KCS_ARTICLE_IDS: ReadonlyMap<number, string> = new Map([
  * Callers must never build a key from a template -- this lookup is the only
  * legitimate source.
  */
-export function adminAckKeysFor(minor: number): readonly string[] {
-  return ACK_KEYS.get(minor) ?? [];
+export function adminAckKeysFor(stream: Stream): readonly string[] {
+  return ACK_KEYS.get(formatStream(stream)) ?? [];
 }
 
 export interface KcsLink {
@@ -70,34 +71,35 @@ export interface KcsLink {
  * article id -- `access.redhat.com/articles/<id>` ids are opaque and not
  * derivable from the minor number.
  */
-export function kcsLinkFor(minor: number): KcsLink {
-  const id = KCS_ARTICLE_IDS.get(minor);
+export function kcsLinkFor(stream: Stream): KcsLink {
+  const id = KCS_ARTICLE_IDS.get(formatStream(stream));
   if (id) {
     return { url: `https://access.redhat.com/articles/${id}`, isSearch: false };
   }
   // `+`-joined, matching the verified live URL form from plan.md §6 exactly
   // (`encodeURIComponent` would emit `%20` for the spaces instead, which is
   // equivalent per RFC 3986 but not what was actually checked to return 200).
-  const query = `Preparing to upgrade to OpenShift Container Platform 4.${minor}`.split(' ').map(encodeURIComponent).join('+');
+  const query = `Preparing to upgrade to OpenShift Container Platform ${formatStream(stream)}`.split(' ').map(encodeURIComponent).join('+');
   return { url: `https://access.redhat.com/search/?q=${query}`, isSearch: true };
 }
 
 /**
- * Distinct minors a path enters, in traversal order, excluding the start
- * version's own minor -- plan.md §6: "Show an ack block for each minor the
- * path enters (a 4.18→4.22 path enters 4.19, 4.20, 4.21, 4.22)." A path that
- * never leaves its start minor (a pure patch-level bump) enters none.
+ * Distinct streams a path enters, in traversal order, excluding the start
+ * version's own -- plan.md §6: "Show an ack block for each minor the path
+ * enters (a 4.18→4.22 path enters 4.19, 4.20, 4.21, 4.22)." A 4.22 -> 5.0
+ * path enters 5.0. A path that never leaves its start stream (a pure
+ * patch-level bump) enters none.
  */
-export function minorsEntered(versions: readonly Version[]): readonly number[] {
+export function streamsEntered(versions: readonly Version[]): readonly Stream[] {
   if (versions.length === 0) return [];
-  const startMinor = parseVersion(versions[0] as Version).minor;
-  const seen = new Set<number>([startMinor]);
-  const entered: number[] = [];
+  const seen = new Set<string>([formatStream(streamOf(versions[0] as Version))]);
+  const entered: Stream[] = [];
   for (const version of versions.slice(1)) {
-    const minor = parseVersion(version).minor;
-    if (!seen.has(minor)) {
-      seen.add(minor);
-      entered.push(minor);
+    const stream = streamOf(version);
+    const key = formatStream(stream);
+    if (!seen.has(key)) {
+      seen.add(key);
+      entered.push(stream);
     }
   }
   return entered;

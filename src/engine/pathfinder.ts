@@ -1,7 +1,7 @@
 import type { Graph, NodeIndex, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { dedupeRisks, RiskIndex, riskWeight } from './risks';
-import { compareVersions, parseVersion } from './version';
+import { compareStreams, compareVersions, formatStream, parseVersion, type Stream, streamOf } from './version';
 import type { FindPathSuccess, NoPathReason, Path, PathCost, PathHop } from './types';
 
 /**
@@ -233,34 +233,40 @@ function closestReachableVersion(
   return bestBelow ?? bestAbove;
 }
 
+function isStrictlyBetween(stream: Stream, low: Stream, high: Stream): boolean {
+  return compareStreams(stream, low) > 0 && compareStreams(stream, high) < 0;
+}
+
 /**
  * The waypoint signature (plan.md §4): the sequence of versions where the
- * path first enters each intermediate minor -- minors strictly between the
- * start's and the target's. Two paths with the same signature are considered
- * the "same" upgrade shape for alternates purposes, even if they differ in
- * which patch they land on within the start or target minor itself.
+ * path first enters each intermediate stream -- streams strictly between the
+ * start's and the target's (4.22 lies between 4.21 and 5.0). Two paths with
+ * the same signature are considered the "same" upgrade shape for alternates
+ * purposes, even if they differ in which patch they land on within the start
+ * or target stream itself.
  */
-function waypointSignature(pathVersions: readonly Version[], startMinor: number, targetMinor: number): string {
-  const seenMinors = new Set<number>();
+function waypointSignature(pathVersions: readonly Version[], startStream: Stream, targetStream: Stream): string {
+  const seenStreams = new Set<string>();
   const parts: string[] = [];
   for (const ver of pathVersions) {
-    const minor = parseVersion(ver).minor;
-    if (minor > startMinor && minor < targetMinor && !seenMinors.has(minor)) {
-      seenMinors.add(minor);
-      parts.push(`${minor}:${ver}`);
+    const stream = streamOf(ver);
+    const key = formatStream(stream);
+    if (isStrictlyBetween(stream, startStream, targetStream) && !seenStreams.has(key)) {
+      seenStreams.add(key);
+      parts.push(`${key}:${ver}`);
     }
   }
   return parts.join('|');
 }
 
 /**
- * Best path per distinct intermediate-minor waypoint, capped at 2 (plus the
+ * Best path per distinct intermediate-stream waypoint, capped at 2 (plus the
  * primary makes 3 total) -- per plan.md §4 / Q12. Not k-shortest-paths: rather
  * than enumerate paths and rank them (infeasible -- a naive BFS at depth ≤5
  * found 45,563 paths for the verified example), this composes each candidate
  * from two independent shortest-path trees: forward from `start` (already
  * computed for the primary) and backward from `target` over reverse adjacency.
- * For every node in an intermediate minor reachable from both directions, the
+ * For every node in an intermediate stream reachable from both directions, the
  * concatenation of its two optimal half-paths is *a* valid start→target path
  * (Dijkstra's optimal-substructure property), and by definition no cheaper
  * than the primary (which is the global minimum over all such paths) -- so
@@ -276,17 +282,15 @@ function findWaypointAlternates(
   targetIdx: NodeIndex,
   primary: Path,
 ): readonly Path[] {
-  const startMinor = parseVersion(versions[startIdx] as Version).minor;
-  const targetMinor = parseVersion(versions[targetIdx] as Version).minor;
-  if (targetMinor - startMinor < 2) return []; // no minor can lie strictly between them
+  const startStream = streamOf(versions[startIdx] as Version);
+  const targetStream = streamOf(versions[targetIdx] as Version);
 
-  const primarySignature = waypointSignature(primary.versions, startMinor, targetMinor);
+  const primarySignature = waypointSignature(primary.versions, startStream, targetStream);
   const bestPerSignature = new Map<string, Path>([[primarySignature, primary]]);
 
   for (let i = 0; i < versions.length; i += 1) {
     if (i === startIdx || i === targetIdx) continue;
-    const minor = parseVersion(versions[i] as Version).minor;
-    if (minor <= startMinor || minor >= targetMinor) continue;
+    if (!isStrictlyBetween(streamOf(versions[i] as Version), startStream, targetStream)) continue;
 
     const waypointIdx = i as NodeIndex;
     const df = fwd.dist[waypointIdx];
@@ -305,7 +309,7 @@ function findWaypointAlternates(
 
     const chain = [...forwardChain, ...backwardChain];
     const candidate = buildPathFromChain(versions, riskIndex, chain, combineCost(df, db));
-    const signature = waypointSignature(candidate.versions, startMinor, targetMinor);
+    const signature = waypointSignature(candidate.versions, startStream, targetStream);
 
     const existing = bestPerSignature.get(signature);
     if (!existing || compareCost(candidate.cost, existing.cost) < 0) {
