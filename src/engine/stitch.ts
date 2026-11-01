@@ -199,7 +199,7 @@ async function loadSegmentsBidirectional(
         }
         // 'empty' = Cincinnati's "channel doesn't exist" signal (HTTP 200,
         // empty arrays, surfaced by parseRawGraph as `empty`) -- try the next
-        // candidate / minor. Any other error kind is a genuine transport or
+        // candidate / stream. Any other error kind is a genuine transport or
         // validation failure worth surfacing immediately, not swallowing.
         if (loaded.error.kind !== 'empty') {
           return err({ kind: 'loadFailed', channel: candidateChannel, error: loaded.error });
