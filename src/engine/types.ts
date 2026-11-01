@@ -108,17 +108,18 @@ export type GraphLoader = (channel: string, arch: Arch) => Promise<Result<Graph,
 /**
  * One channel the stitcher used as a **fallback** rather than the caller's
  * preferred class, per plan.md §6 "Forward channel preference": walking
- * forward, the anchor's own class is tried first at a needed minor (e.g.
+ * forward, the anchor's own class is tried first at a needed stream (e.g.
  * `eus-4.22` for an `eus-4.20` anchor); when that class has no channel there
- * -- EUS is even-minor only, so `eus-4.21` never exists -- `stable` at that
- * minor is used instead. Moving an operator from `eus` to `stable` changes
- * their support posture, so this must never be a silent detail: the UI
+ * the next of `stable`, `fast`, `candidate` that exists is used instead
+ * (design/forwardChannel.ts) -- `eus-4.21` never exists, and 5.0 was at
+ * first published only in `candidate-5.0`. A class change alters the
+ * operator's support posture, so this must never be a silent detail: the UI
  * reads this list to say so explicitly.
  */
 export interface ClassFallback {
   /** The real channel actually used, e.g. `stable-4.21`. */
   readonly channel: string;
-  /** The class that was preferred but unavailable at this channel's minor, e.g. `eus`. */
+  /** The class that was preferred but unavailable at this channel's stream, e.g. `eus`. */
   readonly requestedClass: string;
 }
 
@@ -165,8 +166,8 @@ export type StitchError =
   | Readonly<{ kind: 'startNeverFound'; start: Version; channelsTried: readonly string[] }>
   /**
    * The forward-walk analogue of `startNeverFound` (plan.md §6 "Look-ahead
-   * targets"): walked forward through `channelsTried` (same-class preferred,
-   * `stable` fallback per minor) without ever finding a channel whose
+   * targets"): walked forward through `channelsTried` (same class preferred,
+   * then the `candidateChannelsForStream` fallbacks per stream) without ever finding a channel whose
    * version set overlaps back with the anchor's own -- i.e. no legitimate
    * join point back to the selected channel was ever found. Distinct from
    * `unreachable` below, which means segments *did* chain together but no

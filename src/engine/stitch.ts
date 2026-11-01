@@ -55,7 +55,7 @@ const MAX_WALK_FORWARD = 12; // mirrors MAX_WALK_BACK -- no real Cincinnati chan
 interface LoadedSegment {
   readonly channel: string;
   readonly graph: Graph;
-  /** Set when this segment was loaded via the `stable` fallback rather than the anchor's own class (plan.md §6 "Forward channel preference"). */
+  /** Set when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
   readonly classFallback?: { readonly requestedClass: string };
 }
 
