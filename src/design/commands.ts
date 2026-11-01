@@ -7,7 +7,7 @@ export interface HopCommand {
   readonly to: Version;
   /**
    * The `oc adm upgrade channel <name>` line -- present only when this hop's
-   * `sourceChannel` (post-`reattributeEarliestSwitch`, engine/stitch.ts) is
+   * `sourceChannel` (post-`reattributeSwitches`, engine/stitch.ts) is
    * genuinely not the channel the cluster is currently tracked as being on
    * (plan.md §6 "The channel-switch rule"). `undefined` when the current
    * channel already covers this hop, which is the common case: crossing a
@@ -16,9 +16,9 @@ export interface HopCommand {
    * **Attribution**: when present, the switch belongs to this hop's `from`
    * -- the station the cluster is standing on right before taking this hop
    * -- never `to` (plan.md §6 "Where the switch is attributed matters").
-   * `sourceChannel` is already reattributed to the earliest member station
-   * by the engine, so `from` here is exactly that station; a caller placing
-   * a marker (the map's ring, `HopDetail`'s note) must anchor it on `from`.
+   * `sourceChannel` is already reattributed by the engine (earliest member
+   * station, or the latest one when joining a class-fallback channel), so
+   * `from` here is exactly that station; a caller placing a marker (the map's ring, `HopDetail`'s note) must anchor it on `from`.
    */
   readonly channelSwitch?: string;
   /**

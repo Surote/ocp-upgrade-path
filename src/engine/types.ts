@@ -43,11 +43,12 @@ export interface PathHop {
    * against a per-graph name table that a multi-graph result can't safely
    * share (design/channels.ts) -- see design/commands.ts.
    *
-   * On a multi-graph result, this value is the one `reattributeEarliestSwitch`
+   * On a multi-graph result, this value is the one `reattributeSwitches`
    * (engine/stitch.ts) assigns, **not** necessarily the segment whose edges
    * literally produced this specific hop -- plan.md §6 "Where the switch is
    * attributed matters": the switch belongs to the earliest station on the
-   * path that is already a member of the destination channel, which can be
+   * path that is already a member of the destination channel (the latest,
+   * when the destination is a class fallback), which can be
    * earlier than the layered pathfinding DP's own (cost-optimal, not
    * attribution-optimal) segment boundary. The relabelling never changes
    * which versions or edges are on the path -- only which fetched channel a

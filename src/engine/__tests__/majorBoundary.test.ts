@@ -83,6 +83,27 @@ describe('stitching across the 4.22 -> 5.0 major boundary (live fixtures)', () =
     expect(switches[0]?.from).toBe(firstMember);
   });
 
+  it('stays on stable-4.22 until the last hop when an equally short, equally safe route allows it', async () => {
+    const result = await stitchAndFindPath(fixtureLoader(), {
+      targetChannel: 'stable-4.22',
+      arch: 'amd64',
+      start: v('4.22.3'),
+      target: v('5.0.0-rc.8'),
+    });
+    if (!result.ok) throw new Error(describeStitchError(result.error));
+    const { primary, nodeInfo } = result.value;
+    const stable422 = new Set(graphs.get('stable-4.22')?.nodes.map((n) => n.version));
+
+    expect(primary.versions).toHaveLength(3);
+    expect(stable422.has(primary.versions[1] as Version), `middle station ${primary.versions[1]}`).toBe(true);
+    expect(primary.cost.riskWeight).toBe(0);
+
+    const commands = buildHopCommands(primary, 'stable-4.22', nodeInfo, { channelNames: [], multiGraph: true });
+    const switches = commands.filter((c) => c.channelSwitchTo);
+    expect(switches.map((c) => c.channelSwitch)).toEqual(['oc adm upgrade channel candidate-5.0']);
+    expect(switches[0]).toBe(commands.at(-1));
+  });
+
   it('steps back from candidate-5.0 to the 4.22 stream its own upgrade sources name, not to "5.-1"', async () => {
     const calls: string[] = [];
     const result = await stitchAndFindPath(fixtureLoader(calls), {

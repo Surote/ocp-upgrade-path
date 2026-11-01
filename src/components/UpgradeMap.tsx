@@ -57,9 +57,8 @@ const RISK_WORD: Record<RiskState, string> = { always: 'always risk', conditiona
  * rule": those are not the same thing, and conflating them was defect 1),
  * and **not** the station the switching hop arrives at (plan.md §6 "Where
  * the switch is attributed matters": the `oc adm upgrade channel` command
- * runs while the cluster is standing on the *departure* station -- that's
- * the earliest point the destination channel is genuinely reachable, per
- * `engine/stitch.ts`'s `reattributeEarliestSwitch` -- not the station the
+ * runs while the cluster is standing on the *departure* station, the one
+ * `engine/stitch.ts`'s `reattributeSwitches` picks -- not the station the
  * following `--to` lands on). Risk rides directly on the segment (as a pill
  * sitting *on* the lane line, not floating above it) rather than hidden
  * behind a click. Hand-built SVG, deterministic geometry -- no layout

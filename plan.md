@@ -168,7 +168,10 @@ about an overlapping release, the later channel wins. We never union edges acros
 banner names which channels were stitched, so the path stays auditable.
 
 A stitched result is therefore a *sequential composition of per-segment shortest paths*,
-joined only at a version present in both graphs — never a merged adjacency. Node metadata
+joined only at a version present in both graphs — never a merged adjacency. Junctions are
+ranked by hops, then risk weight, then hops walked on a class-fallback channel (§6
+"Forward channel preference"), then the patch tie-break. Within one graph every hop shares
+a channel, so the extra term never changes a single-graph result. Node metadata
 is the one thing that legitimately merges across graphs, under the later-channel-wins
 rule. **Multi-graph stitches return the primary path only**; waypoint alternates are
 single-graph, because the cheap concatenation trick that makes them nearly free stops
@@ -303,8 +306,13 @@ it directly:
   and `candidate-5.0`). Discovery fetches only those named channels, lowest stream first.
 
 So `stable-4.22`, start 4.22.z, target 5.0.0-rc.x stitches `stable-4.22` → `candidate-5.0`
-and emits `oc adm upgrade channel candidate-5.0` at the first 4.22.z station
-`candidate-5.0` lists, with the banner marking the candidate fallback.
+and emits `oc adm upgrade channel candidate-5.0` at the last `stable-4.22` station on the
+path, with the banner marking the candidate fallback. `candidate-5.0` lists nearly every
+4.22.z, so "the first station it lists" would be the start itself; joining a fallback
+class is deferred instead (see "Where the switch is attributed matters"). Among equally
+short, equally risky routes the stitcher also prefers the one with the fewest hops on a
+fallback channel, ahead of the patch tie-break: `4.22.3 → 4.22.20 → 5.0.0-rc.8` over
+`4.22.3 → 4.22.21 → 5.0.0-rc.8`, since 4.22.21 is published only in `candidate-5.0`.
 
 ### Formerly: "Known limitation: the UI cannot reach the stitcher"
 
@@ -410,6 +418,11 @@ first point the switch is possible — and therefore where the map's interchange
 the `oc adm upgrade channel` line belong. Marking 4.21.28 is wrong: by then the switch has
 already had to happen.
 
+The exception is a switch *into* a class fallback (`eus` → `stable`, `stable` →
+`candidate`). Switching there as early as possible would move the cluster off its own
+class for longer than the path needs, so that switch stays at the last station the path
+spends on the earlier channel.
+
 A channel name must never be constructed; it must only ever be read from real membership
 data or from the set of channels the stitcher actually fetched.
 
@@ -419,7 +432,7 @@ data or from the set of channels the stitcher actually fetched.
 > stations all belong to the destination channel, the DP's own boundary can legitimately
 > land later than the earliest one (see `stitch.test.ts`'s "several consecutive shared
 > stations" case, where the forward channel's own edges only start from the *last* of three
-> shared 4.20.x stations). `reattributeEarliestSwitch` (engine/stitch.ts) runs immediately
+> shared 4.20.x stations). `reattributeSwitches` (engine/stitch.ts) runs immediately
 > after the DP and relabels `PathHop.sourceChannel` to the earliest station on the path that
 > is a real member of the channel about to be used, checked directly against each fetched
 > segment's own node list (`versionsOf`, never a constructed name) -- a pure relabelling

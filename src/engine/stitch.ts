@@ -235,6 +235,8 @@ async function loadSegmentsBidirectional(
 
 interface FrontierEntry {
   readonly cost: PathCost;
+  /** Hops walked on a class-fallback segment: time spent off the anchor's class. */
+  readonly fallbackHops: number;
   readonly hops: readonly PathHop[];
 }
 
@@ -242,10 +244,18 @@ function combineCost(a: PathCost, b: PathCost): PathCost {
   return { hops: a.hops + b.hops, riskWeight: a.riskWeight + b.riskWeight, tieBreak: a.tieBreak + b.tieBreak };
 }
 
-function costLess(a: PathCost, b: PathCost): boolean {
-  if (a.hops !== b.hops) return a.hops < b.hops;
-  if (a.riskWeight !== b.riskWeight) return a.riskWeight < b.riskWeight;
-  return a.tieBreak < b.tieBreak;
+/**
+ * Hops, then risk, then hops spent on a class-fallback channel, then the
+ * patch tie-break. Without the fallback term, `-patch` alone would prefer
+ * a release only the fallback channel publishes (4.22.21 is in
+ * candidate-5.0, not stable-4.22) and move the cluster off its own class a
+ * hop earlier than any equally short, equally safe route needs.
+ */
+function frontierLess(a: FrontierEntry, b: FrontierEntry): boolean {
+  if (a.cost.hops !== b.cost.hops) return a.cost.hops < b.cost.hops;
+  if (a.cost.riskWeight !== b.cost.riskWeight) return a.cost.riskWeight < b.cost.riskWeight;
+  if (a.fallbackHops !== b.fallbackHops) return a.fallbackHops < b.fallbackHops;
+  return a.cost.tieBreak < b.cost.tieBreak;
 }
 
 /**
@@ -269,8 +279,8 @@ function costLess(a: PathCost, b: PathCost): boolean {
  * `findPathsInGraph`'s node-membership requirement) but it optimises for
  * path *cost*, not for early attribution: when several consecutive stations
  * all belong to the destination channel, cost (or edge availability -- see
- * `reattributeEarliestSwitch` below) can legitimately leave the DP boundary
- * later than the earliest one. `reattributeEarliestSwitch` corrects this
+ * `reattributeSwitches` below) can legitimately leave the DP boundary
+ * later than the earliest one. `reattributeSwitches` corrects this
  * before the path is returned, per plan.md §6 "Where the switch is
  * attributed matters".
  */
@@ -279,7 +289,9 @@ function stitchPrimaryAcrossSegments(
   start: Version,
   target: Version,
 ): Path | undefined {
-  let frontier = new Map<Version, FrontierEntry>([[start, { cost: { hops: 0, riskWeight: 0, tieBreak: 0 }, hops: [] }]]);
+  let frontier = new Map<Version, FrontierEntry>([
+    [start, { cost: { hops: 0, riskWeight: 0, tieBreak: 0 }, fallbackHops: 0, hops: [] }],
+  ]);
 
   for (let i = 0; i < segments.length; i += 1) {
     const segment = segments[i] as LoadedSegment;
@@ -298,12 +310,15 @@ function stitchPrimaryAcrossSegments(
         const localResult = findPathsInGraph(segment.graph, fromVersion, candidateVersion);
         if (!localResult.ok) continue;
 
-        const localHops = localResult.value.primary.hops.map((h) => ({ ...h, sourceChannel: segment.channel }));
-        const combinedCost = combineCost(state.cost, localResult.value.primary.cost);
-        const combinedHops = [...state.hops, ...localHops];
+        const local = localResult.value.primary;
+        const candidate: FrontierEntry = {
+          cost: combineCost(state.cost, local.cost),
+          fallbackHops: state.fallbackHops + (segment.classFallback ? local.hops.length : 0),
+          hops: [...state.hops, ...local.hops.map((h) => ({ ...h, sourceChannel: segment.channel }))],
+        };
         const existing = nextFrontier.get(candidateVersion);
-        if (!existing || costLess(combinedCost, existing.cost)) {
-          nextFrontier.set(candidateVersion, { cost: combinedCost, hops: combinedHops });
+        if (!existing || frontierLess(candidate, existing)) {
+          nextFrontier.set(candidateVersion, candidate);
         }
       }
     }
@@ -318,7 +333,7 @@ function stitchPrimaryAcrossSegments(
   const versions: Version[] = [start];
   for (const hop of finalState.hops) versions.push(hop.to);
 
-  const hops = reattributeEarliestSwitch(versions, finalState.hops, segments);
+  const hops = reattributeSwitches(versions, finalState.hops, segments);
 
   return {
     versions,
@@ -350,11 +365,15 @@ function stitchPrimaryAcrossSegments(
  * finds *at least* that one, since it's guaranteed to be a member of the
  * destination segment by construction).
  *
+ * Except a crossing *into* a class-fallback segment, which keeps the DP's
+ * boundary: switching early there moves the cluster off its own class
+ * (e.g. onto `candidate`) sooner than the path needs to.
+ *
  * Purely a relabelling pass: it never changes which versions are visited,
  * which edges were walked, or the path's cost -- only which fetched channel
  * each hop is attributed to for switch-command purposes.
  */
-function reattributeEarliestSwitch(
+function reattributeSwitches(
   versions: readonly Version[],
   hops: readonly PathHop[],
   segments: readonly LoadedSegment[],
@@ -371,6 +390,10 @@ function reattributeEarliestSwitch(
   for (let i = 0; i < hops.length; i += 1) {
     if (i > 0 && dpSeg[i] !== dpSeg[i - 1]) {
       const destSegIdx = dpSeg[i] as number;
+      if (segments[destSegIdx]?.classFallback) {
+        runStartStation = i;
+        continue;
+      }
       const destMembers = memberSets[destSegIdx] as ReadonlySet<Version>;
 
       let earliestStation = i; // fallback: the DP's own junction (this hop's `.from`)
