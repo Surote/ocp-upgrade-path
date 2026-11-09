@@ -1,4 +1,5 @@
-import { describeGraphError } from '../graph/errors';
+import { formatChannelName, parseChannelName } from '../design/channels';
+import { describeGraphError, type GraphError } from '../graph/errors';
 import type { StitchError } from '../engine/types';
 
 /**
@@ -12,9 +13,9 @@ import type { StitchError } from '../engine/types';
 export function describeStitchError(error: StitchError): string {
   switch (error.kind) {
     case 'invalidChannel':
-      return `"${error.channel}" is not a recognised channel name (expected "<prefix>-4.<minor>").`;
+      return `"${error.channel}" is not a recognised channel name (expected "<class>-<major>.<minor>", e.g. "stable-4.22").`;
     case 'loadFailed':
-      return `Failed to load channel "${error.channel}": ${describeGraphError(error.error)}`;
+      return describeChannelLoadError(error.channel, error.error);
     case 'startNeverFound':
       return `Start version ${error.start} was not found in any of: ${error.channelsTried.join(', ')}.`;
     case 'targetNeverFound':
@@ -28,4 +29,21 @@ export function describeStitchError(error: StitchError): string {
         ? `No path found from ${error.start} to ${error.target}. Nearest reachable version: ${error.nearestReachable}.`
         : `No path found from ${error.start} to ${error.target}.`;
   }
+}
+
+/**
+ * Message for a failed channel fetch, shared by the path search and the
+ * selected channel's own load. An empty channel is Cincinnati's "nothing
+ * published here", so it gets a pointer instead of a failure: a new stream
+ * is published to `candidate` before `fast`/`stable` (5.0 was
+ * candidate-only at first).
+ */
+export function describeChannelLoadError(channel: string, error: GraphError): string {
+  if (error.kind !== 'empty') return `Failed to load channel "${channel}": ${describeGraphError(error)}`;
+  const parsed = parseChannelName(channel);
+  const hint =
+    parsed && parsed.cls !== 'candidate'
+      ? ` yet -- a new stream often appears only in "${formatChannelName({ ...parsed, cls: 'candidate' })}" first`
+      : '';
+  return `Channel "${channel}" (${error.arch}) has no releases published${hint}.`;
 }

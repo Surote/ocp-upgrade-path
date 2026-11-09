@@ -93,7 +93,7 @@ export interface GraphNode {
  */
 export interface Graph {
   readonly nodes: readonly GraphNode[];
-  /** Integer index pairs into `nodes`: `edges[i] = [fromIndex, toIndex]`. */
+  /** Integer index pairs into `nodes`: `edges[i] = [fromIndex, toIndex]`. Every published update, conditional ones included (folded in by `parseRawGraph`); `conditionalEdges` says which carry risks. */
   readonly edges: readonly (readonly [NodeIndex, NodeIndex])[];
   readonly conditionalEdges: readonly ConditionalEdgeGroup[];
   /** Channel-name table that `GraphNode.channels` indexes into (per plan.md §3). */

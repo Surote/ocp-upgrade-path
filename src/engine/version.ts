@@ -104,3 +104,26 @@ export function compareVersions(a: Version, b: Version): number {
   if (pa.patch !== pb.patch) return pa.patch - pb.patch;
   return comparePrerelease(pa.prerelease, pb.prerelease);
 }
+
+/**
+ * A `major.minor` release stream (`4.22`, `5.0`) -- the unit channels are
+ * named after and the unit a cluster "enters" when it upgrades. Ordered by
+ * major first: `5.0` follows `4.22`, which a bare minor number cannot express.
+ */
+export interface Stream {
+  readonly major: number;
+  readonly minor: number;
+}
+
+export function streamOf(v: Version): Stream {
+  const { major, minor } = parseVersion(v);
+  return { major, minor };
+}
+
+export function compareStreams(a: Stream, b: Stream): number {
+  return a.major !== b.major ? a.major - b.major : a.minor - b.minor;
+}
+
+export function formatStream(s: Stream): string {
+  return `${s.major}.${s.minor}`;
+}

@@ -1,3 +1,4 @@
+import { parseChannelName } from '../design/channels';
 import type { ClassFallback } from '../engine/types';
 
 /**
@@ -6,8 +7,9 @@ import type { ClassFallback } from '../engine/types';
  * single-channel result.
  *
  * `classFallbacks` (plan.md §6 "Forward channel preference") names every
- * channel in that list that was a `stable` substitute for the anchor's own
- * class -- e.g. an `eus` anchor reaching an odd EUS minor. This is never
+ * channel in that list that substitutes a different class for the anchor's
+ * own -- an `eus` anchor reaching an odd EUS minor through `stable`, or a
+ * `stable` anchor reaching 5.0 through `candidate`. This is never
  * folded silently into the plain channel list above: moving an operator
  * from `eus` to `stable` changes their support posture, and requirement 5
  * is explicit that this must be said outright, not left for someone to
@@ -29,8 +31,15 @@ export function StitchBanner({
       {classFallbacks.map((fb) => (
         <p key={fb.channel} className="stitch-banner__fallback" role="alert">
           <strong>Channel class change:</strong> {fb.channel} was used instead of a <span className="mono">{fb.requestedClass}</span>{' '}
-          channel at that minor, because none exists there — this changes the cluster's support posture at that step, not just its
-          version.
+          channel for that version stream, because none is published there — this changes the cluster's support posture at that
+          step, not just its version.
+          {parseChannelName(fb.channel)?.cls === 'candidate' && (
+            <>
+              {' '}
+              <strong>This plan relies on a candidate channel:</strong> candidate releases are pre-release builds and are not
+              supported for production clusters.
+            </>
+          )}
         </p>
       ))}
     </div>

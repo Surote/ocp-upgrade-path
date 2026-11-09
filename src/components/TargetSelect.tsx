@@ -1,3 +1,4 @@
+import { parseChannelName } from '../design/channels';
 import type { TargetFieldViewModel } from '../planner/usePlanner';
 
 /**
@@ -13,10 +14,11 @@ import type { TargetFieldViewModel } from '../planner/usePlanner';
  * the selected one, and they're rendered in a visibly distinct `<optgroup>`
  * -- never silently mixed into the in-channel list above it -- so the
  * operator knows before choosing that picking one means a real channel
- * change, not just an in-place `--to` upgrade. A same-class -> `stable`
- * class fallback (an `eus` anchor reaching an odd EUS minor) is called out
- * per option too, since that changes support posture and must never be a
- * silent detail (requirement 5).
+ * change, not just an in-place `--to` upgrade. A class fallback (an `eus`
+ * anchor reaching an odd EUS minor through `stable`, a `stable` anchor
+ * reaching 5.0 through `candidate`) is called out per option too, since
+ * that changes support posture and must never be a silent detail
+ * (requirement 5).
  */
 export function TargetSelect({ id, model }: { readonly id: string; readonly model: TargetFieldViewModel }) {
   return (
@@ -39,7 +41,7 @@ export function TargetSelect({ id, model }: { readonly id: string; readonly mode
             {model.lookaheadOptions.map((option) => (
               <option key={option.version} value={option.version} disabled={option.disabled}>
                 {option.version} — via {option.viaChannel}
-                {option.classFallback ? ' (drops to stable)' : ''}
+                {option.classFallback ? ` (drops to ${parseChannelName(option.viaChannel)?.cls ?? option.viaChannel})` : ''}
                 {option.disabled ? ` (unavailable — ${option.reason})` : ''}
               </option>
             ))}

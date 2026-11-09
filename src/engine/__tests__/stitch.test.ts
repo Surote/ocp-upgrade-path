@@ -353,10 +353,10 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(result.error.kind).toBe('targetNeverFound');
     if (result.error.kind !== 'targetNeverFound') return;
     expect(result.error.target).toBe(v('4.30.0'));
-    // Neither the same-class nor the stable fallback exists at 4.30 -- the
-    // walk gives up at the very first minor rather than guessing further.
-    expect(result.error.channelsTried).toEqual(['eus-4.30', 'stable-4.30']);
-    expect(channelsFetched).toEqual(['eus-4.20', 'eus-4.30', 'stable-4.30']);
+    // No class exists at 4.30 -- the walk gives up at the very first stream
+    // rather than guessing further.
+    expect(result.error.channelsTried).toEqual(['eus-4.30', 'stable-4.30', 'fast-4.30', 'candidate-4.30']);
+    expect(channelsFetched).toEqual(['eus-4.20', 'eus-4.30', 'stable-4.30', 'fast-4.30', 'candidate-4.30']);
   });
 
   it('a genuine loadFailed during the forward walk (not a mere "channel does not exist") is surfaced immediately', async () => {
@@ -405,7 +405,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
 });
 
 describe('stitchAndFindPath — failure modes', () => {
-  it('rejects a target channel that does not match the "<prefix>-4.<minor>" pattern', async () => {
+  it('rejects a target channel that does not match the "<class>-<major>.<minor>" pattern', async () => {
     const loader: GraphLoader = async () => {
       throw new Error('loader should never be called');
     };
@@ -438,8 +438,8 @@ describe('stitchAndFindPath — failure modes', () => {
     });
   });
 
-  it('gives up as startNeverFound after walking back through every channel without finding the start version', async () => {
-    const graph418 = rawGraph(['4.1.0'], [], 'X');
+  it('gives up as startNeverFound once a walked-back channel holds nothing older to step back to', async () => {
+    const graph418 = rawGraph(['4.0.0', '4.1.0'], [[0, 1]], 'X');
     const graph417 = rawGraph(['4.0.0'], [], 'Y');
     const channelsFetched: string[] = [];
     const loader: GraphLoader = async (channel) => {

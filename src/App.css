@@ -162,7 +162,7 @@ main {
   margin-top: 6px;
 }
 
-/* A class fallback (eus -> stable) is a support-posture change, not just an
+/* A class fallback (eus -> stable, stable -> candidate) is a support-posture change, not just an
    audit note -- given the same visual weight as an "always" risk so it reads
    as a warning, not a footnote (plan.md §6 requirement 5). */
 .stitch-banner__fallback {

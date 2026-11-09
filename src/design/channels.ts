@@ -1,32 +1,34 @@
 import type { GraphNode } from '../graph/types';
+import type { Stream } from '../engine/version';
 
-const CHANNEL_NAME_PATTERN = /^([a-z]+)-4\.(\d+)$/;
+/** A parsed `<class>-<major>.<minor>` channel name, e.g. `candidate-5.0`. */
+export interface ChannelName extends Stream {
+  readonly cls: string;
+}
 
-/** The class prefix of a `<class>-4.<minor>` channel name, e.g. `"stable"` from `"stable-4.20"`. Undefined for a name that doesn't match Cincinnati's naming convention. */
-export function channelClassOf(channelName: string): string | undefined {
-  const match = CHANNEL_NAME_PATTERN.exec(channelName);
-  return match ? match[1] : undefined;
+const CHANNEL_NAME_PATTERN = /^([a-z]+)-(\d+)\.(\d+)$/;
+
+/** Parses a Cincinnati channel name. Undefined for a name outside the `<class>-<major>.<minor>` convention. */
+export function parseChannelName(name: string): ChannelName | undefined {
+  const match = CHANNEL_NAME_PATTERN.exec(name);
+  if (!match) return undefined;
+  const [, cls, major, minor] = match;
+  return { cls: cls as string, major: Number(major), minor: Number(minor) };
 }
 
 /**
- * The minor number in a `<class>-4.<minor>` channel name, e.g. `19` from
- * `"stable-4.19"`. Undefined for a name that doesn't match Cincinnati's
- * naming convention.
+ * Formats a channel name for *probing* only (design/forwardChannel.ts):
+ * the caller must fetch it and treat an empty graph as "doesn't exist",
+ * because not every class/stream combination is a real channel (EUS is
+ * even-minor only, 5.0 had only `candidate` at first) -- plan.md §2.
  *
- * There is deliberately no inverse `channelNameForMinor(class, minor)` here
- * anymore -- it used to exist and was used to *build* channel names to emit
- * as `oc adm upgrade channel` commands, which is unsound: not every
- * `<class>-4.<minor>` combination is a real, populated channel (EUS channels
- * only exist for even minors 4.6+ -- design/eus.ts), and even when the name
- * happens to exist, naming a channel by class-and-minor ignores whether the
- * destination version is actually a member of it. A channel name must only
- * ever be read from real membership data (`channelNamesForNode`) or from the
- * set of channels the stitcher actually fetched
+ * Never use this to name a channel in an `oc adm upgrade channel` command.
+ * Those names come only from real membership data (`channelNamesForNode`)
+ * or from channels the stitcher actually fetched
  * (`StitchedPathResult.stitch.channelsUsed`) -- see design/commands.ts.
  */
-export function channelMinorOf(channelName: string): number | undefined {
-  const match = CHANNEL_NAME_PATTERN.exec(channelName);
-  return match ? Number(match[2]) : undefined;
+export function formatChannelName(channel: ChannelName): string {
+  return `${channel.cls}-${channel.major}.${channel.minor}`;
 }
 
 /**

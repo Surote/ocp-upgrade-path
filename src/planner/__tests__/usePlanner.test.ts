@@ -255,9 +255,9 @@ describe('usePlanner — look-ahead targets (plan.md §6)', () => {
   it('resolves a permalink target that lives only in a look-ahead channel, and the path stitches across the real channel boundary', async () => {
     setUrl('?channel=eus-4.20&arch=amd64&start=4.18.2&target=4.22.9');
 
-    const anchor = rawGraphJson(['4.18.2', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'eus-4.20');
-    // eus-4.21 genuinely does not exist (EUS is even-minor only); stable-4.21
-    // does, and reaches back to the same 4.20.x band.
+    // Like the live data, the anchor's nodes name the newer channels they are
+    // upgrade sources for. eus-4.21 does not exist (EUS is even-minor only).
+    const anchor = rawGraphJson(['4.18.2', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'eus-4.20,stable-4.21,eus-4.22');
     const eus421Empty = { version: 1, nodes: [], edges: [], conditionalEdges: [] };
     const stable421 = rawGraphJson(['4.20.0', '4.21.0'], [[0, 1]], 'stable-4.21');
     const eus422 = rawGraphJson(['4.20.0', '4.21.0', '4.22.9'], [[0, 1], [1, 2]], 'eus-4.22');
@@ -296,5 +296,19 @@ describe('usePlanner — look-ahead targets (plan.md §6)', () => {
     expect(lookaheadTarget).toBeDefined();
     expect(lookaheadTarget?.disabled).toBe(false);
     expect(lookaheadTarget?.viaChannel).toBe('eus-4.22');
+  });
+});
+
+describe('usePlanner — a stream not yet published outside candidate', () => {
+  it('explains an empty stable-5.0 and points at candidate-5.0 instead of failing opaquely', async () => {
+    setUrl('?channel=stable-5.0&arch=amd64');
+    const empty = { version: 1, nodes: [], edges: [], conditionalEdges: [] };
+    const client = makeClient(withSeed(new Map([['stable-5.0|amd64', jsonHandler(empty)]])));
+
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.start.error).toBeDefined());
+    expect(result.current.start.error).toMatch(/stable-5\.0.*no releases published/);
+    expect(result.current.start.error).toContain('candidate-5.0');
   });
 });

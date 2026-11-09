@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StitchedPathResult, StitchError } from '../engine/types';
 import type { GraphClient } from '../graph/client';
-import { describeGraphError } from '../graph/errors';
+import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
 import { parseUrlState, resolveUrlArch, syncUrlState } from '../url/urlState';
@@ -46,8 +46,8 @@ export interface TargetFieldViewModel {
    * Targets beyond the selected (anchor) channel's own graph -- plan.md §6
    * "Look-ahead targets (bidirectional stitching)": selecting `eus-4.20`
    * must still offer `4.22.9`. Each carries the real channel it was found
-   * in (`viaChannel`) and whether reaching that channel required the
-   * eus -> stable class fallback (`classFallback`), so the UI can mark them
+   * in (`viaChannel`) and whether that channel is a different class than
+   * the anchor's (`classFallback`), so the UI can mark them
    * as "requires a channel change" before the user chooses one, per
    * requirement 4/5 -- never silently mixed into `options` above.
    */
@@ -239,7 +239,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
       disabled: !channel,
       error:
         graphState.status === 'error'
-          ? `Channel "${channel}" (${arch}): ${describeGraphError(graphState.error)}`
+          ? describeChannelLoadError(channel ?? '', graphState.error)
           : undefined,
       onChange: setStart,
       onRetry: graphState.retry,
