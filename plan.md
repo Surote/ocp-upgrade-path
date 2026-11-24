@@ -346,7 +346,11 @@ the latest group a route onward can start in. On the Nov 2026 `eus-4.18` snapsho
 `4.16.33 → 5.0.1` offers 309 stops at the first gap. Pinning each of the 390 versions in
 turn routes for exactly those 309. Each option names the most conservative channel a route can
 arrive on ("reachable on eus-4.20"), not the channel the planned route takes. Naming that
-exactly needs a route search per option, 1.7 s for that list of 365.
+exactly needs a route search per option, 1.7 s for that list of 365. The target dropdown's `via`, by
+contrast, names the channel the route under the pinned stops and risk policy ends on: one
+more search per constraint change gives every target's route at once. Reachability there
+still ignores stops, so a target the stops rule out stays selectable and the stop is
+flagged.
 
 On that snapshot no route to 5.0.1 is free of conditional risk.
 `VSphereConfigCloudControllerCrash` sits on every route's 4.19→4.20, 4.20→4.21 or
