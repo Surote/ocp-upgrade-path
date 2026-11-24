@@ -157,3 +157,25 @@ describe('look-ahead discovery fetches concurrently', () => {
     expect(fastFirst.failure?.channel).toBe('fast-4.17');
   });
 });
+
+describe('look-ahead discovery near the fetch cap', () => {
+  it('spends the last fetches on the channels a one-at-a-time walk would, even when a fetched graph reorders them', async () => {
+    // The anchor names 46 empty or near-empty channels, leaving two of the 48 fetches.
+    // stable-4.21 names stable-4.22 and fast-4.22; stable-4.22 then names candidate-4.21,
+    // an earlier stream, so a one-at-a-time walk fetches it before fast-4.22.
+    const filler = Array.from({ length: 15 }, (_, i) => ['stable', 'fast', 'candidate'].map((cls) => `${cls}-4.${i + 6}`)).flat();
+    const anchor = graph([], { nodes: ['4.5.0'], channels: ['stable-4.5', ...filler, 'stable-4.21'] });
+    const loader = loaderFor({
+      'stable-4.21': graph([['4.20.1', '4.21.1']], { channels: ['stable-4.21', 'stable-4.22', 'fast-4.22'] }),
+      'stable-4.22': graph([['4.21.1', '4.22.1']], { channels: ['stable-4.22', 'candidate-4.21'] }),
+      'fast-4.22': graph([['4.21.1', '4.22.2']], { channels: ['fast-4.22'] }),
+      'candidate-4.21': graph([['4.20.1', '4.21.2']], { channels: ['candidate-4.21'] }),
+    });
+
+    const discovery = await discoverLookahead(loader, 'stable-4.5', anchor, 'amd64');
+
+    expect(discovery.channelsTried).toHaveLength(48);
+    expect(discovery.channelsTried.slice(-2)).toEqual(['stable-4.22', 'candidate-4.21']);
+    expect(discovery.segments.map((s) => s.channel)).toEqual(['candidate-4.21', 'stable-4.21', 'stable-4.22']);
+  });
+});
