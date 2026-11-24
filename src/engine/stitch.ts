@@ -101,13 +101,14 @@ async function loadAnchorAndBackward(
   anchorChannel: string,
   arch: Arch,
   start: Version,
+  loadedAnchor: Graph | undefined,
 ): Promise<Result<AnchorAndBackward, StitchError>> {
   const parsed = parseChannelName(anchorChannel);
   if (!parsed) {
     return err({ kind: 'invalidChannel', channel: anchorChannel });
   }
 
-  const anchorLoaded = await loader(anchorChannel, arch);
+  const anchorLoaded = loadedAnchor ? ok(loadedAnchor) : await loader(anchorChannel, arch);
   if (!anchorLoaded.ok) {
     return err({ kind: 'loadFailed', channel: anchorChannel, error: anchorLoaded.error });
   }
@@ -265,6 +266,12 @@ function reattributeSwitches(hops: readonly PathHop[], segments: readonly Channe
   return hops.map((h, i) => ({ ...h, sourceChannel: segments[effectiveSeg[i] as number]?.channel ?? h.sourceChannel }));
 }
 
+/** An anchor graph the caller already loaded, and the look-ahead it discovered from that same graph. */
+export interface AnchorSnapshot {
+  readonly graph: Graph;
+  readonly lookahead?: LookaheadDiscovery;
+}
+
 /**
  * Finds the recommended (and, when a single graph suffices, alternate) path
  * from `start` to `target`, fetching whichever channel graphs are needed via
@@ -272,14 +279,24 @@ function reattributeSwitches(hops: readonly PathHop[], segments: readonly Channe
  * per plan.md §6 this is the **anchor** (the channel the cluster is on now),
  * not necessarily the target's own channel: `stitchAndFindPath` walks
  * backward to cover `start` and/or forward to cover `target` as needed.
+ *
+ * Given `anchor`, routes against that snapshot instead of fetching the
+ * anchor and rediscovering look-ahead, so the result matches target options
+ * built from the same snapshot.
  */
 export async function stitchAndFindPath(
   loader: GraphLoader,
-  params: { readonly targetChannel: string; readonly arch: Arch; readonly start: Version; readonly target: Version },
+  params: {
+    readonly targetChannel: string;
+    readonly arch: Arch;
+    readonly start: Version;
+    readonly target: Version;
+    readonly anchor?: AnchorSnapshot;
+  },
 ): Promise<Result<StitchedPathResult, StitchError>> {
   const { targetChannel: anchorChannel, arch, start, target } = params;
 
-  const loaded = await loadAnchorAndBackward(loader, anchorChannel, arch, start);
+  const loaded = await loadAnchorAndBackward(loader, anchorChannel, arch, start, params.anchor?.graph);
   if (!loaded.ok) {
     return loaded;
   }
@@ -308,7 +325,7 @@ export async function stitchAndFindPath(
   let lookahead: readonly ChannelSegment[] = [];
   let lookaheadFailure: LookaheadDiscovery['failure'];
   if (!targetInAnchor) {
-    const discovery = await discoverLookahead(loader, anchorChannel, anchor.graph, arch);
+    const discovery = params.anchor?.lookahead ?? (await discoverLookahead(loader, anchorChannel, anchor.graph, arch));
     lookaheadFailure = discovery.failure;
     if (!discovery.segments.some((segment) => versionsOf(segment.graph).has(target))) {
       return err(

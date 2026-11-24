@@ -8,7 +8,7 @@ import { parseUrlState, resolveUrlArch, syncUrlState } from '../url/urlState';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
-import { useLookaheadSegments } from './lookaheadTargets';
+import { useLookahead } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
@@ -125,13 +125,18 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   const graph = graphState.status === 'success' ? graphState.value.graph : undefined;
 
-  // Look-ahead target discovery (plan.md §6): fetched lazily, keyed on
-  // (channel, arch) alone -- it doesn't need `start` to discover *which*
-  // channels exist beyond the anchor, only to later decide which of their
-  // versions are reachable (buildTargetOptions below).
-  const lookahead = useLookaheadSegments(client, channel, arch);
-  const lookaheadSegments = lookahead.status === 'success' ? lookahead.value : NO_SEGMENTS;
-  const lookaheadLoading = lookahead.status === 'loading';
+  // Look-ahead target discovery (plan.md §6), keyed on the loaded anchor
+  // graph -- it doesn't need `start` to discover *which* channels exist
+  // beyond the anchor, only to later decide which of their versions are
+  // reachable (buildTargetOptions below). Used only while it matches the
+  // anchor on screen, and handed to the path search with it, so the options
+  // and the route always come from the same graphs.
+  const anchorResult = graphState.status === 'success' ? graphState.value : undefined;
+  const lookahead = useLookahead(client, channel, arch, anchorResult);
+  const lookaheadSnapshot =
+    lookahead.status === 'success' && lookahead.value.anchorFetchedAt === anchorResult?.fetchedAt ? lookahead.value : undefined;
+  const lookaheadSegments = lookaheadSnapshot?.discovery.segments ?? NO_SEGMENTS;
+  const lookaheadLoading = anchorResult !== undefined && lookaheadSnapshot === undefined;
 
   const resolvedStart = useMemo(() => (graph && startRaw ? resolveVersion(graph, startRaw) : undefined), [graph, startRaw]);
   const resolvedTarget = useMemo(() => {
@@ -160,7 +165,13 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // Only a listed target is searched, so a permalink whose target is the
   // start or older gets the notice below and no route alongside it.
   const targetOption = targetOptions.find((o) => o.version === resolvedTarget);
-  const pathResult = usePathSearch(client, { channel, arch, start: resolvedStart, target: targetOption?.version });
+  const pathResult = usePathSearch(client, {
+    channel,
+    arch,
+    start: resolvedStart,
+    target: targetOption?.version,
+    anchor: anchorResult && { ...anchorResult, lookahead: lookaheadSnapshot?.discovery },
+  });
 
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
   const setChannel = useCallback((next: string) => {

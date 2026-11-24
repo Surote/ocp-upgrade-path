@@ -1,55 +1,42 @@
 import { useCallback } from 'react';
-import { parseChannelName } from '../design/channels';
-import { type ChannelSegment, discoverLookahead } from '../engine/lookahead';
-import type { GraphClient } from '../graph/client';
+import { discoverLookahead, type LookaheadDiscovery } from '../engine/lookahead';
+import type { GraphClient, GraphResult } from '../graph/client';
 import type { Arch } from '../graph/types';
 import { ok, type Result } from '../lib/result';
 import { makeGraphLoader } from './graphLoader';
 import { type AsyncResult, useAsyncResult } from './useAsyncResult';
 
-/**
- * The look-ahead channels beyond `anchorChannel` (engine/lookahead.ts), read
- * through `GraphClient`'s cache so the stitcher's own forward walk later
- * gets the very same graph snapshots.
- *
- * Returns an empty list for a channel name outside Cincinnati's
- * `<class>-<major>.<minor>` convention, without fetching anything, and
- * degrades to the segments found so far on a fetch failure -- this is a
- * dropdown convenience, not a place to surface hard errors.
- */
-export async function discoverLookaheadSegments(
-  client: GraphClient,
-  anchorChannel: string,
-  arch: Arch,
-  signal?: AbortSignal,
-): Promise<readonly ChannelSegment[]> {
-  if (!parseChannelName(anchorChannel)) return [];
-  const loader = makeGraphLoader(client, { signal });
-  const anchor = await loader(anchorChannel, arch);
-  if (!anchor.ok) return [];
-  return (await discoverLookahead(loader, anchorChannel, anchor.value, arch)).segments;
+/** Look-ahead discovered from one loaded anchor graph. */
+export interface LookaheadSnapshot {
+  /** `GraphResult.fetchedAt` of the anchor graph this was discovered from: it names one cache entry, so one graph. */
+  readonly anchorFetchedAt: number;
+  readonly discovery: LookaheadDiscovery;
 }
 
 /**
- * Fetches (and caches, via `discoverLookaheadSegments`) the look-ahead
- * segments for the currently selected `channel`, active only once a channel
- * is actually selected. This never errors outward -- a failed lookahead
- * fetch degrades to "fewer look-ahead targets offered" (see
- * `discoverLookaheadSegments`'s doc), not a broken dropdown -- so the result
- * type's error is `never`.
+ * The look-ahead channels beyond `channel` (engine/lookahead.ts), discovered
+ * from the anchor graph the dropdowns are built from rather than a separate
+ * fetch of it, so a manual refresh of the anchor rediscovers. Read through
+ * `GraphClient`'s cache. Never errors outward: a failed look-ahead fetch is
+ * recorded in `discovery.failure` and means fewer targets offered, not a
+ * broken dropdown.
  */
-export function useLookaheadSegments(
+export function useLookahead(
   client: GraphClient,
   channel: string | undefined,
   arch: Arch,
-): AsyncResult<readonly ChannelSegment[], never> {
-  const active = channel !== undefined;
-  const depsKey = channel ? `${channel}|${arch}` : '';
+  anchor: GraphResult | undefined,
+): AsyncResult<LookaheadSnapshot, never> {
+  const active = channel !== undefined && anchor !== undefined;
+  const depsKey = active ? `${channel}|${arch}|${anchor.fetchedAt}` : '';
 
   const task = useCallback(
-    (signal: AbortSignal): Promise<Result<readonly ChannelSegment[], never>> =>
-      discoverLookaheadSegments(client, channel as string, arch, signal).then(ok),
-    [client, channel, arch],
+    async (signal: AbortSignal): Promise<Result<LookaheadSnapshot, never>> => {
+      const { graph, fetchedAt } = anchor as GraphResult;
+      const discovery = await discoverLookahead(makeGraphLoader(client, { signal }), channel as string, graph, arch);
+      return ok({ anchorFetchedAt: fetchedAt, discovery });
+    },
+    [client, channel, arch, anchor],
   );
 
   return useAsyncResult(active, depsKey, task);

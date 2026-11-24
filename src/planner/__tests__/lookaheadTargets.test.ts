@@ -4,7 +4,9 @@ import type { Version } from '../../graph/types';
 import { fakeFetch, fakeJsonResponse } from '../../test-utils/fakeFetch';
 import { FakeStorage } from '../../test-utils/fakeStorage';
 import { loadFixture } from '../../test-utils/fixtures';
-import { discoverLookaheadSegments } from '../lookaheadTargets';
+import { discoverLookahead } from '../../engine/lookahead';
+import { parseRawGraph } from '../../graph/parse';
+import { makeGraphLoader } from '../graphLoader';
 import { buildTargetOptions } from '../targetOptions';
 
 function v(s: string): Version {
@@ -52,11 +54,20 @@ function makeClient(responses: Map<string, Handler>): GraphClient {
   return Object.assign(client, { __calls: calls }) as GraphClient & { __calls: string[] };
 }
 
-describe('discoverLookaheadSegments', () => {
+/** Discovers through `client`'s cache from the anchor graph `client` loads, as the planner does. */
+async function discoverLookaheadSegments(client: GraphClient, anchorChannel: string) {
+  const anchor = await client.getGraph({ channel: anchorChannel, arch: 'amd64' });
+  if (!anchor.ok) throw new Error(`anchor ${anchorChannel} did not load`);
+  return (await discoverLookahead(makeGraphLoader(client), anchorChannel, anchor.value.graph, 'amd64')).segments;
+}
+
+describe('look-ahead discovery through the graph client', () => {
   it('makes no network calls at all for a channel name that does not match the <class>-<major>.<minor> convention', async () => {
     const client = makeClient(new Map()) as GraphClient & { __calls: string[] };
-    const segments = await discoverLookaheadSegments(client, 'chan-a', 'amd64');
-    expect(segments).toEqual([]);
+    const anchor = parseRawGraph(rawGraphJson(['4.20.0'], [], ['stable-4.21']), { channel: 'chan-a', arch: 'amd64' });
+    if (!anchor.ok) throw new Error('anchor did not parse');
+    const discovery = await discoverLookahead(makeGraphLoader(client), 'chan-a', anchor.value, 'amd64');
+    expect(discovery.segments).toEqual([]);
     expect(client.__calls).toEqual([]);
   });
 
@@ -70,7 +81,7 @@ describe('discoverLookaheadSegments', () => {
       ]),
     ) as GraphClient & { __calls: string[] };
 
-    const segments = await discoverLookaheadSegments(client, 'eus-4.20', 'amd64');
+    const segments = await discoverLookaheadSegments(client, 'eus-4.20');
 
     expect(segments.map((s) => [s.channel, s.classFallback, s.requestedClass])).toEqual([
       ['stable-4.21', true, 'eus'],
@@ -83,7 +94,7 @@ describe('discoverLookaheadSegments', () => {
     const client = makeClient(
       new Map([['stable-4.20|amd64', jsonHandler(rawGraphJson(['4.19.0', '4.20.0'], [[0, 1]], ['stable-4.19', 'stable-4.20']))]]),
     ) as GraphClient & { __calls: string[] };
-    expect(await discoverLookaheadSegments(client, 'stable-4.20', 'amd64')).toEqual([]);
+    expect(await discoverLookaheadSegments(client, 'stable-4.20')).toEqual([]);
     expect(client.__calls).toEqual(['stable-4.20']);
   });
 
@@ -94,16 +105,20 @@ describe('discoverLookaheadSegments', () => {
       ...newer.map((c) => [`${c}|amd64`, jsonHandler(rawGraphJson(['4.20.0', `${c.slice(7)}.0`], [[0, 1]]))] as const),
     ]);
     const client = makeClient(handlers) as GraphClient & { __calls: string[] };
-    const segments = await discoverLookaheadSegments(client, 'stable-4.20', 'amd64');
+    const segments = await discoverLookaheadSegments(client, 'stable-4.20');
     expect(segments.map((s) => s.channel)).toEqual(['stable-4.21', 'stable-4.22', 'stable-4.23', 'stable-4.24', 'stable-5.0']);
   });
 
-  it('stops discovery (without throwing) on a genuine network failure', async () => {
+  it('records a genuine network failure instead of throwing', async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error('network down');
     });
     const brokenClient = new GraphClient({ storage: new FakeStorage(), fetchImpl });
-    expect(await discoverLookaheadSegments(brokenClient, 'eus-4.20', 'amd64')).toEqual([]);
+    const anchor = parseRawGraph(rawGraphJson(['4.20.0'], [], ['eus-4.22']), { channel: 'eus-4.20', arch: 'amd64' });
+    if (!anchor.ok) throw new Error('anchor did not parse');
+    const discovery = await discoverLookahead(makeGraphLoader(brokenClient), 'eus-4.20', anchor.value, 'amd64');
+    expect(discovery.segments).toEqual([]);
+    expect(discovery.failure?.channel).toBe('eus-4.22');
   });
 });
 
@@ -115,7 +130,7 @@ describe('look-ahead across the 4.22 -> 5.0 major boundary (live fixtures)', () 
         ['candidate-5.0|amd64', jsonHandler(loadFixture('candidate-5.0.json'))],
       ]),
     );
-    const segments = await discoverLookaheadSegments(client, 'stable-4.22', 'amd64');
+    const segments = await discoverLookaheadSegments(client, 'stable-4.22');
     const anchor = await client.getGraph({ channel: 'stable-4.22', arch: 'amd64' });
     if (!anchor.ok) throw new Error('anchor fixture did not load');
 

@@ -292,6 +292,11 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > therefore routable by construction, and its `via` names the channel its route ends on.
 > A version in the anchor is still routed on the anchor's own edges only, with full
 > alternates.
+>
+> **One snapshot.** The planner discovers look-ahead from the anchor graph the dropdowns
+> show, not a separate fetch of it, keyed on that graph's fetch time. The path search then
+> routes against that same anchor graph and discovery instead of refetching and
+> rediscovering. A manual refresh therefore rebuilds the options and the route together.
 
 ### Major-version boundaries (4.22 → 5.0)
 

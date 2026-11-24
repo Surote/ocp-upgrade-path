@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { stitchAndFindPath } from '../engine/stitch';
+import { type AnchorSnapshot, stitchAndFindPath } from '../engine/stitch';
 import type { StitchedPathResult, StitchError } from '../engine/types';
 import type { GraphClient } from '../graph/client';
 import type { Arch, Version } from '../graph/types';
@@ -12,6 +12,8 @@ export interface PathSearchParams {
   readonly arch: Arch;
   readonly start: Version | undefined;
   readonly target: Version | undefined;
+  /** The anchor graph the dropdowns were built from, and the look-ahead discovered from it once known; routed against instead of refetched. */
+  readonly anchor?: AnchorSnapshot & { readonly fetchedAt: number };
 }
 
 /**
@@ -22,9 +24,9 @@ export interface PathSearchParams {
  * the stitcher directly.
  */
 export function usePathSearch(client: GraphClient, params: PathSearchParams): AsyncResult<StitchedPathResult, StitchError> {
-  const { channel, arch, start, target } = params;
+  const { channel, arch, start, target, anchor } = params;
   const active = channel !== undefined && start !== undefined && target !== undefined;
-  const depsKey = active ? `${channel}|${arch}|${start}|${target}` : '';
+  const depsKey = active ? `${channel}|${arch}|${start}|${target}|${anchor?.fetchedAt}` : '';
 
   const task = useCallback(
     (signal: AbortSignal) => {
@@ -34,9 +36,10 @@ export function usePathSearch(client: GraphClient, params: PathSearchParams): As
         arch,
         start: start as Version,
         target: target as Version,
+        anchor,
       });
     },
-    [client, channel, arch, start, target],
+    [client, channel, arch, start, target, anchor],
   );
 
   return useAsyncResult(active, depsKey, task);
