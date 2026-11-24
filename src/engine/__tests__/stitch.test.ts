@@ -4,6 +4,7 @@ import type { Graph, Version } from '../../graph/types';
 import { err, ok, type Result } from '../../lib/result';
 import type { GraphError } from '../../graph/errors';
 import { buildTargetOptions } from '../../planner/targetOptions';
+import { loadFixture } from '../../test-utils/fixtures';
 import { discoverLookahead } from '../lookahead';
 import { stitchAndFindPath } from '../stitch';
 import type { GraphLoader } from '../types';
@@ -557,5 +558,21 @@ describe('stitchAndFindPath — failure modes', () => {
     if (result.error.kind !== 'startNeverFound') return;
     expect(result.error.channelsTried).toEqual(['stable-4.1', 'stable-4.0']);
     expect(channelsFetched).toEqual(['stable-4.1', 'stable-4.0']);
+  });
+});
+
+describe('single-graph alternates', () => {
+  it('offers alternates distinct from the primary on screen (candidate-4.20 fixture)', async () => {
+    const parsed = parseRawGraph(loadFixture('candidate-4.20.json'), { channel: 'candidate-4.20', arch: 'amd64' });
+    if (!parsed.ok) throw new Error('fixture did not parse');
+    const loader: GraphLoader = async () => ok(parsed.value);
+
+    const result = await stitchAndFindPath(loader, { targetChannel: 'candidate-4.20', arch: 'amd64', start: v('4.18.14'), target: v('4.20.0-ec.2') });
+
+    if (!result.ok) throw new Error(result.error.kind);
+    const shown = [result.value.primary, ...result.value.alternates].map((p) => p.versions.join(' > '));
+    expect(new Set(shown).size).toBe(shown.length);
+    expect(shown.some((route) => route.includes('4.19.0-rc.2'))).toBe(true);
+    expect(shown.some((route) => route.includes('4.19.0-rc.3'))).toBe(true);
   });
 });
