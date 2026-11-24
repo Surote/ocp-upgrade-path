@@ -609,3 +609,23 @@ describe('node metadata follows hop provenance', () => {
     expect(command?.upgradeToImage).toBe(`oc adm upgrade --to-image=${digest} --allow-explicit-upgrade`);
   });
 });
+
+describe('response order', () => {
+  it('plans the same route whatever order Cincinnati lists nodes and edges in', async () => {
+    // Two routes tie on every ranked term; Cincinnati shuffles node order on each response.
+    const edges: [string, string][] = [
+      ['4.22.15', '5.0.0-rc.3'],
+      ['4.22.15', '5.0.0-rc.4'],
+      ['5.0.0-rc.3', '5.1.0-ec.1'],
+      ['5.0.0-rc.4', '5.1.0-ec.1'],
+    ];
+    const plan = async (order: [string, string][]) => {
+      const g = fx.graph(order, { nodes: [...new Set(order.flat())].reverse() });
+      const result = await stitchAndFindPath(async () => ok(g), { targetChannel: 'candidate-5.1', arch: 'amd64', start: v('4.22.15'), target: v('5.1.0-ec.1') });
+      if (!result.ok) throw new Error(result.error.kind);
+      return result.value.primary.versions;
+    };
+
+    expect(await plan([...edges].reverse())).toEqual(await plan(edges));
+  });
+});
