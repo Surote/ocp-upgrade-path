@@ -16,7 +16,7 @@ export function CommandScript({ commands }: { readonly commands: readonly HopCom
   const script = buildScript(commands);
 
   return (
-    <section className="panel panel--commands" aria-labelledby="commands-heading">
+    <section className="panel" aria-labelledby="commands-heading">
       <div className="panel__head">
         <h2 id="commands-heading">Commands</h2>
         <CopyButton text={script} label="Copy full script" />

@@ -119,4 +119,34 @@ describe('App', () => {
       ]),
     );
   });
+
+  it('keeps the AI caveat visible and shows hop/station detail only once something on the map is selected', async () => {
+    render(<App graphClient={makeClient()} />);
+
+    expect(screen.getByText('AI-generated.').closest('[role="note"]')).toHaveTextContent(/Verify with Red Hat docs before acting/);
+
+    await waitFor(() => expect(screen.getByRole('option', { name: 'demo-4.21' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'demo-4.21' } });
+    await waitFor(() => expect(screen.getByRole('option', { name: '4.18.2' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Start version'), { target: { value: '4.18.2' } });
+    await waitFor(() => expect(within(screen.getByLabelText('Target version')).getByRole('option', { name: '4.20.32' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Target version'), { target: { value: '4.20.32' } });
+
+    const hint = await screen.findByText(/Select a station or hop on the map/);
+    expect(screen.queryByRole('heading', { name: /^Hop 1 of 2/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Station / })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Hop 1 of 2:/ }));
+    expect(screen.getByRole('heading', { name: 'Hop 1 of 2: 4.18.2 → 4.19.40' })).toBeInTheDocument();
+    expect(hint).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Station 4\.20\.32,/ }));
+    expect(screen.getByRole('heading', { name: 'Station 4.20.32' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Hop 1 of 2:/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Station 4\.20\.32,/ }));
+    expect(screen.queryByRole('heading', { name: /^Hop 1 of 2/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Station / })).not.toBeInTheDocument();
+    expect(screen.getByText(/Select a station or hop on the map/)).toBeInTheDocument();
+  });
 });

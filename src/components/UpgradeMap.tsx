@@ -7,26 +7,21 @@ import type { Path } from '../engine/types';
 import type { GraphNode, Version } from '../graph/types';
 
 /*
- * Geometry -- scaled to roughly two-thirds of the design-review pass that
- * preceded it (that pass fixed an *earlier*, too-timid map; this is a
- * distinct, smaller correction on top of it, not a reversion). Every
- * pixel constant below carries forward the same ~2/3 ratio, so the map's
- * proportions -- and the "every band is real content, not dead space"
- * tight-fit `MAP_HEIGHT` -- are unchanged, just smaller. Vertical offsets
- * are still measured from `ROW_Y` using the fixed terminal radius
- * (`R_TERMINAL`), not each station's own radius, so labels stay aligned
- * across terminal and intermediate stations.
+ * Geometry, in CSS pixels. The SVG renders 1:1 and is never scaled to its
+ * container, so dots, strokes, labels and spacing are the same size on every
+ * viewport; a path wider than the screen scrolls inside `.map-scroll`.
+ * STATION_GAP fits a typical four-station path in a 390px-wide phone.
  */
-const STATION_GAP = 140;
-const MARGIN_X = 50;
-const R = 17; // intermediate station radius
-const R_TERMINAL = 21; // start/target station radius
+const STATION_GAP = 88;
+const MARGIN_X = 40;
+const R = 6; // station dot radius
+const R_HIT = 14; // invisible station click/tap target
 
-const ROW_Y = 61;
-const CAPTION_Y = ROW_Y - (R_TERMINAL + 17); // "START"/"TARGET"
-const LABEL_Y = ROW_Y + (R_TERMINAL + 17); // version number
-const TAG_Y = LABEL_Y + 15; // "switch to <channel>" note, interchange stations only
-const MAP_HEIGHT = TAG_Y + 12; // tight-fit: every band above is real content, not void
+const ROW_Y = 32;
+const CAPTION_Y = ROW_Y - 20; // "start"/"target"
+const LABEL_Y = ROW_Y + 26; // version number
+const TAG_Y = LABEL_Y + 14; // "switch to <channel>" note, interchange stations only
+const MAP_HEIGHT = TAG_Y + 6;
 
 type RiskState = 'always' | 'conditional' | 'clean';
 
@@ -76,12 +71,7 @@ const RISK_WORD: Record<RiskState, string> = { always: 'always risk', conditiona
  * screen, since explaining a symbol that isn't present is just noise (and
  * per the channel-switch-rule fix, most paths now have zero interchanges).
  *
- * Scales to its container: `width: 100%` with a `viewBox` doing the actual
- * scaling, `min-width` floored at the map's own natural size so text never
- * shrinks below legibility on a narrow viewport -- `.map-scroll`'s own
- * `overflow-x: auto` (App.css) takes over only once the container is
- * narrower than that floor, per the quality floor's "map scrolls in its own
- * container" rule.
+ * Rendered at a fixed size (see Geometry), never scaled with the viewport.
  *
  * Both stations and segments are real interactive elements (`role="button"`,
  * `tabIndex=0`, Enter/Space via `handleActivateKey`) with their own visible
@@ -116,9 +106,8 @@ export function UpgradeMap({
       <div className="map-scroll">
         <svg
           className="upgrade-map"
-          viewBox={`0 0 ${width} ${MAP_HEIGHT}`}
-          style={{ width: '100%', minWidth: `${width}px`, height: 'auto', display: 'block' }}
-          preserveAspectRatio="xMidYMid meet"
+          width={width}
+          height={MAP_HEIGHT}
           role="group"
           aria-label="Interactive upgrade path map. Tab through stations and hops for details."
         >
@@ -130,6 +119,7 @@ export function UpgradeMap({
             const state = hopRiskState(hop.risks);
             const selected = selectedHopIndex === i;
             const totalRisks = hop.risks.length;
+            const badgeWidth = state === 'clean' ? 16 : 28;
 
             const ariaLabel = `Hop ${i + 1} of ${path.hops.length}: ${hop.from} to ${hop.to}. ${
               state === 'clean' ? 'No known risks.' : `${totalRisks} risk${totalRisks === 1 ? '' : 's'}, ${RISK_WORD[state]}.`
@@ -149,15 +139,9 @@ export function UpgradeMap({
               >
                 <line x1={x1} y1={ROW_Y} x2={x2} y2={ROW_Y} className="hop-segment__hit" />
                 <line x1={x1} y1={ROW_Y} x2={x2} y2={ROW_Y} className={`hop-segment__line ${laneClassName(toMinor)}`} />
-                {/* The risk pill sits directly ON the lane line (same y as
-                    the line), not floating above it -- an annotation
-                    anchored to its segment, drawn after the line so it
-                    reads as a capsule inset into the route, the way a real
-                    transit map marks a stop-specific note on the line
-                    itself. */}
                 <g transform={`translate(${midX}, ${ROW_Y})`} className={`risk-pill risk-pill--${state}`}>
-                  <rect x={-20} y={-9} width={40} height={18} rx={9} />
-                  <text x={0} y={3} textAnchor="middle" aria-hidden="true">
+                  <rect x={-badgeWidth / 2} y={-7} width={badgeWidth} height={14} rx={7} />
+                  <text x={0} y={3.5} textAnchor="middle" aria-hidden="true">
                     {RISK_GLYPH[state]}
                     {state === 'clean' ? '' : ` ${totalRisks}`}
                   </text>
@@ -184,9 +168,7 @@ export function UpgradeMap({
             const node = nodeInfo.get(version);
             const hasErrata = Boolean(node?.errataUrl);
             const incomingRisks = i > 0 ? (path.hops[i - 1]?.risks.length ?? 0) : undefined;
-            const incomingState = i > 0 && path.hops[i - 1] ? hopRiskState((path.hops[i - 1] as Path['hops'][number]).risks) : undefined;
             const selected = selectedStationIndex === i;
-            const radius = isTerminal ? R_TERMINAL : R;
 
             const parts: string[] = [`Station ${version}`];
             if (isStart) parts.push('start');
@@ -211,36 +193,35 @@ export function UpgradeMap({
                 onClick={() => onSelectStation(i)}
                 onKeyDown={(e) => handleActivateKey(e, () => onSelectStation(i))}
               >
+                <circle r={R_HIT} className="station__hit" />
                 {/* Interchange = a ring around the station -- the standard
                     transit-map mark for "this stop connects to another
                     line" -- drawn where the ring is part of the station
                     itself rather than a small glyph floating above the row.
                     The inline tag below names the real destination channel
                     so the ring is self-explanatory without the legend. */}
-                {isInterchange && <circle r={radius + 6} className="interchange-ring" aria-hidden="true" />}
-                <circle r={radius} className={`station__dot ${laneClassName(minor)}`} />
-                {!hasErrata && <circle r={radius + 3} className="station__no-advisory-ring" aria-hidden="true" />}
+                {isInterchange && <circle r={R + 5} className="interchange-ring" aria-hidden="true" />}
+                <circle r={R} className={`station__dot ${laneClassName(minor)}`} />
+                {!hasErrata && <circle r={R + 3} className="station__no-advisory-ring" aria-hidden="true" />}
 
                 <text className="station__caption" y={CAPTION_Y - ROW_Y} textAnchor="middle" aria-hidden="true">
-                  {isStart ? 'START' : isTarget ? 'TARGET' : ''}
+                  {isStart ? 'start' : isTarget ? 'target' : ''}
                 </text>
 
                 <text className="station__label" y={LABEL_Y - ROW_Y} textAnchor="middle" aria-hidden="true">
-                  <tspan>{version}</tspan>
-                  {/* Risk-count badge lives inline with the label, at the
-                      same fixed baseline every station uses -- and is
-                      omitted entirely at zero, since a "0" badge repeats
-                      what the green clean pill already says (plan.md §6
-                      means "a count worth showing", not literal zero). */}
-                  {incomingRisks !== undefined && incomingRisks > 0 && incomingState && incomingState !== 'clean' && (
-                    <tspan className={`station__risk-count station__risk-count--${incomingState}`} dx={5}>
-                      {RISK_GLYPH[incomingState]} {incomingRisks}
-                    </tspan>
-                  )}
+                  {version}
                 </text>
 
+                {/* Left-aligned on the first station: centred, the tag would
+                    run past the SVG's left edge and be clipped. */}
                 {isInterchange && (
-                  <text className="interchange-tag" y={TAG_Y - ROW_Y} textAnchor="middle" aria-hidden="true">
+                  <text
+                    className="interchange-tag"
+                    x={isStart ? -R : 0}
+                    y={TAG_Y - ROW_Y}
+                    textAnchor={isStart ? 'start' : 'middle'}
+                    aria-hidden="true"
+                  >
                     ⇄ switch to {switchTo}
                   </text>
                 )}
