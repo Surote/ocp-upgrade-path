@@ -302,3 +302,58 @@ export function routeAcrossSegments(
 ): ReadonlyMap<Version, Route> {
   return searchRoutes(buildRoutingModel(segments), start, constraints).at(-1) as ReadonlyMap<Version, Route>;
 }
+
+/**
+ * Where routes through `stops` can stand once past them all: each version
+ * mapped to the earliest group a route reaches it in. Unweighted, over the
+ * same transitions as `searchRoutes`.
+ */
+export function reachForward(model: RoutingModel, start: Version, stops: readonly Version[]): ReadonlyMap<Version, number> {
+  const layers: Map<Version, number>[] = Array.from({ length: stops.length + 1 }, () => new Map());
+  (layers[0] as Map<Version, number>).set(start, 0);
+  model.groups.forEach((group, g) => {
+    layers.forEach((reached, layer) => {
+      const queue = [...reached.keys()].filter((version) => group.out.has(version));
+      for (let version = queue.pop(); version !== undefined; version = queue.pop()) {
+        for (const arc of group.out.get(version) ?? []) {
+          const next = layerAfter(stops, layer, arc.to);
+          const target = layers[next] as Map<Version, number>;
+          if (target.has(arc.to)) continue;
+          target.set(arc.to, g);
+          if (next === layer) queue.push(arc.to);
+        }
+      }
+    });
+  });
+  return layers.at(-1) as ReadonlyMap<Version, number>;
+}
+
+/**
+ * The mirror of `reachForward`: every version from which a route through
+ * `stops` reaches `target`, mapped to the latest group such a route can
+ * start in (it uses only that group and later ones).
+ */
+export function reachBackward(model: RoutingModel, target: Version, stops: readonly Version[]): ReadonlyMap<Version, number> {
+  const layers: Map<Version, number>[] = Array.from({ length: stops.length + 1 }, () => new Map());
+  (layers[stops.length] as Map<Version, number>).set(target, model.groups.length - 1);
+  for (let g = model.groups.length - 1; g >= 0; g -= 1) {
+    const group = model.groups[g] as RoutingGroup;
+    for (let layer = stops.length; layer >= 0; layer -= 1) {
+      const reached = layers[layer] as Map<Version, number>;
+      const queue = [...reached.keys()].filter((version) => group.in.has(version));
+      for (let version = queue.pop(); version !== undefined; version = queue.pop()) {
+        for (const arc of group.in.get(version) ?? []) {
+          // The layers a hop into `version` can leave from and still land in `layer`.
+          for (const from of [layer - 1, layer]) {
+            if (from < 0 || layerAfter(stops, from, version) !== layer) continue;
+            const source = layers[from] as Map<Version, number>;
+            if (source.has(arc.from)) continue;
+            source.set(arc.from, g);
+            if (from === layer) queue.push(arc.from);
+          }
+        }
+      }
+    }
+  }
+  return layers[0] as ReadonlyMap<Version, number>;
+}
