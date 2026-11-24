@@ -142,7 +142,7 @@ export function PathResult({
       <CommandScript commands={commands} />
       <RiskSummary riskSummary={primary.riskSummary} applicability={riskApplicability} />
       <AdminAcksPanel path={primary} />
-      <EusAdvisory versions={primary.versions} />
+      <EusAdvisory hops={primary.hops} />
       <AlternatesPanel alternates={alternates} channelsUsed={stitch.channelsUsed} />
     </div>
   );

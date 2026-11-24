@@ -1,3 +1,4 @@
+import type { PathHop } from '../engine/types';
 import { formatStream, type Stream, streamOf } from '../engine/version';
 import type { Version } from '../graph/types';
 
@@ -78,13 +79,14 @@ function isLegStart(a: StreamRun, b: StreamRun, c: StreamRun): boolean {
 }
 
 /**
- * The Control Plane Only legs of an actual route (`Path.versions`, after
- * stops and avoids), in order. Cincinnati does not encode this -- it is
+ * The Control Plane Only legs of an actual route (`Path.hops`, after stops
+ * and avoids), in order. Cincinnati does not encode this -- it is
  * UI-side guidance (EusAdvisory.tsx). Consecutive legs share their EUS
  * stream: one leg's unpause point is the next leg's pause point.
  */
-export function controlPlaneOnlyLegs(versions: readonly Version[]): readonly ControlPlaneOnlyLeg[] {
-  const runs = streamRuns(versions);
+export function controlPlaneOnlyLegs(hops: readonly PathHop[]): readonly ControlPlaneOnlyLeg[] {
+  const first = hops[0];
+  const runs = streamRuns(first ? [first.from, ...hops.map((hop) => hop.to)] : []);
   const legs: ControlPlaneOnlyLeg[] = [];
   let i = 0;
   while (i + 2 < runs.length) {

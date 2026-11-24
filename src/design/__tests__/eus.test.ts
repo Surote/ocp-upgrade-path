@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import type { PathHop } from '../../engine/types';
 import { formatStream, streamOf } from '../../engine/version';
 import type { Version } from '../../graph/types';
 import { buildLegScript, controlPlaneOnlyLegs, isEusMinor, type ControlPlaneOnlyLeg } from '../eus';
 
-const route = (...vs: string[]) => vs as Version[];
+/** A route's hops, each taken from a stable channel's graph. */
+function route(...vs: string[]): PathHop[] {
+  return vs.slice(1).map((to, i) => ({ from: vs[i] as Version, to: to as Version, risks: [], sourceChannel: 'stable-4.22' }));
+}
 
 function summary(legs: readonly ControlPlaneOnlyLeg[]) {
   return legs.map((leg) => `${formatStream(leg.from)}->${formatStream(leg.to)} pause@${leg.pauseAt} unpause@${leg.unpauseAt}`);
@@ -78,8 +82,8 @@ describe('controlPlaneOnlyLegs', () => {
   });
 
   it('never keeps workers paused across more than one leg', () => {
-    const versions = route('4.14.50', '4.15.40', '4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46', '4.21.42', '4.22.22', '5.0.1');
-    const legs = controlPlaneOnlyLegs(versions);
+    const versions = ['4.14.50', '4.15.40', '4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46', '4.21.42', '4.22.22', '5.0.1'] as Version[];
+    const legs = controlPlaneOnlyLegs(route(...versions));
     let previousUnpause = -1;
     for (const leg of legs) {
       const pause = versions.indexOf(leg.pauseAt);

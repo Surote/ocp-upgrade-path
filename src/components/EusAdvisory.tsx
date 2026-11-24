@@ -1,6 +1,6 @@
 import { buildLegScript, controlPlaneOnlyLegs } from '../design/eus';
 import { formatStream } from '../engine/version';
-import type { Version } from '../graph/types';
+import type { PathHop } from '../engine/types';
 import { CopyButton } from './CopyButton';
 
 /**
@@ -10,8 +10,8 @@ import { CopyButton } from './CopyButton';
  * renamed the procedure; "EUS-to-EUS" stays in the heading as the name
  * operators still use.
  */
-export function EusAdvisory({ versions }: { readonly versions: readonly Version[] }) {
-  const legs = controlPlaneOnlyLegs(versions);
+export function EusAdvisory({ hops }: { readonly hops: readonly PathHop[] }) {
+  const legs = controlPlaneOnlyLegs(hops);
   if (legs.length === 0) return null;
 
   return (
