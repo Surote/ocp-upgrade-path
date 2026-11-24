@@ -323,7 +323,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     constraints: routeConstraints,
   });
 
-  const controlPlaneOnlyLegs = useControlPlaneOnlyLegs(client, arch, pathResult);
+  const controlPlaneOnlyLegs = useControlPlaneOnlyLegs(client, arch, pathResult).legs;
 
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
   // Stops clear with the target; a target change keeps them, and any the

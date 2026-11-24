@@ -56,7 +56,7 @@ describe('useControlPlaneOnlyLegs', () => {
     });
     const client = new GraphClient({ storage: new FakeStorage(), fetchImpl });
 
-    const { result: legs } = renderHook(() => useControlPlaneOnlyLegs(client, 'amd64', result));
+    const { result: legs } = renderHook(() => useControlPlaneOnlyLegs(client, 'amd64', result).legs);
 
     await waitFor(() => expect(legs.current.map((leg) => `${leg.eusChannel} ${leg.kind}`)).toEqual(['eus-4.18 available', 'eus-4.20 checking']));
   });
@@ -70,7 +70,7 @@ describe('useControlPlaneOnlyLegs', () => {
       return fakeJsonResponse(chain(VERSIONS.slice(2)));
     });
     const client = new GraphClient({ storage: new FakeStorage(), fetchImpl });
-    const { result: legs, rerender } = renderHook(({ route }) => useControlPlaneOnlyLegs(client, 'amd64', route), { initialProps: { route: result } });
+    const { result: legs, rerender } = renderHook(({ route }) => useControlPlaneOnlyLegs(client, 'amd64', route).legs, { initialProps: { route: result } });
     await waitFor(() => expect(legKinds(legs.current)).toEqual(['eus-4.18 unavailable', 'eus-4.20 available']));
 
     rerender({ route: found(hops.slice(0, 1)) });
@@ -90,7 +90,7 @@ describe('useControlPlaneOnlyLegs', () => {
       return fakeJsonResponse(chain(VERSIONS.slice(0, 3)));
     });
     const client = new GraphClient({ storage: new FakeStorage(), fetchImpl });
-    const { result: legs, rerender } = renderHook(({ route }) => useControlPlaneOnlyLegs(client, 'amd64', route), { initialProps: { route: result } });
+    const { result: legs, rerender } = renderHook(({ route }) => useControlPlaneOnlyLegs(client, 'amd64', route).legs, { initialProps: { route: result } });
     await waitFor(() => expect(legKinds(legs.current)).toEqual(['eus-4.18 available', 'eus-4.20 checking']));
 
     rerender({ route: found(hops.map((hop) => ({ ...hop }))) });
