@@ -1,6 +1,6 @@
-import { qualifiedRiskName, type RiskId } from '../engine/risks';
+import { parseRiskId, type RiskId } from '../engine/risks';
 import type { RiskPolicy } from '../engine/routeConstraints';
-import { isArch, type Arch, type Risk } from '../graph/types';
+import { isArch, type Arch } from '../graph/types';
 
 const PARAM_CHANNEL = 'channel';
 const PARAM_ARCH = 'arch';
@@ -27,7 +27,7 @@ export interface RawUrlState {
   /** `stops=v1,v2`, in order; blank entries dropped. */
   readonly stops?: readonly string[];
   readonly avoid?: string;
-  /** One `na=` per advisory the operator marked not applicable, verbatim (see `encodeNotApplicable`); blank values dropped. */
+  /** One `na=` per advisory the operator marked not applicable, verbatim (see `resolveUrlNotApplicable`); blank values dropped. */
   readonly notApplicable?: readonly string[];
 }
 
@@ -65,7 +65,7 @@ export interface UrlStateInput {
   readonly target?: string;
   readonly stops?: readonly string[];
   readonly riskPolicy?: RiskPolicy;
-  readonly notApplicable?: readonly string[];
+  readonly notApplicable?: readonly RiskId[];
 }
 
 /** Serializes the current selection back into a canonical query string (no leading `?`), omitting any unset field. */
@@ -80,7 +80,7 @@ export function serializeUrlState(state: UrlStateInput): string {
   if (state.riskPolicy === 'avoidConditional') params.set(PARAM_AVOID, AVOID_CONDITIONAL);
   for (const mark of [...(state.notApplicable ?? [])].sort()) params.append(PARAM_NOT_APPLICABLE, mark);
   // These survive URLSearchParams parsing literally, and keep `stops=` and an advisory URL in `na=` readable in a shared link.
-  return params.toString().replace(/%2C|%2F|%3A/gi, (escaped) => decodeURIComponent(escaped));
+  return params.toString().replace(/%2C|%2F|%3A|%7E/gi, (escaped) => decodeURIComponent(escaped));
 }
 
 export interface ResolvedUrlArch {
@@ -115,48 +115,34 @@ export function resolveUrlRiskPolicy(raw: string | undefined): ResolvedUrlRiskPo
   return { riskPolicy: 'recommended', notice: `Unknown avoid value "${raw}" in link -- showing the recommended route.` };
 }
 
-/** The advisories in `known` a `na=` value names: by bare name, or by `qualifiedRiskName`. */
-function advisoriesNamed(value: string, known: ReadonlyMap<RiskId, Risk>): readonly RiskId[] {
-  return [...known].filter(([id, risk]) => risk.name === value || qualifiedRiskName(id) === value).map(([id]) => id);
-}
-
-/**
- * The `na=` values for `marks`: a mark's bare name while no other advisory in
- * `known` answers to it, so the common link stays readable, and otherwise the
- * name with its URL, so the link still names exactly one advisory.
- */
-export function encodeNotApplicable(marks: ReadonlySet<RiskId>, known: ReadonlyMap<RiskId, Risk>): readonly string[] {
-  return [...marks].map((id) => {
-    const name = known.get(id)?.name;
-    return name !== undefined && advisoriesNamed(name, known).length === 1 ? name : qualifiedRiskName(id);
-  });
-}
-
 export interface ResolvedUrlNotApplicable {
   readonly ids: readonly RiskId[];
-  /** Values that name no single advisory in `known`, never matched loosely onto one. */
-  readonly unmatched: readonly string[];
+  /** Set when a value has no `~`, so names no advisory URL; never matched by name alone. */
+  readonly notice?: string;
 }
 
-export function resolveUrlNotApplicable(raw: readonly string[], known: ReadonlyMap<RiskId, Risk>): ResolvedUrlNotApplicable {
+/** Each `na=` value as the advisory it names, `name~url` (see `RiskId`). Whether a loaded graph carries it is the caller's to check. */
+export function resolveUrlNotApplicable(raw: readonly string[] | undefined): ResolvedUrlNotApplicable {
   const ids: RiskId[] = [];
-  const unmatched: string[] = [];
-  for (const value of raw) {
-    const named = advisoriesNamed(value, known);
-    if (named.length === 1) ids.push(named[0] as RiskId);
-    else unmatched.push(value);
+  const malformed: string[] = [];
+  for (const value of raw ?? []) {
+    const id = parseRiskId(value);
+    if (id) ids.push(id);
+    else malformed.push(value);
   }
-  return { ids, unmatched };
+  if (malformed.length === 0) return { ids };
+  const list = malformed.map((value) => `"${value}"`).join(', ');
+  return { ids, notice: `The link marked ${list} as not applicable without an advisory URL (name~url), so ${malformed.length === 1 ? 'it was' : 'they were'} dropped.` };
 }
 
-/** The notice for linked marks dropped because they name no single conditional risk. */
-export function droppedMarksNotice(dropped: readonly string[]): string | undefined {
+/** The notice for linked marks dropped because no loaded conditional risk is that advisory. */
+export function droppedMarksNotice(dropped: readonly RiskId[]): string | undefined {
   if (dropped.length === 0) return undefined;
   const list = dropped.map((value) => `"${value}"`).join(', ');
   const tail =
     dropped.length === 1
-      ? 'it names no single conditional risk on these channels, so the mark was dropped.'
-      : 'none of those names a single conditional risk on these channels, so the marks were dropped.';
+      ? 'no conditional risk on these channels has that name and URL, so the mark was dropped.'
+      : 'no conditional risk on these channels has those names and URLs, so the marks were dropped.';
   return `The link marked ${list} as not applicable, but ${tail}`;
 }
 

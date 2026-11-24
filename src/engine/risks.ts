@@ -3,24 +3,27 @@ import type { ConditionalEdgeGroup, Graph, Risk, Version } from '../graph/types'
 /**
  * One advisory: its `name` and `url` together, since Cincinnati can publish
  * two advisories under one name and has no separate identity field. The risk
- * summary dedupes by it and the operator marks it not applicable. Minted from
- * a parsed `Risk`, or from a link only after it matched one
- * (url/urlState.ts `resolveUrlNotApplicable`).
+ * summary dedupes by it, the operator marks it not applicable, and a
+ * permalink's `na=` carries it as is. Spelled `name~url` with `%` and `~` in
+ * the name escaped, so the first `~` always splits it and any URL is kept.
  */
 export type RiskId = string & { readonly __brand: 'RiskId' };
 
 export const NO_MARKS: ReadonlySet<RiskId> = new Set();
 
-// No advisory name or URL plausibly holds a NUL, so the join never merges two advisories.
-const ID_SEPARATOR = '\u0000';
+const ID_SEPARATOR = '~';
 
-export function riskIdOf(risk: Risk): RiskId {
-  return `${risk.name}${ID_SEPARATOR}${risk.url}` as RiskId;
+export function riskIdOf(risk: Pick<Risk, 'name' | 'url'>): RiskId {
+  const name = risk.name.replace(/[%~]/g, (c) => (c === '%' ? '%25' : '%7E'));
+  return `${name}${ID_SEPARATOR}${risk.url}` as RiskId;
 }
 
-/** `name url`: the advisory spelled out where its name alone is shared. */
-export function qualifiedRiskName(id: RiskId): string {
-  return id.replace(ID_SEPARATOR, ' ');
+/** The advisory a `name~url` value names, respelled canonically; `undefined` when it has no separator. */
+export function parseRiskId(value: string): RiskId | undefined {
+  const at = value.indexOf(ID_SEPARATOR);
+  if (at < 0) return undefined;
+  const name = value.slice(0, at).replace(/%(25|7E)/gi, (_, hex: string) => (hex === '25' ? '%' : '~'));
+  return riskIdOf({ name, url: value.slice(at + 1) });
 }
 
 /**

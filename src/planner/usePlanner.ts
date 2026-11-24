@@ -6,7 +6,6 @@ import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
 import {
   droppedMarksNotice,
-  encodeNotApplicable,
   parseUrlState,
   resolveUrlArch,
   resolveUrlNotApplicable,
@@ -152,6 +151,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const initialUrl = useMemo(() => parseUrlState(window.location.search), []);
   const initialArch = useMemo(() => resolveUrlArch(initialUrl.arch, DEFAULT_ARCH), [initialUrl.arch]);
   const initialRiskPolicy = useMemo(() => resolveUrlRiskPolicy(initialUrl.avoid), [initialUrl.avoid]);
+  const initialMarks = useMemo(() => resolveUrlNotApplicable(initialUrl.notApplicable), [initialUrl.notApplicable]);
 
   const [channel, setChannelState] = useState<string | undefined>(initialUrl.channel);
   const [arch, setArchState] = useState<Arch>(initialArch.arch);
@@ -160,7 +160,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const [stopsRaw, setStopsRaw] = useState<readonly string[]>(initialUrl.stops ?? []);
   const [riskPolicy, setRiskPolicy] = useState<RiskPolicy>(initialRiskPolicy.riskPolicy);
   // The link's marks wait here until a loaded channel vouches for each one.
-  const [linkedMarks, setLinkedMarks] = useState(initialUrl.notApplicable);
+  const [linkedMarks, setLinkedMarks] = useState(initialMarks.ids.length > 0 ? initialMarks.ids : undefined);
   const [notApplicable, setNotApplicable] = useState<ReadonlySet<RiskId>>(() => new Set());
   const [marksNotice, setMarksNotice] = useState<string>();
 
@@ -218,7 +218,8 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // slow look-ahead never holds one on an anchor route; only dropping an
   // unmatched one waits for every graph.
   if (linkedMarks && graph) {
-    const { ids, unmatched } = resolveUrlNotApplicable(linkedMarks, markable);
+    const ids = linkedMarks.filter((id) => markable.has(id));
+    const unmatched = linkedMarks.filter((id) => !markable.has(id));
     const settled = !lookaheadLoading;
     if (ids.length > 0) setNotApplicable((prev) => new Set([...prev, ...ids]));
     if (settled) setMarksNotice(droppedMarksNotice(unmatched));
@@ -333,6 +334,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     const list: string[] = [];
     if (initialArch.notice) list.push(initialArch.notice);
     if (initialRiskPolicy.notice) list.push(initialRiskPolicy.notice);
+    if (initialMarks.notice) list.push(initialMarks.notice);
     if (marksNotice) list.push(marksNotice);
     if (graph && startRaw && !resolvedStart) {
       list.push(`Start version "${startRaw}" from the link was not found in channel "${channel}" -- please reselect.`);
@@ -356,6 +358,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   }, [
     initialArch.notice,
     initialRiskPolicy.notice,
+    initialMarks.notice,
     marksNotice,
     graph,
     startRaw,
@@ -369,9 +372,9 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   // --- Permalink sync: replaceState only, never a new history entry (Q21) ---
   useEffect(() => {
-    const marks = [...new Set([...(linkedMarks ?? []), ...encodeNotApplicable(notApplicable, markable)])];
+    const marks = [...new Set([...(linkedMarks ?? []), ...notApplicable])];
     syncUrlState({ channel, arch, start: startRaw, target: targetRaw, stops: stopsRaw, riskPolicy, notApplicable: marks });
-  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy, linkedMarks, notApplicable, markable]);
+  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy, linkedMarks, notApplicable]);
 
   return {
     channel: {

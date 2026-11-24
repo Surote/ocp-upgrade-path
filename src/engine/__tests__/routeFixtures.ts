@@ -13,7 +13,7 @@ const riskUrl = (name: string) => `https://issues.example/${name}`;
 
 /** The advisory a `RiskSpec` named `name` parses to, as a mark names it. */
 export function fixtureRiskId(name: string): RiskId {
-  return riskIdOf({ name, url: riskUrl(name), message: name, matchingRules: [] });
+  return riskIdOf({ name, url: riskUrl(name) });
 }
 
 export interface RiskSpec {
