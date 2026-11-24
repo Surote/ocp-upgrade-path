@@ -722,7 +722,8 @@ script never contradicts the checkpoint. Workers unpause on the last 4.E+2 versi
 reaches over hops `eus-4.(E+2)` publishes from eus or stable (a later patch hop inside 4.E+2
 from fast or candidate runs as an ordinary update after the unpause). Then `oc get mcp`
 until every pool the operator paused reports `UPDATED=True` and `UPDATING=False`, before
-the route leaves that stream. The `oc` commands are Red Hat's
+the next update of any kind, a patch inside 4.E+2 included: the early unpause can leave a
+fast or candidate patch hop in the same minor while workers still catch up. The `oc` commands are Red Hat's
 verbatim. The doc link uses the leg's destination stream. The UI (`EusAdvisory`) shows one
 flat list, for example "Leg 1: 4.16 → 4.18 (pause workers before 4.17, unpause at 4.18)",
 labelled as guidance. Each checkpoint (pause, unpause, pool check) is its own block with its

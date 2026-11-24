@@ -261,7 +261,7 @@ export function legCheckpoints(leg: AvailableLeg): readonly LegCheckpoint[] {
     { kind: 'unpause', when: `Once the cluster reports ${leg.unpauseAt}`, commands: [UNPAUSE_WORKERS_COMMAND] },
     {
       kind: 'waitForPools',
-      when: `Before leaving ${formatStream(leg.to)}, wait until every pool you paused reports UPDATED=True and UPDATING=False`,
+      when: `Before the next update of any kind, including a patch update within ${formatStream(leg.to)}, wait until every pool you paused reports UPDATED=True and UPDATING=False`,
       commands: ['oc get mcp'],
     },
   ];
