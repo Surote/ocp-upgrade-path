@@ -6,17 +6,20 @@ import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
 import { parseUrlState, resolveUrlArch, syncUrlState } from '../url/urlState';
 import type { AsyncResult } from './useAsyncResult';
-import { buildLookaheadTargetOptions, type LookaheadTargetOption, useLookaheadSegments } from './lookaheadTargets';
-import { buildStartOptions, buildTargetOptions, type TargetOption } from './targetOptions';
+import { groupByStream, type StreamGroup } from './groupByStream';
+import { type LookaheadSegment, useLookaheadSegments } from './lookaheadTargets';
+import { channelStream } from './sortChannels';
+import { buildStartOptions, buildTargetOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
 import { useGraphForSelection } from './useGraphForSelection';
 import { usePathSearch } from './usePathSearch';
 
 const DEFAULT_ARCH: Arch = 'amd64';
+const NO_SEGMENTS: readonly LookaheadSegment[] = [];
 
 export interface ChannelFieldViewModel {
   readonly value: string;
-  readonly options: readonly string[];
+  readonly groups: readonly StreamGroup<string>[];
   readonly loading: boolean;
   readonly error?: string;
   readonly onChange: (channel: string) => void;
@@ -31,7 +34,7 @@ export interface ArchFieldViewModel {
 
 export interface StartFieldViewModel {
   readonly value: string;
-  readonly options: readonly Version[];
+  readonly groups: readonly StreamGroup<Version>[];
   readonly loading: boolean;
   readonly disabled: boolean;
   readonly error?: string;
@@ -41,18 +44,13 @@ export interface StartFieldViewModel {
 
 export interface TargetFieldViewModel {
   readonly value: string;
-  readonly options: readonly TargetOption[];
   /**
-   * Targets beyond the selected (anchor) channel's own graph -- plan.md §6
-   * "Look-ahead targets (bidirectional stitching)": selecting `eus-4.20`
-   * must still offer `4.22.9`. Each carries the real channel it was found
-   * in (`viaChannel`) and whether that channel is a different class than
-   * the anchor's (`classFallback`), so the UI can mark them
-   * as "requires a channel change" before the user chooses one, per
-   * requirement 4/5 -- never silently mixed into `options` above.
+   * Newer-than-start targets from the selected channel and the look-ahead
+   * channels beyond it (plan.md §6: selecting `eus-4.20` must still offer
+   * `4.22.9`), merged newest first. A look-ahead target carries `via`.
    */
-  readonly lookaheadOptions: readonly LookaheadTargetOption[];
-  /** True while look-ahead channels are still being discovered/fetched -- lets the UI show a distinct "still looking further ahead" state without blocking the in-channel `options` above. */
+  readonly groups: readonly StreamGroup<TargetOption>[];
+  /** True while look-ahead channels are still being fetched; in-channel targets are already listed. */
   readonly lookaheadLoading: boolean;
   readonly disabled: boolean;
   readonly onChange: (version: string) => void;
@@ -129,9 +127,9 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // Look-ahead target discovery (plan.md §6): fetched lazily, keyed on
   // (channel, arch) alone -- it doesn't need `start` to discover *which*
   // channels exist beyond the anchor, only to later decide which of their
-  // versions are reachable (buildLookaheadTargetOptions below).
+  // versions are reachable (buildTargetOptions below).
   const lookahead = useLookaheadSegments(client, channel, arch);
-  const lookaheadSegments = lookahead.status === 'success' ? lookahead.value : [];
+  const lookaheadSegments = lookahead.status === 'success' ? lookahead.value : NO_SEGMENTS;
   const lookaheadLoading = lookahead.status === 'loading';
 
   const resolvedStart = useMemo(() => (graph && startRaw ? resolveVersion(graph, startRaw) : undefined), [graph, startRaw]);
@@ -154,15 +152,14 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   const startOptions = useMemo(() => (graph ? buildStartOptions(graph) : []), [graph]);
   const targetOptions = useMemo(
-    () => (graph && resolvedStart ? buildTargetOptions(graph, resolvedStart) : []),
-    [graph, resolvedStart],
-  );
-  const lookaheadOptions = useMemo(
-    () => (graph && resolvedStart ? buildLookaheadTargetOptions(graph, resolvedStart, lookaheadSegments) : []),
+    () => (graph && resolvedStart ? buildTargetOptions(graph, resolvedStart, lookaheadSegments) : []),
     [graph, resolvedStart, lookaheadSegments],
   );
 
-  const pathResult = usePathSearch(client, { channel, arch, start: resolvedStart, target: resolvedTarget });
+  // Only a listed (newer-than-start) target is searched, so a permalink whose
+  // target is not newer gets the notice below and no route alongside it.
+  const targetOption = targetOptions.find((o) => o.version === resolvedTarget);
+  const pathResult = usePathSearch(client, { channel, arch, start: resolvedStart, target: targetOption?.version });
 
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
   const setChannel = useCallback((next: string) => {
@@ -196,11 +193,11 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     if (graph && targetRaw && resolvedStart && !resolvedTarget && !lookaheadLoading) {
       list.push(`Target version "${targetRaw}" from the link was not found in channel "${channel}" -- please reselect.`);
     }
-    if (resolvedTarget) {
-      const opt =
-        targetOptions.find((o) => o.version === resolvedTarget) ?? lookaheadOptions.find((o) => o.version === resolvedTarget);
-      if (opt?.disabled) {
-        list.push(`Target version "${resolvedTarget}" from the link is ${opt.reason} -- please choose a different target.`);
+    if (resolvedTarget && resolvedStart) {
+      if (!targetOption) {
+        list.push(`Target version "${resolvedTarget}" from the link is not newer than the start version -- please choose a different target.`);
+      } else if (!targetOption.reachable) {
+        list.push(`Target version "${resolvedTarget}" from the link is not reachable from the start version -- please choose a different target.`);
       }
     }
     return list;
@@ -212,8 +209,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     targetRaw,
     resolvedTarget,
     channel,
-    targetOptions,
-    lookaheadOptions,
+    targetOption,
     lookaheadLoading,
   ]);
 
@@ -225,7 +221,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   return {
     channel: {
       value: channel ?? '',
-      options: channelCatalog.channels,
+      groups: groupByStream(channelCatalog.channels, channelStream),
       loading: channelCatalog.loading,
       error: channelCatalog.error,
       onChange: setChannel,
@@ -234,7 +230,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     arch: { value: arch, options: ARCHES, onChange: setArch },
     start: {
       value: startRaw,
-      options: startOptions,
+      groups: groupByStream(startOptions, versionStream),
       loading: graphState.status === 'loading',
       disabled: !channel,
       error:
@@ -246,8 +242,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     },
     target: {
       value: targetRaw,
-      options: targetOptions,
-      lookaheadOptions,
+      groups: groupByStream(targetOptions, (o) => versionStream(o.version)),
       lookaheadLoading,
       disabled: !resolvedStart,
       onChange: setTarget,
