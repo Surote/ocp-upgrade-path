@@ -54,5 +54,5 @@ export function LowerRiskRoute({
 
 function lowerRiskTitle(route: Path, conditionalFree: boolean): string {
   if (!conditionalFree) return 'A lower-risk route exists';
-  return hasConditionalRisk(route, NO_MARKS) ? 'A route with no conditional risks besides the ones you marked exists' : 'A route with no conditional risks exists';
+  return hasConditionalRisk(route, NO_MARKS) ? 'A route with no unmarked conditional risks exists' : 'A route with no conditional risks exists';
 }
