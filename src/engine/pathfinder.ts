@@ -371,57 +371,6 @@ export function shortestPathsFrom(graph: Graph, start: Version): ReadonlyMap<Ver
   return paths;
 }
 
-/** A route found by `extendRoutesInGraph`: the seed it starts from, its total cost, and the hops walked in this graph. */
-export interface ExtendedRoute<C> {
-  readonly seed: Version;
-  readonly cost: C;
-  readonly hops: readonly PathHop[];
-}
-
-/**
- * Extends routes that already reach some of `graph`'s versions (`seeds`,
- * each with the cost accumulated so far) through `graph`'s own edges, in one
- * multi-source search: the cheapest extension to every reachable version,
- * whichever seed it starts from. A seed nothing cheaper reaches maps to
- * itself with no hops. `step` adds one hop to a cost; it must strictly
- * increase the cost under `compare`.
- */
-export function extendRoutesInGraph<C>(
-  graph: Graph,
-  seeds: ReadonlyMap<Version, C>,
-  step: (cost: C, hop: { readonly riskWeight: number; readonly toPatch: number }) => C,
-  compare: (a: C, b: C) => number,
-): ReadonlyMap<Version, ExtendedRoute<C>> {
-  const versions = graph.nodes.map((n) => n.version);
-  const indexOf = new Map(versions.map((ver, i) => [ver, i as NodeIndex] as const));
-  const sources: (readonly [NodeIndex, C])[] = [];
-  for (const [ver, cost] of seeds) {
-    const idx = indexOf.get(ver);
-    if (idx !== undefined) sources.push([idx, cost]);
-  }
-
-  const riskIndex = new RiskIndex(graph.conditionalEdges);
-  const edgeCost = makeEdgeCost(riskIndex, versions, 'forward');
-  const { forward } = buildAdjacency(graph);
-  const { dist, pred } = dijkstra(versions.length, forward, sources, (cost, u, v) => step(cost, edgeCost(u, v)), compare);
-
-  const routes = new Map<Version, ExtendedRoute<C>>();
-  dist.forEach((cost, i) => {
-    if (cost === undefined) return;
-    const chain: NodeIndex[] = [i as NodeIndex];
-    for (let p = pred[i]; p !== undefined; p = pred[p]) chain.push(p);
-    chain.reverse();
-    const hops: PathHop[] = [];
-    for (let k = 0; k + 1 < chain.length; k += 1) {
-      const from = versions[chain[k] as NodeIndex] as Version;
-      const to = versions[chain[k + 1] as NodeIndex] as Version;
-      hops.push({ from, to, risks: riskIndex.risksFor(from, to) });
-    }
-    routes.set(versions[i] as Version, { seed: versions[chain[0] as NodeIndex] as Version, cost, hops });
-  });
-  return routes;
-}
-
 /**
  * Finds the recommended upgrade path from `start` to `target` within a single
  * `Graph`, plus up to two waypoint alternates, per plan.md §4. Pure: no

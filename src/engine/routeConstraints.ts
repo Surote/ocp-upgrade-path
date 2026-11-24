@@ -1,6 +1,8 @@
 import type { Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
+import { buildRoutingModel, forEachEdge, reachBackward, reachForward, type RoutingModel } from './routeSearch';
 import type { Path } from './types';
+import { compareVersions } from './version';
 
 /**
  * How the route search ranks candidate routes once support posture (anchor
@@ -43,18 +45,62 @@ export interface StopOption {
 }
 
 /**
- * Versions the operator may pin at stop index `gap` (0 = between start and
- * the first stop), given every other stop: each offered version is reachable
- * from start through the stops before it and can still reach target through
- * the stops after it, on the same segments the route search uses. Newest
- * first. Contract stub; the engine track implements it.
+ * Versions the operator may pin at position `gap` among `stops` (0 = between
+ * start and the first stop; `stops.length` = between the last stop and the
+ * target). `stops` holds every other stop, without the one being edited.
+ * Each offered version is reachable from start through the stops before it
+ * and can still reach target through the stops after it, on the segments and
+ * transitions the route search uses, so pinning it always routes. Newest
+ * first.
+ *
+ * `segments` is the anchor followed by its look-ahead, as the planner hands
+ * them to `buildTargetOptions`. When the anchor holds the target the
+ * stitcher routes on the anchor alone, and so does this.
+ *
+ * Two unweighted passes, not a search per candidate: forward from start, and
+ * backward from target. A route may never return to an earlier stream's
+ * channel, so a version counts only when the earliest group a route reaches
+ * it in is no later than the latest group a route onward can start in.
  */
 export function buildStopOptions(
-  _segments: readonly ChannelSegment[],
-  _start: Version,
-  _target: Version,
-  _stops: readonly Version[],
-  _gap: number,
+  segments: readonly ChannelSegment[],
+  start: Version,
+  target: Version,
+  stops: readonly Version[],
+  gap: number,
 ): readonly StopOption[] {
-  return [];
+  const anchor = segments[0];
+  const routed = anchor && anchor.graph.nodes.some((node) => node.version === target) ? [anchor] : segments;
+  const model = buildRoutingModel(routed);
+  const before = stops.slice(0, gap);
+  const forward = reachForward(model, start, before);
+  const backward = reachBackward(model, target, stops.slice(gap));
+  const excluded = new Set([start, target, ...stops]);
+
+  const options: StopOption[] = [];
+  for (const [version, earliest] of forward) {
+    const latest = backward.get(version);
+    if (excluded.has(version) || latest === undefined || earliest > latest) continue;
+    options.push({ version, channel: arrivingChannel(model, forward, version, latest) });
+  }
+  return options.sort((a, b) => compareVersions(b.version, a.version) || (a.version < b.version ? 1 : -1));
+}
+
+/**
+ * The segment a route arrives at `version` on, among hops a route past the
+ * earlier stops can take and still go on: the anchor's class first, then the
+ * least drastic fallback, then the earliest group. That is the order the
+ * recommended route ranks by, short of a full search per version.
+ */
+function arrivingChannel(model: RoutingModel, forward: ReadonlyMap<Version, number>, version: Version, latest: number): string {
+  let best: { readonly tier: number; readonly segment: number } | undefined;
+  for (let group = 0; group <= latest; group += 1) {
+    forEachEdge(model, model.groups[group] as readonly number[], 'in', version, ({ from }, segment) => {
+      const reachedIn = forward.get(from);
+      if (reachedIn === undefined || reachedIn > group) return;
+      const tier = model.tiers[segment] as number;
+      if (!best || tier < best.tier) best = { tier, segment };
+    });
+  }
+  return (model.segments[(best as { segment: number }).segment] as ChannelSegment).channel;
 }

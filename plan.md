@@ -289,7 +289,7 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > channel is named that it has not tried (safety cap 48 fetches). A preferred channel
 > named only by a later graph (fast-5.0's releases name stable-5.0) is fetched too, beside
 > the fallback that reached its stream. Both also read reachability from
-> `routeAcrossSegments` (engine/stitch.ts), a layered shortest-path DP over the anchor
+> `routeAcrossSegments` (engine/routeSearch.ts), a layered shortest-path DP over the anchor
 > plus every look-ahead segment. Its frontier carries across segments, so a segment can
 > contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
 > though `stable-4.21` sits between them in the list. An option marked reachable is
@@ -301,6 +301,48 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > show, not a separate fetch of it, keyed on that graph's fetch time. The path search then
 > routes against that same anchor graph and discovery instead of refetching and
 > rediscovering. A manual refresh therefore rebuilds the options and the route together.
+
+### Stops and risk policy
+
+An operator can pin **stops**, versions the route must pass through in order, and pick a
+**risk policy** (`RouteConstraints`, engine/routeConstraints.ts).
+
+**Stops narrow one search; they do not split it into legs.** The route search
+(engine/routeSearch.ts) tracks how many stops a route has passed, alongside the version.
+Arriving at the next stop advances that count and keeps the incoming channel. The next hop
+switches channel only if another segment supplies it, so the channel-switch rule above
+holds across a stop exactly as it does elsewhere. Concatenating per-leg searches would
+lose this: the cheapest arrival at a stop can be on a later channel than an arrival that
+can still reach the target. A stop that no route honors is reported as `stopUnreachable`
+with its position. A target that is unreachable without stops is still `unreachable`.
+
+**Channels of one stream form a group.** Segments stay in stream order, and a route never
+returns to an earlier stream's channel. Within one stream it moves freely. A route can
+enter 5.0 on `fast-5.0`, take a hop only `stable-5.0` publishes, and return to `fast-5.0`
+for the next hop. Each hop still runs on the segment that supplied its edge.
+
+**`avoidConditional` ranks risk before length, never before posture.** The order is
+support posture, then `Always` risk occurrences, then conditional ones, then hops, then
+the patch tie-break. Occurrences are counted per hop, so a risk on two hops counts twice,
+and they are deduplicated only for display. The policy never makes a fallback class
+eligible to dodge a risk. Under the default `recommended` policy the result also carries
+`riskComparison`, the `avoidConditional` route under the same stops when it has fewer
+occurrences, and whether the lowest-risk route is free of conditional risk. Single-graph
+waypoint alternates honor neither stops nor the policy, so they are offered only with no
+stops under `recommended`.
+
+**The stop dropdown offers only stops that route.** `buildStopOptions` makes two
+unweighted passes over the same transitions as the search: forward from the start through
+the stops before the gap, and backward from the target through the stops after it. A
+version qualifies when the earliest stream group a route reaches it in is no later than
+the latest group a route onward can start in. On the Nov 2026 `eus-4.18` snapshot,
+`4.16.33 → 5.0.1` offers 309 stops at the first gap. Pinning each of the 390 versions in
+turn routes for exactly those 309.
+
+On that snapshot no route to 5.0.1 is free of conditional risk.
+`VSphereConfigCloudControllerCrash` sits on every route's 4.19→4.20, 4.20→4.21 or
+4.21→4.22 crossing. Stops move where it lands, and `riskComparison` reports that no
+conditional-free route exists.
 
 ### Major-version boundaries (4.22 → 5.0)
 
