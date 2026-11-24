@@ -103,6 +103,43 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
     ]);
   });
 
+  it('never switches early onto a channel that does not publish the hops moved onto it', async () => {
+    // stable-4.22 lists 4.20.1 and 4.21.1 but publishes only 4.21.1 -> 4.22.1,
+    // so 4.20.1 -> 4.21.1 has to be taken on stable-4.21 first.
+    const stable420 = rawGraph(['4.19.9', '4.20.1'], [[0, 1]], 'S420', ['stable-4.20', 'stable-4.21', 'stable-4.22']);
+    const stable421 = rawGraph(['4.20.1', '4.21.1'], [[0, 1]], 'S421', ['stable-4.21', 'stable-4.22']);
+    const stable422 = rawGraph(['4.20.1', '4.21.1', '4.22.1'], [[1, 2]], 'S422', ['stable-4.22']);
+    const graphs = new Map([
+      ['stable-4.20', stable420],
+      ['stable-4.21', stable421],
+      ['stable-4.22', stable422],
+    ]);
+    const loader: GraphLoader = async (channel) => {
+      const graph = graphs.get(channel);
+      return graph ? ok(graph) : err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const stitched = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.20',
+      arch: 'amd64',
+      start: v('4.20.1'),
+      target: v('4.22.1'),
+    });
+    expect(stitched.ok).toBe(true);
+    if (!stitched.ok) return;
+
+    const commands = buildHopCommands(stitched.value.primary, 'stable-4.20', stitched.value.nodeInfo, {
+      channelNames: [],
+      multiGraph: stitched.value.stitch.multiGraph,
+    });
+    expect(buildScript(commands).split('\n')).toEqual([
+      'oc adm upgrade channel stable-4.21  # destination isn\'t on the current channel',
+      'oc adm upgrade --to 4.21.1',
+      'oc adm upgrade channel stable-4.22  # destination isn\'t on the current channel',
+      'oc adm upgrade --to 4.22.1',
+    ]);
+  });
+
   it('?channel=stable-4.20&arch=amd64&start=4.18.2&target=4.20.32 regression: zero switch commands, 3 hops', async () => {
     const stable420 = rawGraph(['4.18.2', '4.18.50', '4.19.40', '4.20.32'], [[0, 1], [1, 2], [2, 3]], 'STABLE420');
     const loader: GraphLoader = async (channel) => {
