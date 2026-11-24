@@ -60,9 +60,9 @@ export async function discoverLookahead(
   arch: Arch,
 ): Promise<LookaheadDiscovery> {
   const anchor = parseChannelName(anchorChannel);
-  const segments: ChannelSegment[] = [];
+  const found: { readonly stream: Stream; readonly segment: ChannelSegment }[] = [];
   const channelsTried: string[] = [];
-  if (!anchor) return { segments, channelsTried };
+  if (!anchor) return { segments: [], channelsTried };
 
   const attested = new Set(anchorGraph.channelNames);
   const visitedStreams = new Set<string>([formatStream(anchor)]);
@@ -84,12 +84,15 @@ export async function discoverLookahead(
         break;
       }
       const classFallback = parseChannelName(channel)?.cls !== anchor.cls;
-      segments.push({ channel, graph: result.value, classFallback, requestedClass: classFallback ? anchor.cls : undefined });
+      found.push({ stream, segment: { channel, graph: result.value, classFallback, requestedClass: classFallback ? anchor.cls : undefined } });
       for (const name of result.value.channelNames) attested.add(name);
       break;
     }
   }
-  return { segments, channelsTried, failure };
+  // A fetched graph can name a stream older than one already fetched (only
+  // 5.1 names 4.23), and routeAcrossSegments visits each segment once.
+  found.sort((a, b) => compareStreams(a.stream, b.stream));
+  return { segments: found.map((f) => f.segment), channelsTried, failure };
 }
 
 function lowestNewerStream(channelNames: ReadonlySet<string>, than: Stream, exclude: ReadonlySet<string>): Stream | undefined {
