@@ -10,12 +10,18 @@ function v(s: string): Version {
   return s as Version;
 }
 
+interface RawConditionalEdges {
+  readonly edges: readonly { readonly from: string; readonly to: string }[];
+  readonly risks: readonly { readonly url: string; readonly name: string; readonly message: string; readonly matchingRules: readonly { readonly type: 'Always' }[] }[];
+}
+
 /** `channels` is the membership every node advertises; forward discovery follows it. */
 function rawGraph(
   nodeVersions: readonly string[],
   edges: ReadonlyArray<readonly [number, number]>,
   payloadTag: string,
   channels: readonly string[] = [],
+  conditionalEdges: readonly RawConditionalEdges[] = [],
 ): Graph {
   const raw = {
     version: 1,
@@ -28,7 +34,7 @@ function rawGraph(
       },
     })),
     edges: edges.map(([a, b]) => [a, b]),
-    conditionalEdges: [],
+    conditionalEdges,
   };
   const result = parseRawGraph(raw, { channel: 'test', arch: 'amd64' });
   if (!result.ok) throw new Error(`rawGraph: ${JSON.stringify(result.error)}`);
@@ -137,6 +143,49 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
       'oc adm upgrade --to 4.21.1',
       'oc adm upgrade channel stable-4.22  # destination isn\'t on the current channel',
       'oc adm upgrade --to 4.22.1',
+    ]);
+  });
+
+  it('shows each hop with exactly the risks the channel in effect attaches to that edge', async () => {
+    // stable-4.21 publishes 4.20.0 -> 4.21.0 unconditionally; eus-4.22 publishes
+    // the same edge only as a conditional update with an Always risk.
+    const alwaysRisk = { url: 'https://issues.redhat.com/browse/OCPBUGS-1', name: 'EusOnlyRisk', message: 'Breaks every cluster.', matchingRules: [{ type: 'Always' as const }] };
+    const graphs = new Map([
+      ['eus-4.20', rawGraph(['4.19.0', '4.20.0'], [[0, 1]], 'E420', ['eus-4.20', 'stable-4.21', 'eus-4.22'])],
+      ['stable-4.21', rawGraph(['4.20.0', '4.21.0'], [[0, 1]], 'S421')],
+      [
+        'eus-4.22',
+        rawGraph(['4.20.0', '4.21.0', '4.22.0'], [[1, 2]], 'E422', [], [{ edges: [{ from: '4.20.0', to: '4.21.0' }], risks: [alwaysRisk] }]),
+      ],
+    ]);
+    const loader: GraphLoader = async (channel) => {
+      const graph = graphs.get(channel);
+      return graph ? ok(graph) : err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const stitched = await stitchAndFindPath(loader, { targetChannel: 'eus-4.20', arch: 'amd64', start: v('4.19.0'), target: v('4.22.0') });
+    expect(stitched.ok).toBe(true);
+    if (!stitched.ok) return;
+    const { primary } = stitched.value;
+    const commands = buildHopCommands(primary, 'eus-4.20', stitched.value.nodeInfo, { channelNames: [], multiGraph: true });
+
+    let channel = 'eus-4.20';
+    const shownVsInEffect = commands.map((command, i) => {
+      channel = command.channelSwitchTo ?? channel;
+      const graph = graphs.get(channel) as Graph;
+      const attached = graph.conditionalEdges
+        .filter((group) => group.edges.some((e) => e.from === command.from && e.to === command.to))
+        .flatMap((group) => group.risks.map((r) => r.name));
+      return { hop: `${command.from} -> ${command.to} on ${channel}`, shown: primary.hops[i]?.risks.map((r) => r.name), attached };
+    });
+    for (const { hop, shown, attached } of shownVsInEffect) expect({ hop, shown }).toEqual({ hop, shown: attached });
+
+    expect(buildScript(commands).split('\n')).toEqual([
+      'oc adm upgrade --to 4.20.0',
+      'oc adm upgrade channel stable-4.21  # destination isn\'t on the current channel',
+      'oc adm upgrade --to 4.21.0',
+      'oc adm upgrade channel eus-4.22  # destination isn\'t on the current channel',
+      'oc adm upgrade --to 4.22.0',
     ]);
   });
 
