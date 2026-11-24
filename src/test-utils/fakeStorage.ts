@@ -75,33 +75,28 @@ export class ThrowingWriteStorage implements Storage {
   }
 }
 
-/** A `Storage` whose `setItem` throws QuotaExceededError exactly once (its
- * first call), then behaves like a normal in-memory store -- simulates quota
- * being freed by the cache's purge-and-retry backstop. */
-export class QuotaOnceThenOkStorage implements Storage {
-  private readonly map = new Map<string, string>();
-  private setItemCalls = 0;
+/** A `FakeStorage` that throws QuotaExceededError once its keys and values would pass `capacity` characters, as browsers do. */
+export class CapacityStorage extends FakeStorage {
+  private readonly capacity: number;
 
-  get length(): number {
-    return this.map.size;
+  constructor(capacity: number) {
+    super();
+    this.capacity = capacity;
   }
-  clear(): void {
-    this.map.clear();
-  }
-  getItem(key: string): string | null {
-    return this.map.has(key) ? (this.map.get(key) as string) : null;
-  }
-  key(index: number): string | null {
-    return Array.from(this.map.keys())[index] ?? null;
-  }
-  removeItem(key: string): void {
-    this.map.delete(key);
-  }
-  setItem(key: string, value: string): void {
-    this.setItemCalls += 1;
-    if (this.setItemCalls === 1) {
-      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+
+  usedChars(): number {
+    let used = 0;
+    for (let i = 0; i < this.length; i += 1) {
+      const key = this.key(i) as string;
+      used += key.length + (this.getItem(key) as string).length;
     }
-    this.map.set(key, value);
+    return used;
+  }
+
+  override setItem(key: string, value: string): void {
+    const previous = this.getItem(key);
+    const growth = key.length + value.length - (previous == null ? 0 : key.length + previous.length);
+    if (this.usedChars() + growth > this.capacity) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    super.setItem(key, value);
   }
 }
