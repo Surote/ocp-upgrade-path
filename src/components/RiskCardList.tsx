@@ -1,5 +1,6 @@
 import { groupRisksByClass } from '../design/riskDisplay';
 import type { Risk } from '../graph/types';
+import type { RiskApplicabilityViewModel } from '../planner/usePlanner';
 import { RiskCard } from './RiskCard';
 
 /**
@@ -7,7 +8,15 @@ import { RiskCard } from './RiskCard';
  * with a "deliberately clean" state when there are none -- a hop or path
  * with zero risk must read as verified-clean, not as an empty void.
  */
-export function RiskCardList({ risks, cleanLabel }: { readonly risks: readonly Risk[]; readonly cleanLabel: string }) {
+export function RiskCardList({
+  risks,
+  cleanLabel,
+  applicability,
+}: {
+  readonly risks: readonly Risk[];
+  readonly cleanLabel: string;
+  readonly applicability: RiskApplicabilityViewModel;
+}) {
   if (risks.length === 0) {
     return (
       <p className="risk-clean">
@@ -23,11 +32,8 @@ export function RiskCardList({ risks, cleanLabel }: { readonly risks: readonly R
 
   return (
     <ul className="risk-card-list">
-      {always.map((risk) => (
-        <RiskCard key={`${risk.name}|${risk.url}`} risk={risk} />
-      ))}
-      {conditional.map((risk) => (
-        <RiskCard key={`${risk.name}|${risk.url}`} risk={risk} />
+      {[...always, ...conditional].map((risk) => (
+        <RiskCard key={`${risk.name}|${risk.url}`} risk={risk} applicability={applicability} />
       ))}
     </ul>
   );

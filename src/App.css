@@ -653,6 +653,27 @@ main {
   width: 100%;
 }
 
+.risk-card__mark {
+  margin-top: 2px;
+  font-size: 0.85rem;
+}
+
+/* A marked card stays in place; only its weight drops, so the advisory is never hidden. */
+.risk-card--marked {
+  border-left-style: dashed;
+}
+
+.risk-card--marked .risk-card__name,
+.risk-card--marked .risk-card__message {
+  color: var(--text-muted);
+}
+
+.risk-card__marked-note {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
 .risk-card__promql summary {
   cursor: pointer;
   color: var(--accent);

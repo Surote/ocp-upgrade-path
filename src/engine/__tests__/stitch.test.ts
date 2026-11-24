@@ -624,7 +624,7 @@ describe('node metadata follows hop provenance', () => {
       arch: 'amd64',
       start: v('4.22.20'),
       target: v('5.0.1'),
-      constraints: { stops: [v('5.0.0+b')], riskPolicy: 'recommended' },
+      constraints: { stops: [v('5.0.0+b')], riskPolicy: 'recommended', notApplicable: new Set() },
     });
 
     if (!result.ok) throw new Error(result.error.kind);

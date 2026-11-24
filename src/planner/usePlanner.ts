@@ -4,12 +4,13 @@ import type { GraphClient } from '../graph/client';
 import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
-import { parseUrlState, resolveUrlArch, resolveUrlRiskPolicy, syncUrlState } from '../url/urlState';
+import { parseUrlState, resolveUrlArch, resolveUrlNotApplicable, resolveUrlRiskPolicy, syncUrlState } from '../url/urlState';
 import type { RiskPolicy, RouteConstraints, StopOption } from '../engine/routeConstraints';
 import { checkStops, stopReleases } from './stopFields';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
+import { conditionalRiskNames, type RiskName } from '../engine/risks';
 import { useLookahead } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
@@ -78,6 +79,15 @@ export interface RouteConstraintsViewModel {
   readonly onRiskPolicyChange: (policy: RiskPolicy) => void;
 }
 
+/**
+ * The conditional risks the operator marked as not applying to their
+ * cluster, shared by every risk card that offers the mark.
+ */
+export interface RiskApplicabilityViewModel {
+  readonly notApplicable: ReadonlySet<RiskName>;
+  readonly onChange: (name: RiskName, notApplicable: boolean) => void;
+}
+
 /** Why no route is searched although start and target are set. */
 export type RouteHold = 'checkingStops' | 'invalidStops';
 
@@ -92,6 +102,7 @@ export interface PlannerViewModel {
   readonly start: StartFieldViewModel;
   readonly target: TargetFieldViewModel;
   readonly constraints: RouteConstraintsViewModel;
+  readonly riskApplicability: RiskApplicabilityViewModel;
   /** The stops the route search was asked to honor, for marking on the map. */
   readonly pinnedStops: readonly Version[];
   readonly routeHold?: RouteHold;
@@ -140,6 +151,10 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const [targetRaw, setTargetRaw] = useState(initialUrl.target ?? '');
   const [stopsRaw, setStopsRaw] = useState<readonly string[]>(initialUrl.stops ?? []);
   const [riskPolicy, setRiskPolicy] = useState<RiskPolicy>(initialRiskPolicy.riskPolicy);
+  // The link's marks wait here until the loaded channels can vouch for each name.
+  const [linkedMarks, setLinkedMarks] = useState(initialUrl.notApplicable);
+  const [notApplicable, setNotApplicable] = useState<ReadonlySet<RiskName>>(() => new Set());
+  const [marksNotice, setMarksNotice] = useState<string>();
 
   const channelCatalog = useChannelCatalog(client);
   const graphState = useGraphForSelection(client, channel, arch);
@@ -187,6 +202,25 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     return undefined;
   }, [graph, targetRaw, lookaheadSegments]);
 
+  const knownRiskNames = useMemo(
+    () => (graph && !lookaheadLoading ? conditionalRiskNames([graph, ...lookaheadSegments.map((s) => s.graph)]) : undefined),
+    [graph, lookaheadLoading, lookaheadSegments],
+  );
+  if (linkedMarks && knownRiskNames) {
+    const resolved = resolveUrlNotApplicable(linkedMarks, knownRiskNames);
+    setLinkedMarks(undefined);
+    setNotApplicable((prev) => new Set([...prev, ...resolved.names]));
+    setMarksNotice(resolved.notice);
+  }
+  const markNotApplicable = useCallback((name: RiskName, marked: boolean) => {
+    setNotApplicable((prev) => {
+      const next = new Set(prev);
+      if (marked) next.add(name);
+      else next.delete(name);
+      return next;
+    });
+  }, []);
+
   const startOptions = useMemo(() => (graph ? buildStartOptions(graph) : []), [graph]);
   const targetOptions = useMemo(
     () => (graph && resolvedStart ? buildTargetOptions(graph, resolvedStart, lookaheadSegments) : []),
@@ -228,14 +262,17 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     () => stopRows.flatMap((r) => (r.check.kind === 'valid' ? [r.check.version] : [])),
     [stopRows],
   );
-  const routeConstraints = useMemo<RouteConstraints>(() => ({ stops: pinnedStops, riskPolicy }), [pinnedStops, riskPolicy]);
+  const routeConstraints = useMemo<RouteConstraints>(
+    () => ({ stops: pinnedStops, riskPolicy, notApplicable }),
+    [pinnedStops, riskPolicy, notApplicable],
+  );
   // Selection and stop checks read `targetOptions`; only the labels follow the
   // constraints, since the stops are themselves checked against the target.
   // Labels use every stop that names a release, not just those the current
   // target honors, so each option names the route it gets once chosen.
   const labelConstraints = useMemo<RouteConstraints>(
-    () => ({ stops: stopReleases(stopsRaw, allSegments), riskPolicy }),
-    [stopsRaw, allSegments, riskPolicy],
+    () => ({ stops: stopReleases(stopsRaw, allSegments), riskPolicy, notApplicable }),
+    [stopsRaw, allSegments, riskPolicy, notApplicable],
   );
   const shownTargetOptions = useMemo(() => {
     const constrained = labelConstraints.stops.length > 0 || labelConstraints.riskPolicy !== 'recommended';
@@ -284,6 +321,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     const list: string[] = [];
     if (initialArch.notice) list.push(initialArch.notice);
     if (initialRiskPolicy.notice) list.push(initialRiskPolicy.notice);
+    if (marksNotice) list.push(marksNotice);
     if (graph && startRaw && !resolvedStart) {
       list.push(`Start version "${startRaw}" from the link was not found in channel "${channel}" -- please reselect.`);
     }
@@ -306,6 +344,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   }, [
     initialArch.notice,
     initialRiskPolicy.notice,
+    marksNotice,
     graph,
     startRaw,
     resolvedStart,
@@ -318,8 +357,9 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   // --- Permalink sync: replaceState only, never a new history entry (Q21) ---
   useEffect(() => {
-    syncUrlState({ channel, arch, start: startRaw, target: targetRaw, stops: stopsRaw, riskPolicy });
-  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy]);
+    const marks = [...new Set([...(linkedMarks ?? []), ...notApplicable])];
+    syncUrlState({ channel, arch, start: startRaw, target: targetRaw, stops: stopsRaw, riskPolicy, notApplicable: marks });
+  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy, linkedMarks, notApplicable]);
 
   return {
     channel: {
@@ -363,6 +403,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
       riskPolicy,
       onRiskPolicyChange: setRiskPolicy,
     },
+    riskApplicability: { notApplicable, onChange: markNotApplicable },
     pinnedStops,
     routeHold,
     freshness:

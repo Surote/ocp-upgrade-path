@@ -55,6 +55,7 @@ function App({ graphClient }: AppProps = {}) {
           channelNames={planner.channelNames}
           routeHold={planner.routeHold}
           pinnedStops={planner.pinnedStops}
+          riskApplicability={planner.riskApplicability}
           onUseLowerRisk={() => planner.constraints.onRiskPolicyChange('avoidConditional')}
         />
       </section>

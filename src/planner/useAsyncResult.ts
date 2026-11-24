@@ -22,6 +22,10 @@ export type AsyncResult<T, E> = AsyncState<T, E> & {
  * and an explicit string key is easier to audit for "did this actually
  * change" than trusting object identity across renders.
  *
+ * `refineKey` names inputs that only refine an answer already on screen. When
+ * it alone changes, the current success stays shown until the new run lands,
+ * instead of dropping back to `loading`.
+ *
  * Guards against stale responses two ways, per plan.md §6 ("a stale
  * response must never overwrite a newer selection"):
  *
@@ -40,15 +44,19 @@ export function useAsyncResult<T, E>(
   active: boolean,
   depsKey: string,
   task: (signal: AbortSignal) => Promise<Result<T, E>>,
+  refineKey = '',
 ): AsyncResult<T, E> {
   const [state, setState] = useState<AsyncState<T, E>>({ status: 'idle' });
   const generationRef = useRef(0);
   const taskRef = useRef(task);
   taskRef.current = task;
   const [nonce, setNonce] = useState(0);
+  /** The `depsKey` of the success on screen, if any. */
+  const shownKeyRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!active) {
+      shownKeyRef.current = undefined;
       setState({ status: 'idle' });
       return;
     }
@@ -56,10 +64,14 @@ export function useAsyncResult<T, E>(
     const myGeneration = generationRef.current + 1;
     generationRef.current = myGeneration;
     const controller = new AbortController();
-    setState({ status: 'loading' });
+    if (shownKeyRef.current !== depsKey) {
+      shownKeyRef.current = undefined;
+      setState({ status: 'loading' });
+    }
 
     taskRef.current(controller.signal).then((result) => {
       if (myGeneration !== generationRef.current) return; // superseded by a newer run
+      shownKeyRef.current = result.ok ? depsKey : undefined;
       setState(result.ok ? { status: 'success', value: result.value } : { status: 'error', error: result.error });
     });
 
@@ -70,7 +82,7 @@ export function useAsyncResult<T, E>(
     // render, and `depsKey` is the explicit, caller-computed signal for
     // "the task's actual inputs changed" -- see the doc comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, depsKey, nonce]);
+  }, [active, depsKey, refineKey, nonce]);
 
   const retry = useCallback(() => setNonce((n) => n + 1), []);
 

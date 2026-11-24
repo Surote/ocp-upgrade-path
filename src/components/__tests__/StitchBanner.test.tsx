@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { graph, loaderFor, v } from '../../engine/__tests__/routeFixtures';
 import { stitchAndFindPath } from '../../engine/stitch';
 import { PathResult } from '../PathResult';
+import { NO_MARKS } from '../../engine/risks';
 
 afterEach(cleanup);
 
@@ -28,6 +29,7 @@ describe('stitch banner', () => {
         channel="stable-4.22"
         channelNames={[]}
         pinnedStops={[]}
+        riskApplicability={{ notApplicable: NO_MARKS, onChange: () => {} }}
         onUseLowerRisk={() => {}}
       />,
     );

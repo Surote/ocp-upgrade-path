@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseUrlState, resolveUrlArch, resolveUrlRiskPolicy, serializeUrlState, syncUrlState } from '../urlState';
+import type { RiskName } from '../../engine/risks';
+import { parseUrlState, resolveUrlArch, resolveUrlNotApplicable, resolveUrlRiskPolicy, serializeUrlState, syncUrlState } from '../urlState';
 
 describe('parseUrlState', () => {
   it('parses all four params', () => {
@@ -151,5 +152,30 @@ describe('stops and avoid', () => {
     const resolved = resolveUrlRiskPolicy('everything');
     expect(resolved.riskPolicy).toBe('recommended');
     expect(resolved.notice).toMatch(/everything/);
+  });
+});
+
+describe('risks marked not applicable', () => {
+  const known = new Set(['VSphereConfigCloudControllerCrash', 'AWSOldBootImages'] as RiskName[]);
+
+  it('round-trips marked risk names through na=', () => {
+    const qs = serializeUrlState({ channel: 'eus-4.18', notApplicable: ['VSphereConfigCloudControllerCrash', 'AWSOldBootImages'] });
+    expect(qs).toBe('channel=eus-4.18&na=AWSOldBootImages,VSphereConfigCloudControllerCrash');
+    const parsed = parseUrlState(qs);
+    expect(resolveUrlNotApplicable(parsed.notApplicable ?? [], known)).toEqual({
+      names: ['AWSOldBootImages', 'VSphereConfigCloudControllerCrash'],
+      notice: undefined,
+    });
+  });
+
+  it('omits na when nothing is marked', () => {
+    expect(serializeUrlState({ channel: 'eus-4.18', notApplicable: [] })).toBe('channel=eus-4.18');
+    expect(parseUrlState('?na=,').notApplicable).toBeUndefined();
+  });
+
+  it('drops a name no loaded conditional risk carries, with a notice naming it', () => {
+    const resolved = resolveUrlNotApplicable(['VSphereConfigCloudControllerCrash', 'vsphereconfigcloudcontrollercrash', 'Gone'], known);
+    expect(resolved.names).toEqual(['VSphereConfigCloudControllerCrash']);
+    expect(resolved.notice).toContain('"vsphereconfigcloudcontrollercrash", "Gone"');
   });
 });
