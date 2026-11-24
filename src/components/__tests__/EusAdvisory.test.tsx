@@ -6,6 +6,8 @@ import type { PathHop } from '../../engine/types';
 import { parseRawGraph } from '../../graph/parse';
 import type { Graph, Version } from '../../graph/types';
 import { loadFixture } from '../../test-utils/fixtures';
+import { controlPlaneOnlyLegs } from '../../design/eus';
+import { eusPublishing } from '../../test-utils/eusGraphs';
 import { EusAdvisory } from '../EusAdvisory';
 
 afterEach(cleanup);
@@ -15,6 +17,11 @@ function legItems(): HTMLElement[] {
   return [...screen.getByRole('list', { name: 'Control Plane Only legs' }).children] as HTMLElement[];
 }
 
+/** The panel for `hops`, every eus channel publishing all of them. */
+function renderAdvisory(hops: readonly PathHop[]) {
+  return render(<EusAdvisory legs={controlPlaneOnlyLegs(hops, eusPublishing(hops))} />);
+}
+
 /** A route's hops, each taken from a stable channel's graph. */
 function route(...vs: string[]): PathHop[] {
   return vs.slice(1).map((to, i) => ({ from: vs[i] as Version, to: to as Version, risks: [], sourceChannel: 'stable-4.22' }));
@@ -22,7 +29,7 @@ function route(...vs: string[]): PathHop[] {
 
 describe('EusAdvisory', () => {
   it('lists one Control Plane Only leg per EUS-to-EUS span of the route, in order', () => {
-    render(<EusAdvisory hops={route('4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46', '4.21.42', '4.22.22', '5.0.1')} />);
+    renderAdvisory(route('4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46', '4.21.42', '4.22.22', '5.0.1'));
 
     const legs = legItems();
     expect(legs.map((li) => li.querySelector('h3')?.textContent)).toEqual([
@@ -35,7 +42,7 @@ describe('EusAdvisory', () => {
   });
 
   it('renders nothing when the route has no complete EUS-to-EUS leg', () => {
-    const { container } = render(<EusAdvisory hops={route('4.18.2', '4.19.10')} />);
+    const { container } = renderAdvisory(route('4.18.2', '4.19.10'));
     expect(container.innerHTML).toBe('');
   });
 });
@@ -60,7 +67,7 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
     const { primary } = result.value;
     expect(primary.versions).toEqual(['4.18.42', '4.19.43', '4.20.35', '4.21.40']);
 
-    render(<EusAdvisory hops={primary.hops} />);
+    renderAdvisory(primary.hops);
 
     const [leg] = legItems() as [HTMLElement];
     expect(leg.querySelector('h3')?.textContent).toBe('Leg 1: 4.18 → 4.20 (Control Plane Only update not available on this route)');
@@ -72,7 +79,7 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
   it('judges each leg on its own hops: a stable leg keeps its pause steps when the next leg crosses a fast hop', () => {
     const stableLeg = route('4.16.33', '4.17.59', '4.18.59');
     const fastLeg = route('4.18.59', '4.19.55', '4.20.46').map((hop, i) => (i === 1 ? { ...hop, sourceChannel: 'fast-4.20' } : hop));
-    render(<EusAdvisory hops={[...stableLeg, ...fastLeg]} />);
+    renderAdvisory([...stableLeg, ...fastLeg]);
 
     const [first, second] = legItems() as [HTMLElement, HTMLElement];
     expect(first).toHaveTextContent(/"paused":true/);
@@ -87,7 +94,7 @@ describe('copying a leg\'s commands', () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     try {
-      render(<EusAdvisory hops={route('4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46')} />);
+      renderAdvisory(route('4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46'));
 
       const buttons = screen.getAllByRole('button', { name: /^Copy/ });
       for (const button of buttons) fireEvent.click(button);
@@ -105,12 +112,12 @@ describe('copying a leg\'s commands', () => {
 
 describe('the pool check after a leg', () => {
   it('waits for every pool the operator paused, custom pools included, not just worker', () => {
-    render(<EusAdvisory hops={route('4.16.33', '4.17.59', '4.18.59')} />);
+    renderAdvisory(route('4.16.33', '4.17.59', '4.18.59'));
 
     const [leg] = legItems() as [HTMLElement];
     const check = within(leg).getByRole('button', { name: 'Copy leg 1 pool check' }).closest('li') as HTMLElement;
     expect(check).toHaveTextContent(/every pool you paused reports UPDATED=True and UPDATING=False/);
-    expect(check).toHaveTextContent(/before leaving 4\.18/i);
+    expect(check).toHaveTextContent(/before the next update of any kind, including a patch update within 4\.18/i);
     expect(check).not.toHaveTextContent(/worker UPDATED=True/);
   });
 });
