@@ -91,6 +91,11 @@ main {
   font-size: 0.75rem;
 }
 
+.field-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .field-error {
   color: var(--risk-always);
   font-size: 0.85rem;

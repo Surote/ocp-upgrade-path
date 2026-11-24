@@ -4,6 +4,8 @@ import type { GraphClient } from '../graph/client';
 import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
+import { isLegacyStream } from '../design/lifecycle';
+import { formatStream, streamOf } from '../engine/version';
 import {
   droppedMarksNotice,
   parseUrlState,
@@ -19,7 +21,7 @@ import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
 import { conditionalRisks, type RiskId } from '../engine/risks';
 import { useLookahead } from './lookaheadTargets';
-import { channelStream } from './sortChannels';
+import { channelGroupLabel } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
 import { useGraphForSelection } from './useGraphForSelection';
@@ -49,6 +51,8 @@ export interface StartFieldViewModel {
   readonly loading: boolean;
   readonly disabled: boolean;
   readonly error?: string;
+  /** The start's stream, e.g. `4.14`, when it is older than every stream Red Hat still supports in a standard term. */
+  readonly legacyStream?: string;
   readonly onChange: (version: string) => void;
   readonly onRetry: () => void;
 }
@@ -235,6 +239,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   }, []);
 
   const startOptions = useMemo(() => (graph ? buildStartOptions(graph) : []), [graph]);
+  const startStream = resolvedStart && streamOf(resolvedStart);
   const targetOptions = useMemo(
     () => (graph && resolvedStart ? buildTargetOptions(graph, resolvedStart, lookaheadSegments) : []),
     [graph, resolvedStart, lookaheadSegments],
@@ -379,7 +384,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   return {
     channel: {
       value: channel ?? '',
-      groups: groupByStream(channelCatalog.channels, channelStream),
+      groups: groupByStream(channelCatalog.channels, channelGroupLabel),
       loading: channelCatalog.loading,
       error: channelCatalog.error,
       onChange: setChannel,
@@ -395,6 +400,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
         graphState.status === 'error'
           ? describeChannelLoadError(channel ?? '', graphState.error)
           : undefined,
+      legacyStream: startStream && isLegacyStream(startStream) ? formatStream(startStream) : undefined,
       onChange: setStart,
       onRetry: graphState.retry,
     },
