@@ -256,8 +256,8 @@ describe('legSteps', () => {
   it("waits for each paused update to finish, as Red Hat's procedure checks it, before the next step", () => {
     const checks = steps.filter((step) => step.kind === 'waitForUpdate');
     expect(checks.map((step) => [step.hop.to, step.commands, step.when])).toEqual([
-      ['4.17.59', ['oc adm upgrade'], 'Wait for the update to 4.17.59 to finish: run this until it prints "Cluster version is 4.17.59". While the update runs, it prints "info: An upgrade is in progress" instead.'],
-      ['4.18.59', ['oc adm upgrade'], 'Wait for the update to 4.18.59 to finish: run this until it prints "Cluster version is 4.18.59". While the update runs, it prints "info: An upgrade is in progress" instead.'],
+      ['4.17.59', ['oc adm upgrade'], 'Wait for the update to 4.17.59 to finish. Run this until it prints "Cluster version is 4.17.59". While the update runs, it prints "info: An upgrade is in progress" instead.'],
+      ['4.18.59', ['oc adm upgrade'], 'Wait for the update to 4.18.59 to finish. Run this until it prints "Cluster version is 4.18.59". While the update runs, it prints "info: An upgrade is in progress" instead.'],
     ]);
   });
 

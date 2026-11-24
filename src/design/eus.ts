@@ -303,7 +303,18 @@ export interface LegUpdate {
   readonly riskNotes: readonly string[];
 }
 
-export type LegStep = LegCheckpoint | LegUpdate;
+/**
+ * Waits for one paused update to finish. `oc adm upgrade --to` only requests
+ * the update, so the next update and the unpause wait on this check.
+ */
+export interface LegUpdateCheck {
+  readonly kind: 'waitForUpdate';
+  readonly hop: PausedHop;
+  readonly when: string;
+  readonly commands: readonly string[];
+}
+
+export type LegStep = LegCheckpoint | LegUpdate | LegUpdateCheck;
 
 function describeRisk(risk: Risk): string {
   return `${risk.name} (${riskClass(risk) === 'Always' ? 'Always' : 'conditional'})`;
@@ -324,8 +335,9 @@ function riskNotes(hop: PausedHop, eusChannel: string): readonly string[] {
 
 /**
  * Red Hat's "Control Plane Only update using the CLI" for one leg: pools
- * settled, switch to eus-4.(E+2) and pause, the paused updates on that
- * channel, unpause, pools settled, then back to the main route's channel.
+ * settled, switch to eus-4.(E+2) and pause, each paused update on that
+ * channel followed by a check that it finished, unpause, pools settled, then
+ * back to the main route's channel.
  */
 export function legSteps(leg: AvailableLeg): readonly LegStep[] {
   const steps: LegStep[] = [
@@ -340,16 +352,23 @@ export function legSteps(leg: AvailableLeg): readonly LegStep[] {
       // Chained: on separate lines a failed switch would still pause workers on the old channel.
       commands: [`oc adm upgrade channel ${leg.eusChannel} && ${PAUSE_WORKERS_COMMAND}`],
     },
-    ...leg.pausedHops.map(
-      (hop): LegUpdate => ({
+    ...leg.pausedHops.flatMap((hop): LegStep[] => [
+      {
         kind: 'update',
         hop,
         upgradeTo: `oc adm upgrade --to ${hop.to}`,
         upgradeToImage: `oc adm upgrade --to-image=${hop.payload} --allow-explicit-upgrade`,
         riskNotes: riskNotes(hop, leg.eusChannel),
-      }),
-    ),
-    { kind: 'unpause', when: `Once the cluster reports ${leg.unpauseAt}`, commands: [UNPAUSE_WORKERS_COMMAND] },
+      },
+      {
+        kind: 'waitForUpdate',
+        hop,
+        // Red Hat's check after each update; oc prints the CVO's "Cluster version is" message only once nothing is progressing.
+        when: `Wait for the update to ${hop.to} to finish. Run this until it prints "Cluster version is ${hop.to}". While the update runs, it prints "info: An upgrade is in progress" instead.`,
+        commands: ['oc adm upgrade'],
+      },
+    ]),
+    { kind: 'unpause', when: `Then unpause workers so they update to ${leg.unpauseAt}`, commands: [UNPAUSE_WORKERS_COMMAND] },
     {
       kind: 'waitForPools',
       when: `Before the next update of any kind, including a patch update within ${formatStream(leg.to)}, wait until every pool you paused reports UPDATED=True and UPDATING=False`,

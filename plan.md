@@ -725,7 +725,10 @@ design/eus.ts in Red Hat's CLI order:
 3. Each update run with workers paused, as `eus-4.(E+2)`'s graph publishes it: its
    `oc adm upgrade --to`, its `--to-image` digest from that graph's node, and the risks that
    graph attaches to the edge (its `RiskIndex`), shown as risk cards that honor the
-   operator's "doesn't apply" marks.
+   operator's "doesn't apply" marks. Each update is followed by its own step, Red Hat's
+   check that it finished: `oc adm upgrade` until it prints "Cluster version is <version>"
+   rather than "info: An upgrade is in progress". `--to` only requests the update, so the
+   next update and the unpause wait on that check.
 4. Unpause on the last 4.E+2 version the route reaches over hops `eus-4.(E+2)` publishes from
    eus or stable (a later patch hop inside 4.E+2 from fast or candidate runs as an ordinary
    update after the unpause).

@@ -1,4 +1,4 @@
-import { type AvailableLeg, type CheckingLeg, type ControlPlaneOnlyLeg, type LegCheckpoint, type LegUpdate, legSteps, type UnavailableLeg } from '../design/eus';
+import { type AvailableLeg, type CheckingLeg, type ControlPlaneOnlyLeg, type LegCheckpoint, type LegStep, type LegUpdate, legSteps, type UnavailableLeg } from '../design/eus';
 import { formatStream } from '../engine/version';
 import { describeGraphError } from '../graph/errors';
 import type { RiskApplicabilityViewModel } from '../planner/usePlanner';
@@ -67,6 +67,14 @@ const COPY_LABEL: Record<LegCheckpoint['kind'], string> = {
   returnChannel: 'channel return',
 };
 
+function copyLabel(step: Exclude<LegStep, LegUpdate>, n: number): string {
+  return step.kind === 'waitForUpdate' ? `Copy leg ${n} check that the update to ${step.hop.to} finished` : `Copy leg ${n} ${COPY_LABEL[step.kind]}`;
+}
+
+function stepKey(step: LegStep): string {
+  return step.kind === 'update' || step.kind === 'waitForUpdate' ? `${step.kind} ${step.hop.to}` : step.kind;
+}
+
 function CommandBlock({ text, label, secondary = false }: { readonly text: string; readonly label: string; readonly secondary?: boolean }) {
   return (
     <div className={secondary ? 'command-line command-line--secondary' : 'command-line'}>
@@ -120,13 +128,13 @@ function AvailableLegSteps({ leg, n, applicability }: { readonly leg: AvailableL
       </p>
       <ol className="cpo-checkpoints">
         {legSteps(leg).map((step) => (
-          <li key={step.kind === 'update' ? `update ${step.hop.to}` : step.kind}>
+          <li key={stepKey(step)}>
             {step.kind === 'update' ? (
               <UpdateStep step={step} eusChannel={leg.eusChannel} n={n} applicability={applicability} />
             ) : (
               <>
                 <p className="cpo-checkpoint__when">{step.when}</p>
-                <CommandBlock text={step.commands.join('\n')} label={`Copy leg ${n} ${COPY_LABEL[step.kind]}`} />
+                <CommandBlock text={step.commands.join('\n')} label={copyLabel(step, n)} />
               </>
             )}
           </li>

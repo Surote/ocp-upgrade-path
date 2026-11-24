@@ -158,7 +158,7 @@ describe('the paused updates', () => {
     ]);
     for (const [i, version] of [[3, '4.17.59'], [5, '4.18.59']] as const) {
       expect([...(steps[i] as HTMLElement).querySelectorAll('code')].map((code) => code.textContent)).toEqual(['oc adm upgrade']);
-      expect(steps[i]).toHaveTextContent(`run this until it prints "Cluster version is ${version}"`);
+      expect(steps[i]).toHaveTextContent(`Run this until it prints "Cluster version is ${version}"`);
       expect(within(steps[i] as HTMLElement).getByRole('button', { name: `Copy leg 1 check that the update to ${version} finished` })).toBeTruthy();
     }
   });
