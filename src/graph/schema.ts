@@ -33,10 +33,17 @@ const payloadSchema = z
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/, 'Not a release image pullspec (registry/repo@sha256:digest or :tag).');
 
 const channelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Not a channel name.');
-// The comma-separated wire list; graph/parse.ts splits it and trims the spaces.
+// The comma-separated wire list, parsed into its names. Empty entries are
+// skipped, so `""` and `"a, ,b"` are valid.
 const channelListSchema = z
   .string()
-  .regex(/^\s*(?:[A-Za-z0-9][A-Za-z0-9._-]*)?\s*(?:,\s*(?:[A-Za-z0-9][A-Za-z0-9._-]*)?\s*)*$/, 'Not a comma-separated channel list.');
+  .transform((list) =>
+    list
+      .split(',')
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
+  )
+  .pipe(z.array(channelNameSchema));
 
 const rawMatchingRuleSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('Always') }).strict(),

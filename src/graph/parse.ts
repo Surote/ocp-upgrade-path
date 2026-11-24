@@ -21,28 +21,22 @@ import type {
 const CHANNELS_METADATA_KEY = 'io.openshift.upgrades.graph.release.channels';
 
 /**
- * Interns each node's comma-separated channel-membership string against a
- * shared per-graph name table, per plan.md §3. Splitting/trimming happens here
- * (the single place both parse entry points funnel through); an absent or
- * empty metadata field yields an empty channel list for that node, never a
- * failure -- channel membership is enrichment, not a structural requirement.
+ * Interns each node's channel names (already split and validated by
+ * graph/schema.ts) against a shared per-graph name table, per plan.md §3. An
+ * absent or empty metadata field yields an empty channel list for that node,
+ * never a failure -- channel membership is enrichment, not a structural
+ * requirement.
  */
 function internChannels(
-  channelsFields: readonly (string | undefined)[],
+  channelsFields: readonly (readonly string[] | undefined)[],
 ): { channelNames: string[]; perNodeChannels: number[][] } {
   const channelNames: string[] = [];
   const indexOf = new Map<string, number>();
   const perNodeChannels: number[][] = [];
 
-  for (const field of channelsFields) {
-    const names = field
-      ? field
-          .split(',')
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0)
-      : [];
+  for (const names of channelsFields) {
     const ids: number[] = [];
-    for (const name of names) {
+    for (const name of names ?? []) {
       let id = indexOf.get(name);
       if (id === undefined) {
         id = channelNames.length;

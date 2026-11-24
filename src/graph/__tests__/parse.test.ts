@@ -259,6 +259,15 @@ describe('graph boundary — values that reach the upgrade script stay shell-saf
     expect(result.error.kind).toBe('validation');
   });
 
+  it('rejects a long malformed channel list without stalling', () => {
+    const started = performance.now();
+    const result = parseRawGraph(rawWith({ version: '4.18.0', payload: SAFE_PAYLOAD, channels: `${' ,'.repeat(5000)}!` }), CTX);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('validation');
+  });
+
   it('still accepts SemVer prerelease and build identifiers, digest and tag pullspecs, and spaced channel lists', () => {
     for (const node of [
       { version: '4.18.0-rc.10', payload: SAFE_PAYLOAD, channels: 'candidate-4.18, fast-4.18' },
