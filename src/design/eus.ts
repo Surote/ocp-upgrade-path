@@ -1,7 +1,8 @@
+import { riskClass, riskIdOf, RiskIndex } from '../engine/risks';
 import type { PathHop } from '../engine/types';
 import { formatStream, type Stream, streamOf } from '../engine/version';
 import type { GraphError } from '../graph/errors';
-import type { Graph, Version } from '../graph/types';
+import type { Graph, GraphNode, Risk, Version } from '../graph/types';
 import { formatChannelName, parseChannelName } from './channels';
 
 /**
@@ -47,15 +48,53 @@ export type EusGraphState =
 
 export type EusGraphLookup = (channel: string) => EusGraphState;
 
-const publishedEdgeCache = new WeakMap<Graph, ReadonlySet<string>>();
+/** What a leg reads from its EUS graph: which edges it publishes, the risks it attaches, and its nodes. */
+interface EusGraphIndex {
+  readonly edges: ReadonlySet<string>;
+  readonly risks: RiskIndex;
+  readonly nodes: ReadonlyMap<Version, GraphNode>;
+}
 
-function publishes(graph: Graph, hop: PathHop): boolean {
-  let edges = publishedEdgeCache.get(graph);
-  if (!edges) {
-    edges = new Set(graph.edges.map(([from, to]) => `${graph.nodes[from]?.version}>${graph.nodes[to]?.version}`));
-    publishedEdgeCache.set(graph, edges);
+const indexCache = new WeakMap<Graph, EusGraphIndex>();
+
+function indexOf(graph: Graph): EusGraphIndex {
+  let index = indexCache.get(graph);
+  if (!index) {
+    index = {
+      edges: new Set(graph.edges.map(([from, to]) => `${graph.nodes[from]?.version}>${graph.nodes[to]?.version}`)),
+      risks: new RiskIndex(graph.conditionalEdges),
+      nodes: new Map(graph.nodes.map((node) => [node.version, node])),
+    };
+    indexCache.set(graph, index);
   }
-  return edges.has(`${hop.from}>${hop.to}`);
+  return index;
+}
+
+function publishes(index: EusGraphIndex, hop: PathHop): boolean {
+  return index.edges.has(`${hop.from}>${hop.to}`);
+}
+
+/** One update a leg runs with workers paused, as `eusChannel`'s graph publishes it. */
+export interface PausedHop {
+  readonly from: Version;
+  readonly to: Version;
+  /** The risks `eusChannel`'s graph attaches to this edge, which can differ from the main route channel's. */
+  readonly risks: readonly Risk[];
+  /** `eusChannel`'s release image for `to`, for `--to-image`. */
+  readonly payload: string;
+  /** The same update as the main route takes it, on the channel that supplied it there. */
+  readonly onRoute: PathHop;
+}
+
+function pausedHop(index: EusGraphIndex, hop: PathHop): PausedHop {
+  return {
+    from: hop.from,
+    to: hop.to,
+    risks: index.risks.risksFor(hop.from, hop.to),
+    // An edge `publishes` confirmed names a node of the same graph.
+    payload: (index.nodes.get(hop.to) as GraphNode).payload,
+    onRoute: hop,
+  };
 }
 
 /**
@@ -79,17 +118,21 @@ interface LegSpan {
   readonly docsUrl: string;
 }
 
-/** `eusChannel`'s graph publishes every hop run with workers paused, and none came from fast or candidate. */
+/**
+ * `eusChannel`'s graph publishes every hop run with workers paused, and none
+ * came from fast or candidate. The leg is its own procedure on `eusChannel`:
+ * the main route's commands never change because of it (plan.md §6).
+ */
 export interface AvailableLeg extends LegSpan {
   readonly kind: 'available';
   /** Last route version in `from`: switch to `eusChannel` and pause here, right before the hop into `via`. */
   readonly pauseAt: Version;
-  /** First route version in `via`, the first hop taken with workers paused. */
-  readonly firstPausedHopTo: Version;
   /** Last version reached with workers paused: the first arrival in `to`, or a later `to` patch `eusChannel` also publishes. */
   readonly unpauseAt: Version;
-  /** Indexes into the route's hops of the first and last hop run with workers paused, all on `eusChannel`. */
-  readonly pausedHops: { readonly first: number; readonly last: number };
+  /** The updates run with workers paused, from `pauseAt` to `unpauseAt`, as `eusChannel` publishes them. */
+  readonly pausedHops: readonly [PausedHop, ...PausedHop[]];
+  /** The main route's next update after the leg, when it runs on a channel other than `eusChannel`. */
+  readonly returnTo?: { readonly channel: string; readonly hop: PathHop };
 }
 
 /** `eusChannel`'s graph is still loading. */
@@ -206,24 +249,26 @@ function judgeLeg(hops: readonly PathHop[], located: SpanOnRoute, eusGraph: EusG
   const eus = eusGraph(span.eusChannel);
   if (eus.kind === 'loading') return { ...span, kind: 'checking' };
   if (eus.kind === 'failed') return { ...span, kind: 'unavailable', reason: { kind: 'eusNotLoaded', error: eus.error } };
-  const notOnEus = required.find((hop) => !publishes(eus.graph, hop));
+  const index = indexOf(eus.graph);
+  const notOnEus = required.find((hop) => !publishes(index, hop));
   if (notOnEus) return { ...span, kind: 'unavailable', reason: { kind: 'notOnEus', hop: notOnEus } };
 
   // Patch hops inside the destination may run unpaused as ordinary updates, so they only decide how long the pause can last.
   let last = arrivalHop;
   while (last < lastHopInDestination) {
     const next = hops[last + 1] as PathHop;
-    if (!isStableOrEusHop(next) || !publishes(eus.graph, next)) break;
+    if (!isStableOrEusHop(next) || !publishes(index, next)) break;
     last += 1;
   }
-  const pausePoint = hops[pauseHop] as PathHop;
+  const [first, ...rest] = hops.slice(pauseHop, last + 1).map((hop) => pausedHop(index, hop)) as [PausedHop, ...PausedHop[]];
+  const next = hops[last + 1];
   return {
     ...span,
     kind: 'available',
-    pauseAt: pausePoint.from,
-    firstPausedHopTo: pausePoint.to,
-    unpauseAt: (hops[last] as PathHop).to,
-    pausedHops: { first: pauseHop, last },
+    pauseAt: first.from,
+    unpauseAt: (rest.at(-1) ?? first).to,
+    pausedHops: [first, ...rest],
+    returnTo: next?.sourceChannel && next.sourceChannel !== span.eusChannel ? { channel: next.sourceChannel, hop: next } : undefined,
   };
 }
 
@@ -238,26 +283,72 @@ export function controlPlaneOnlyLegs(hops: readonly PathHop[], eusGraph: EusGrap
 }
 
 /**
- * A point in the leg's hop sequence and the commands to run there, in order.
+ * A point in the leg's procedure and the commands to run there, in order.
  * Each point is copied on its own: the points are separated by updates, so a
  * paste holding two of them would run the second before those updates happen.
  */
 export interface LegCheckpoint {
-  readonly kind: 'pause' | 'unpause' | 'waitForPools';
+  readonly kind: 'checkPools' | 'pause' | 'unpause' | 'waitForPools' | 'returnChannel';
   readonly when: string;
   readonly commands: readonly string[];
 }
 
-/** The order of Red Hat's "Control Plane Only update using the CLI": pools settled, switch to eus-4.(E+2), pause, update, unpause, check pools. */
-export function legCheckpoints(leg: AvailableLeg): readonly LegCheckpoint[] {
+/** One update run with workers paused, on the leg's EUS channel. `upgradeTo` and `upgradeToImage` are alternatives, never run together. */
+export interface LegUpdate {
+  readonly kind: 'update';
+  readonly hop: PausedHop;
+  readonly upgradeTo: string;
+  readonly upgradeToImage: string;
+  /** Each risk the EUS channel and the main route's channel attach differently to this update. */
+  readonly riskNotes: readonly string[];
+}
+
+export type LegStep = LegCheckpoint | LegUpdate;
+
+function describeRisk(risk: Risk): string {
+  return `${risk.name} (${riskClass(risk) === 'Always' ? 'Always' : 'conditional'})`;
+}
+
+function riskNotes(hop: PausedHop, eusChannel: string): readonly string[] {
+  const routeChannel = hop.onRoute.sourceChannel ?? "the main route's channel";
+  // A risk that changes class between channels is a difference too: Always fires on every cluster.
+  const key = (risk: Risk) => `${riskIdOf(risk)}|${riskClass(risk)}`;
+  const onRoute = new Set(hop.onRoute.risks.map(key));
+  const onEus = new Set(hop.risks.map(key));
+  const edge = `the update from ${hop.from} to ${hop.to}`;
   return [
+    ...hop.risks.filter((risk) => !onRoute.has(key(risk))).map((risk) => `${eusChannel} attaches ${describeRisk(risk)} to ${edge}, which ${routeChannel} does not.`),
+    ...hop.onRoute.risks.filter((risk) => !onEus.has(key(risk))).map((risk) => `${routeChannel} attaches ${describeRisk(risk)} to ${edge}, which ${eusChannel} does not.`),
+  ];
+}
+
+/**
+ * Red Hat's "Control Plane Only update using the CLI" for one leg: pools
+ * settled, switch to eus-4.(E+2) and pause, the paused updates on that
+ * channel, unpause, pools settled, then back to the main route's channel.
+ */
+export function legSteps(leg: AvailableLeg): readonly LegStep[] {
+  const steps: LegStep[] = [
+    {
+      kind: 'checkPools',
+      when: `At ${leg.pauseAt}, before the update to ${leg.pausedHops[0].to}, confirm that every pool reports UPDATED=True and UPDATING=False`,
+      commands: ['oc get mcp'],
+    },
     {
       kind: 'pause',
-      when:
-        `At ${leg.pauseAt}, before oc adm upgrade --to ${leg.firstPausedHopTo}. First confirm with oc get mcp that every pool reports ` +
-        `UPDATED=True and UPDATING=False. Then switch to ${leg.eusChannel} and pause workers: the updates through ${leg.unpauseAt} run on ${leg.eusChannel}.`,
-      commands: [`oc adm upgrade channel ${leg.eusChannel}`, PAUSE_WORKERS_COMMAND],
+      when: `Then switch to ${leg.eusChannel} and pause workers. They stay paused through ${leg.unpauseAt}`,
+      // Chained: on separate lines a failed switch would still pause workers on the old channel.
+      commands: [`oc adm upgrade channel ${leg.eusChannel} && ${PAUSE_WORKERS_COMMAND}`],
     },
+    ...leg.pausedHops.map(
+      (hop): LegUpdate => ({
+        kind: 'update',
+        hop,
+        upgradeTo: `oc adm upgrade --to ${hop.to}`,
+        upgradeToImage: `oc adm upgrade --to-image=${hop.payload} --allow-explicit-upgrade`,
+        riskNotes: riskNotes(hop, leg.eusChannel),
+      }),
+    ),
     { kind: 'unpause', when: `Once the cluster reports ${leg.unpauseAt}`, commands: [UNPAUSE_WORKERS_COMMAND] },
     {
       kind: 'waitForPools',
@@ -265,4 +356,13 @@ export function legCheckpoints(leg: AvailableLeg): readonly LegCheckpoint[] {
       commands: ['oc get mcp'],
     },
   ];
+  if (leg.returnTo) {
+    const { channel, hop } = leg.returnTo;
+    steps.push({
+      kind: 'returnChannel',
+      when: `Then return to ${channel}, the channel the main route takes its next update, from ${hop.from} to ${hop.to}, on`,
+      commands: [`oc adm upgrade channel ${channel}`],
+    });
+  }
+  return steps;
 }

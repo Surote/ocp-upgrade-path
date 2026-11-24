@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loaderFor } from '../../engine/__tests__/routeFixtures';
+import { NO_MARKS } from '../../engine/risks';
 import { stitchAndFindPath } from '../../engine/stitch';
 import type { PathHop } from '../../engine/types';
 import { parseRawGraph } from '../../graph/parse';
@@ -19,7 +20,7 @@ function legItems(): HTMLElement[] {
 
 /** The panel for `hops`, every eus channel publishing all of them. */
 function renderAdvisory(hops: readonly PathHop[]) {
-  return render(<EusAdvisory legs={controlPlaneOnlyLegs(hops, eusPublishing(hops))} />);
+  return render(<EusAdvisory legs={controlPlaneOnlyLegs(hops, eusPublishing(hops))} applicability={{ notApplicable: NO_MARKS, onChange: () => {} }} />);
 }
 
 /** A route's hops, each taken from a stable channel's graph. */
@@ -104,6 +105,22 @@ describe('copying a leg\'s commands', () => {
       expect(copied.filter((text) => text.includes('"paused":true'))).toHaveLength(2);
       expect(copied.filter((text) => text.includes('"paused":false'))).toHaveLength(2);
       expect(copied.filter((text) => text.includes('"paused":true') && text.includes('"paused":false'))).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('the pause checkpoint', () => {
+  it('pauses workers only once the switch to eus-4.(E+2) has succeeded', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    try {
+      renderAdvisory(route('4.16.33', '4.17.59', '4.18.59'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy leg 1 pause' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      expect(writeText).toHaveBeenCalledWith(`oc adm upgrade channel eus-4.18 && oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`);
     } finally {
       vi.unstubAllGlobals();
     }

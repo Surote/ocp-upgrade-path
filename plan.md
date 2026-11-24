@@ -706,29 +706,59 @@ any came from a fast or candidate graph (or has no recorded source), the leg is
 `unavailable` without fetching anything. Otherwise the planner loads `eus-4.(E+2)` through
 `GraphClient` after the route renders (one fetch per leg at most, cached like any graph; an
 `eus` anchor's look-ahead has usually loaded it already). Until it arrives, the leg reads
-`checking` and gives no pause steps. If that graph lacks a paused hop, has no releases yet,
+`checking` and gives no pause steps. Each leg settles as soon as its own graph arrives; a slow
+EUS channel for one leg never holds another leg in `checking`. If that graph lacks a paused hop, has no releases yet,
 or fails to load, the leg is `unavailable` and the panel says which, with no pause steps.
 The legs are data (`'available' | 'checking' | 'unavailable'`, each with its `eusChannel`),
 built by `controlPlaneOnlyLegs` in design/eus.ts and loaded by
 planner/useControlPlaneOnlyLegs.ts.
 
-Each available leg follows Red Hat's CLI sequence. At the last route version in 4.E, right
-before the first hop into 4.E+1: confirm with `oc get mcp` that every pool reports
-`UPDATED=True` and `UPDATING=False`, run `oc adm upgrade channel eus-4.(E+2)`, then pause
-`mcp/worker` (one copy block, in that order). The route's Commands run the same paused hops
-on `eus-4.(E+2)` too: the script switches to it at the pause point, commented as a Control
-Plane Only leg, and switches away only when a later hop needs another channel, so the
-script never contradicts the checkpoint. Workers unpause on the last 4.E+2 version the route
-reaches over hops `eus-4.(E+2)` publishes from eus or stable (a later patch hop inside 4.E+2
-from fast or candidate runs as an ordinary update after the unpause). Then `oc get mcp`
-until every pool the operator paused reports `UPDATED=True` and `UPDATING=False`, before
-the next update of any kind, a patch inside 4.E+2 included: the early unpause can leave a
-fast or candidate patch hop in the same minor while workers still catch up. The `oc` commands are Red Hat's
-verbatim. The doc link uses the leg's destination stream. The UI (`EusAdvisory`) shows one
-flat list, for example "Leg 1: 4.16 → 4.18 (pause workers before 4.17, unpause at 4.18)",
-labelled as guidance. Each checkpoint (pause, unpause, pool check) is its own block with its
-own copy button: they run at different points in the route, so no single copy may hold both
-the pause and the unpause. A route with no complete leg renders nothing.
+Each available leg is its own procedure on `eus-4.(E+2)`, built by `legSteps` in
+design/eus.ts in Red Hat's CLI order:
+
+1. At the last route version in 4.E, right before the first hop into 4.E+1: `oc get mcp`
+   until every pool reports `UPDATED=True` and `UPDATING=False`.
+2. `oc adm upgrade channel eus-4.(E+2) && oc patch mcp/worker ...`, chained so a failed
+   switch never pauses workers on the old channel.
+3. Each update run with workers paused, as `eus-4.(E+2)`'s graph publishes it: its
+   `oc adm upgrade --to`, its `--to-image` digest from that graph's node, and the risks that
+   graph attaches to the edge (its `RiskIndex`), shown as risk cards that honor the
+   operator's "doesn't apply" marks.
+4. Unpause on the last 4.E+2 version the route reaches over hops `eus-4.(E+2)` publishes from
+   eus or stable (a later patch hop inside 4.E+2 from fast or candidate runs as an ordinary
+   update after the unpause).
+5. `oc get mcp` until every pool the operator paused reports `UPDATED=True` and
+   `UPDATING=False`, before the next update of any kind, a patch inside 4.E+2 included: the
+   early unpause can leave a fast or candidate patch hop in the same minor while workers
+   still catch up.
+6. When the main route's next update runs on another channel, `oc adm upgrade channel` back
+   to it.
+
+**The leg never changes the main route.** The route's map, Commands, hop details, risk
+summary, facts line, via labels, stops and permalink are the same whether or not any EUS
+graph has loaded, and the Commands still run every hop on the channel whose graph supplied
+it, with that channel's risks (the attribution rule above). Earlier, a verified leg switched
+the main script onto `eus-4.(E+2)` for its paused hops once that graph arrived. That
+rewrote the route on screen after a network round trip, so the via label, the stops and the
+script could disagree with what was first shown, and the hop details kept the stable
+channel's risks for an edge the script now took on the EUS channel. The leg says instead
+that following it replaces the main script's updates from the pause point to the unpause
+point.
+
+**A verified leg can attach risks the main route does not.** `eus-4.(E+2)` may publish the
+same edge with a different risk set, for example an `Always` risk the stable channel lacks.
+The leg lists its own risks for each update and names every difference in a note, such as
+"eus-4.20 attaches X (Always) to the update from 4.19.40 to 4.20.32, which stable-4.20 does not." The
+main route's risk summary, the lower-risk comparison and the avoid-conditional ranking are
+the engine's, computed over the main route's own channels, and an EUS leg never feeds
+into them.
+
+The `oc` commands are Red Hat's verbatim. The doc link uses the leg's destination stream.
+The UI (`EusAdvisory`) shows one flat list, for example "Leg 1: 4.16 → 4.18 (pause workers
+before 4.17, unpause at 4.18)", labelled as guidance. Each step is its own block with its own
+copy button: they run at different points in the route, so no single copy may hold both the
+pause and the unpause, and an update's `--to` and `--to-image` are alternatives copied
+separately. A route with no complete leg renders nothing.
 
 **No 60-day limit.** Earlier versions of this tool said to finish within 60 days. Red Hat's
 procedure states no such limit, and the 4.16.42 release notes call the web console's

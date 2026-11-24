@@ -1,7 +1,9 @@
-import { type AvailableLeg, type CheckingLeg, type ControlPlaneOnlyLeg, type LegCheckpoint, legCheckpoints, type UnavailableLeg } from '../design/eus';
+import { type AvailableLeg, type CheckingLeg, type ControlPlaneOnlyLeg, type LegCheckpoint, type LegUpdate, legSteps, type UnavailableLeg } from '../design/eus';
 import { formatStream } from '../engine/version';
 import { describeGraphError } from '../graph/errors';
+import type { RiskApplicabilityViewModel } from '../planner/usePlanner';
 import { CopyButton } from './CopyButton';
+import { RiskCardList } from './RiskCardList';
 
 /**
  * Control Plane Only (formerly EUS-to-EUS) guidance for the route's actual
@@ -10,7 +12,13 @@ import { CopyButton } from './CopyButton';
  * renamed the procedure; "EUS-to-EUS" stays in the heading as the name
  * operators still use.
  */
-export function EusAdvisory({ legs }: { readonly legs: readonly ControlPlaneOnlyLeg[] }) {
+export function EusAdvisory({
+  legs,
+  applicability,
+}: {
+  readonly legs: readonly ControlPlaneOnlyLeg[];
+  readonly applicability: RiskApplicabilityViewModel;
+}) {
   if (legs.length === 0) return null;
 
   return (
@@ -27,7 +35,7 @@ export function EusAdvisory({ legs }: { readonly legs: readonly ControlPlaneOnly
       <ol className="cpo-leg-list" aria-label="Control Plane Only legs">
         {legs.map((leg, i) => (
           <li key={formatStream(leg.from)}>
-            <LegBody leg={leg} n={i + 1} />
+            <LegBody leg={leg} n={i + 1} applicability={applicability} />
             <p className="panel__hint">
               <a href={leg.docsUrl} target="_blank" rel="noopener noreferrer">
                 Red Hat docs: Control Plane Only update to {formatStream(leg.to)} ↗
@@ -40,10 +48,10 @@ export function EusAdvisory({ legs }: { readonly legs: readonly ControlPlaneOnly
   );
 }
 
-function LegBody({ leg, n }: { readonly leg: ControlPlaneOnlyLeg; readonly n: number }) {
+function LegBody({ leg, n, applicability }: { readonly leg: ControlPlaneOnlyLeg; readonly n: number; readonly applicability: RiskApplicabilityViewModel }) {
   switch (leg.kind) {
     case 'available':
-      return <AvailableLegSteps leg={leg} n={n} />;
+      return <AvailableLegSteps leg={leg} n={n} applicability={applicability} />;
     case 'checking':
       return <CheckingLegNote leg={leg} n={n} />;
     case 'unavailable':
@@ -52,33 +60,77 @@ function LegBody({ leg, n }: { readonly leg: ControlPlaneOnlyLeg; readonly n: nu
 }
 
 const COPY_LABEL: Record<LegCheckpoint['kind'], string> = {
+  checkPools: 'pool check before pausing',
   pause: 'pause',
   unpause: 'unpause',
   waitForPools: 'pool check',
+  returnChannel: 'channel return',
 };
 
-function AvailableLegSteps({ leg, n }: { readonly leg: AvailableLeg; readonly n: number }) {
+function CommandBlock({ text, label, secondary = false }: { readonly text: string; readonly label: string; readonly secondary?: boolean }) {
+  return (
+    <div className={secondary ? 'command-line command-line--secondary' : 'command-line'}>
+      <pre className="script-block cpo-leg-command">
+        <code>{text}</code>
+      </pre>
+      <CopyButton text={text} label={label} />
+    </div>
+  );
+}
+
+function UpdateStep({
+  step,
+  eusChannel,
+  n,
+  applicability,
+}: {
+  readonly step: LegUpdate;
+  readonly eusChannel: string;
+  readonly n: number;
+  readonly applicability: RiskApplicabilityViewModel;
+}) {
+  const { hop } = step;
+  return (
+    <>
+      <p className="cpo-checkpoint__when">
+        Update to {hop.to} on {eusChannel}, or by digest on a disconnected cluster
+      </p>
+      <CommandBlock text={step.upgradeTo} label={`Copy leg ${n} update to ${hop.to}`} />
+      <CommandBlock text={step.upgradeToImage} label={`Copy leg ${n} update to ${hop.to} by digest`} secondary />
+      {step.riskNotes.map((note) => (
+        <p key={note} className="cpo-risk-note" role="note">
+          {note}
+        </p>
+      ))}
+      <RiskCardList risks={hop.risks} cleanLabel={`${eusChannel} attaches no known risks to this update.`} applicability={applicability} />
+    </>
+  );
+}
+
+function AvailableLegSteps({ leg, n, applicability }: { readonly leg: AvailableLeg; readonly n: number; readonly applicability: RiskApplicabilityViewModel }) {
   return (
     <>
       <h3>
         Leg {n}: {formatStream(leg.from)} → {formatStream(leg.to)} (pause workers before {formatStream(leg.via)}, unpause at{' '}
         {formatStream(leg.to)})
       </h3>
+      <p className="panel__hint">
+        Following this leg replaces the main Commands script's updates from {leg.pauseAt} to {leg.unpauseAt}. They run on{' '}
+        {leg.eusChannel}, so each update below lists the risks {leg.eusChannel} attaches to it.
+      </p>
       <ol className="cpo-checkpoints">
-        {legCheckpoints(leg).map((checkpoint) => {
-          const text = checkpoint.commands.join('\n');
-          return (
-            <li key={checkpoint.kind}>
-              <p className="cpo-checkpoint__when">{checkpoint.when}</p>
-              <div className="command-line">
-                <pre className="script-block cpo-leg-command">
-                  <code>{text}</code>
-                </pre>
-                <CopyButton text={text} label={`Copy leg ${n} ${COPY_LABEL[checkpoint.kind]}`} />
-              </div>
-            </li>
-          );
-        })}
+        {legSteps(leg).map((step) => (
+          <li key={step.kind === 'update' ? `update ${step.hop.to}` : step.kind}>
+            {step.kind === 'update' ? (
+              <UpdateStep step={step} eusChannel={leg.eusChannel} n={n} applicability={applicability} />
+            ) : (
+              <>
+                <p className="cpo-checkpoint__when">{step.when}</p>
+                <CommandBlock text={step.commands.join('\n')} label={`Copy leg ${n} ${COPY_LABEL[step.kind]}`} />
+              </>
+            )}
+          </li>
+        ))}
       </ol>
     </>
   );
