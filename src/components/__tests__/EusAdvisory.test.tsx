@@ -102,3 +102,15 @@ describe('copying a leg\'s commands', () => {
     }
   });
 });
+
+describe('the pool check after a leg', () => {
+  it('waits for every pool the operator paused, custom pools included, not just worker', () => {
+    render(<EusAdvisory hops={route('4.16.33', '4.17.59', '4.18.59')} />);
+
+    const [leg] = legItems() as [HTMLElement];
+    const check = within(leg).getByRole('button', { name: 'Copy leg 1 pool check' }).closest('li') as HTMLElement;
+    expect(check).toHaveTextContent(/every pool you paused reports UPDATED=True and UPDATING=False/);
+    expect(check).toHaveTextContent(/before leaving 4\.18/);
+    expect(check).not.toHaveTextContent(/worker UPDATED=True/);
+  });
+});
