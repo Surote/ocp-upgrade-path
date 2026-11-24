@@ -596,3 +596,66 @@ describe('usePlanner — target labels under pinned stops', () => {
     expect(routed?.hops.at(-1)?.sourceChannel).toBe(option?.via?.channel);
   });
 });
+
+describe('usePlanner — prerelease targets and stops', () => {
+  // 5.0.0-rc.1 is reachable only through candidate-5.0; 5.0.0 also through stable-5.0.
+  function prereleaseClient() {
+    const anchor = (channel: string) =>
+      jsonHandler(rawGraphJson(['4.22.0-rc.1', '4.22.15', '4.22.20'], [[0, 1], [1, 2]], `${channel},candidate-5.0,stable-5.0`));
+    return makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', anchor('stable-4.22')],
+          ['candidate-4.22|amd64', anchor('candidate-4.22')],
+          ['candidate-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0-rc.1', '5.0.0'], [[0, 1], [1, 2], [0, 2]], 'candidate-5.0'))],
+          ['stable-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0'], [[0, 1]], 'stable-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+  }
+  const versions = (groups: readonly { readonly options: readonly ({ readonly version: string })[] }[]) => groups.flatMap((g) => g.options.map((o) => o.version));
+
+  it('offers no prerelease target or stop from a non-candidate channel and a GA start', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.0');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(versions(result.current.target.groups)).toEqual(['5.0.0', '4.22.20']);
+    act(() => result.current.constraints.onAddStop());
+    expect(versions(result.current.constraints.stops[0]?.groups ?? [])).toEqual(['4.22.20']);
+  });
+
+  it('offers prerelease targets and stops from a candidate channel', async () => {
+    setUrl('?channel=candidate-4.22&arch=amd64&start=4.22.15&target=5.0.0');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(versions(result.current.target.groups)).toEqual(['5.0.0', '5.0.0-rc.1', '4.22.20']);
+    act(() => result.current.constraints.onAddStop());
+    expect(versions(result.current.constraints.stops[0]?.groups ?? [])).toContain('5.0.0-rc.1');
+  });
+
+  it('offers prerelease targets from a prerelease start', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.0-rc.1');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(versions(result.current.target.groups)).toEqual(['5.0.0', '5.0.0-rc.1', '4.22.20', '4.22.15']));
+  });
+
+  it('restores a permalink to a prerelease stop on a non-candidate channel, showing it', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.0&stops=5.0.0-rc.1');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(result.current.pinnedStops).toEqual(['5.0.0-rc.1']);
+    expect(versions(result.current.constraints.stops[0]?.groups ?? [])).toContain('5.0.0-rc.1');
+  });
+
+  it('restores a permalink to a prerelease target on a non-candidate channel, showing it', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.0-rc.1');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(versions(result.current.target.groups)).toEqual(['5.0.0', '5.0.0-rc.1', '4.22.20']);
+  });
+});
