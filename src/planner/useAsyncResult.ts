@@ -24,7 +24,8 @@ export type AsyncResult<T, E> = AsyncState<T, E> & {
  *
  * `refineKey` names inputs that only refine an answer already on screen. When
  * it alone changes, the current success stays shown until the new run lands,
- * instead of dropping back to `loading`.
+ * instead of dropping back to `loading`. A `retry()` always drops back to
+ * `loading`, so a refresh never leaves the old answer looking current.
  *
  * Guards against stale responses two ways, per plan.md §6 ("a stale
  * response must never overwrite a newer selection"):
@@ -51,12 +52,12 @@ export function useAsyncResult<T, E>(
   const taskRef = useRef(task);
   taskRef.current = task;
   const [nonce, setNonce] = useState(0);
-  /** The `depsKey` of the success on screen, if any. */
-  const shownKeyRef = useRef<string | undefined>(undefined);
+  /** The run inputs, other than `refineKey`, of the success on screen, if any. */
+  const shownRef = useRef<{ readonly depsKey: string; readonly nonce: number } | undefined>(undefined);
 
   useEffect(() => {
     if (!active) {
-      shownKeyRef.current = undefined;
+      shownRef.current = undefined;
       setState({ status: 'idle' });
       return;
     }
@@ -64,14 +65,14 @@ export function useAsyncResult<T, E>(
     const myGeneration = generationRef.current + 1;
     generationRef.current = myGeneration;
     const controller = new AbortController();
-    if (shownKeyRef.current !== depsKey) {
-      shownKeyRef.current = undefined;
+    if (shownRef.current?.depsKey !== depsKey || shownRef.current.nonce !== nonce) {
+      shownRef.current = undefined;
       setState({ status: 'loading' });
     }
 
     taskRef.current(controller.signal).then((result) => {
       if (myGeneration !== generationRef.current) return; // superseded by a newer run
-      shownKeyRef.current = result.ok ? depsKey : undefined;
+      shownRef.current = result.ok ? { depsKey, nonce } : undefined;
       setState(result.ok ? { status: 'success', value: result.value } : { status: 'error', error: result.error });
     });
 
