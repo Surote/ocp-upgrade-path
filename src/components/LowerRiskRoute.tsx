@@ -1,3 +1,4 @@
+import { NO_MARKS, type RiskName } from '../engine/risks';
 import type { RiskComparison } from '../engine/routeConstraints';
 import type { Path } from '../engine/types';
 import { channelSequence, hasConditionalRisk, routeFacts } from './routeFacts';
@@ -10,17 +11,19 @@ import { channelSequence, hasConditionalRisk, routeFacts } from './routeFacts';
 export function LowerRiskRoute({
   primary,
   comparison,
+  notApplicable,
   onUse,
 }: {
   readonly primary: Path;
   readonly comparison: RiskComparison | undefined;
+  readonly notApplicable: ReadonlySet<RiskName>;
   readonly onUse: () => void;
 }) {
   if (!comparison) return null;
   const { route, conditionalFree } = comparison;
 
   if (!route) {
-    if (!hasConditionalRisk(primary)) return null;
+    if (!hasConditionalRisk(primary, notApplicable)) return null;
     return <p className="lower-risk lower-risk--none">No lower-risk route exists for this start, target and stops.</p>;
   }
 
@@ -29,7 +32,7 @@ export function LowerRiskRoute({
   return (
     <section className="lower-risk" aria-label="Lower-risk route">
       <div className="lower-risk__head">
-        <p className="lower-risk__title">{conditionalFree ? 'A route with no conditional risks exists' : 'A lower-risk route exists'}</p>
+        <p className="lower-risk__title">{lowerRiskTitle(route, conditionalFree)}</p>
         <button type="button" className="copy-button" onClick={onUse}>
           Use lower-risk route
         </button>
@@ -42,9 +45,14 @@ export function LowerRiskRoute({
         ))}
       </ol>
       <p className="lower-risk__meta">
-        {routeFacts(route)}
+        {routeFacts(route, notApplicable)}
         {channels.length > 0 && ` · on ${channels.join(' → ')}`}
       </p>
     </section>
   );
+}
+
+function lowerRiskTitle(route: Path, conditionalFree: boolean): string {
+  if (!conditionalFree) return 'A lower-risk route exists';
+  return hasConditionalRisk(route, NO_MARKS) ? 'A route with no conditional risks besides the ones you marked exists' : 'A route with no conditional risks exists';
 }

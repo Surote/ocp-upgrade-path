@@ -2,7 +2,7 @@ import { parseChannelName } from '../design/channels';
 import { FALLBACK_CLASSES } from '../design/forwardChannel';
 import type { Graph, GraphNode, Risk, Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
-import { isWaived, riskClass, RiskIndex, type RiskName } from './risks';
+import { isWaived, NO_MARKS, riskClass, RiskIndex, type RiskName } from './risks';
 import type { RiskPolicy, RouteConstraints } from './routeConstraints';
 import { compareVersions, parseVersion } from './version';
 import type { PathCost, PathHop } from './types';
@@ -337,7 +337,7 @@ function hopsOf(entry: Entry, model: RoutingModel): readonly PathHop[] {
 export function routeAcrossSegments(
   segments: readonly ChannelSegment[],
   start: Version,
-  constraints: RouteConstraints = { stops: [], riskPolicy: 'recommended', notApplicable: new Set() },
+  constraints: RouteConstraints = { stops: [], riskPolicy: 'recommended', notApplicable: NO_MARKS },
 ): ReadonlyMap<Version, Route> {
   return searchRoutes(buildRoutingModel(segments), start, constraints).at(-1) as ReadonlyMap<Version, Route>;
 }

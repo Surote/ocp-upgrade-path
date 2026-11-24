@@ -4,7 +4,7 @@ import type { PathHop, StitchedPathResult, StitchError } from '../engine/types';
 import type { Version } from '../graph/types';
 import { describeStitchError } from '../planner/describeStitchError';
 import type { AsyncResult } from '../planner/useAsyncResult';
-import type { RouteHold } from '../planner/usePlanner';
+import type { RiskApplicabilityViewModel, RouteHold } from '../planner/usePlanner';
 import { AdminAcksPanel } from './AdminAcksPanel';
 import { AlternatesPanel } from './AlternatesPanel';
 import { CommandScript } from './CommandScript';
@@ -30,6 +30,7 @@ export function PathResult({
   channelNames,
   routeHold,
   pinnedStops,
+  riskApplicability,
   onUseLowerRisk,
 }: {
   readonly result: AsyncResult<StitchedPathResult, StitchError>;
@@ -37,6 +38,7 @@ export function PathResult({
   readonly channelNames: readonly string[];
   readonly routeHold?: RouteHold;
   readonly pinnedStops: readonly Version[];
+  readonly riskApplicability: RiskApplicabilityViewModel;
   readonly onUseLowerRisk: () => void;
 }) {
   const [selectedHop, setSelectedHop] = useState<number | null>(null);
@@ -101,8 +103,8 @@ export function PathResult({
   return (
     <div aria-live="polite">
       <StitchBanner channels={channelSequence(primary, channel)} classFallbacks={stitch.classFallbacks} />
-      <RouteSummary path={primary} />
-      <LowerRiskRoute primary={primary} comparison={riskComparison} onUse={onUseLowerRisk} />
+      <RouteSummary path={primary} notApplicable={riskApplicability.notApplicable} />
+      <LowerRiskRoute primary={primary} comparison={riskComparison} notApplicable={riskApplicability.notApplicable} onUse={onUseLowerRisk} />
 
       <UpgradeMap
         path={primary}
@@ -120,7 +122,13 @@ export function PathResult({
       ) : (
         <div className="detail-grid">
           {selectedHop !== null && (
-            <HopDetail hop={primary.hops[selectedHop] as PathHop} command={commands[selectedHop]} index={selectedHop} total={primary.hops.length} />
+            <HopDetail
+              hop={primary.hops[selectedHop] as PathHop}
+              command={commands[selectedHop]}
+              index={selectedHop}
+              total={primary.hops.length}
+              applicability={riskApplicability}
+            />
           )}
           {selectedStation !== null && (
             <NodeDetail
@@ -134,7 +142,7 @@ export function PathResult({
       )}
 
       <CommandScript commands={commands} />
-      <RiskSummary riskSummary={primary.riskSummary} />
+      <RiskSummary riskSummary={primary.riskSummary} applicability={riskApplicability} />
       <AdminAcksPanel path={primary} />
       {start && target && <EusAdvisory start={start} target={target} />}
       <AlternatesPanel alternates={alternates} multiGraph={stitch.multiGraph} channelsUsed={stitch.channelsUsed} />

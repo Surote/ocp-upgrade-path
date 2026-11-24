@@ -1,6 +1,6 @@
 import type { Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
-import type { RiskName } from './risks';
+import { NO_MARKS, type RiskName } from './risks';
 import { buildRoutingModel, forEachEdge, reachBackward, reachForward, type RoutingModel } from './routeSearch';
 import type { Path } from './types';
 import { compareVersions } from './version';
@@ -32,7 +32,7 @@ export interface RouteConstraints {
   readonly notApplicable: ReadonlySet<RiskName>;
 }
 
-export const NO_CONSTRAINTS: RouteConstraints = { stops: [], riskPolicy: 'recommended', notApplicable: new Set() };
+export const NO_CONSTRAINTS: RouteConstraints = { stops: [], riskPolicy: 'recommended', notApplicable: NO_MARKS };
 
 /**
  * The lower-risk counterpart to the recommended route, computed with
