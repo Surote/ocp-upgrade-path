@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { GraphClient } from '../../graph/client';
 import { fakeFetch, fakeJsonResponse } from '../../test-utils/fakeFetch';
 import { FakeStorage } from '../../test-utils/fakeStorage';
+import { describeStitchError } from '../describeStitchError';
 import { usePlanner } from '../usePlanner';
 
 const SEED_CHANNEL = 'stable-4.20';
@@ -34,15 +35,19 @@ function jsonHandler(body: unknown): Handler {
   return () => Promise.resolve(fakeJsonResponse(body));
 }
 
-function makeClient(responses: Map<string, Handler>): GraphClient {
+const EMPTY_GRAPH = { version: 1, nodes: [], edges: [], conditionalEdges: [] };
+
+/** `unregistered: 'empty'` answers like Cincinnati does for a channel that doesn't exist. */
+function makeClient(responses: Map<string, Handler>, unregistered: 'throw' | 'empty' = 'throw'): GraphClient {
   const fetchImpl = fakeFetch(async (url) => {
     const u = new URL(url);
     const channel = u.searchParams.get('channel');
     const arch = u.searchParams.get('arch');
     const key = `${channel}|${arch}`;
     const handler = responses.get(key);
-    if (!handler) throw new Error(`no fake response registered for ${key}`);
-    return handler();
+    if (handler) return handler();
+    if (unregistered === 'empty') return fakeJsonResponse(EMPTY_GRAPH);
+    throw new Error(`no fake response registered for ${key}`);
   });
   return new GraphClient({ storage: new FakeStorage(), fetchImpl });
 }
@@ -317,6 +322,152 @@ describe('usePlanner — look-ahead targets (plan.md §6)', () => {
     expect(lookaheadTarget).toBeDefined();
     expect(lookaheadTarget?.reachable).toBe(true);
     expect(lookaheadTarget?.via?.channel).toBe('eus-4.22');
+  });
+});
+
+/**
+ * Selects every target the dropdown marks reachable, in turn, and reports
+ * where each one's path ends up: the channel of its last hop, or the error
+ * text. A reachable option must route, and through the channel its `via`
+ * names (the anchor's own when it has none).
+ */
+async function routeEveryReachableTarget(search: string, client: GraphClient, anchor: string) {
+  setUrl(search);
+  const { result } = renderHook(() => usePlanner(client));
+  await waitFor(() => expect(result.current.target.disabled).toBe(false));
+  await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+  return routeEachReachableOption(result, anchor);
+}
+
+async function routeEachReachableOption(result: { readonly current: ReturnType<typeof usePlanner> }, anchor: string) {
+  const options = result.current.target.groups.flatMap((g) => g.options);
+  const reachable = options.filter((o) => o.reachable);
+  const expected = reachable.map((o) => ({ version: o.version, channel: o.via?.channel ?? anchor }));
+  const actual: { version: string; channel: string }[] = [];
+  const paths = new Map<string, readonly (string | undefined)[]>();
+  for (const option of reachable) {
+    act(() => result.current.target.onChange(option.version));
+    await waitFor(() => expect(result.current.result.status).not.toBe('loading'));
+    const outcome = result.current.result;
+    if (outcome.status === 'success') {
+      const hops = outcome.value.primary.hops;
+      paths.set(option.version, hops.map((h) => h.sourceChannel));
+      actual.push({ version: option.version, channel: hops.at(-1)?.sourceChannel ?? '(no hops)' });
+    } else {
+      actual.push({ version: option.version, channel: outcome.status === 'error' ? describeStitchError(outcome.error) : outcome.status });
+    }
+  }
+  return { options, expected, actual, paths };
+}
+
+describe('usePlanner — every reachable target routes (dropdown and stitcher agree)', () => {
+  it('routes look-ahead targets past an existing but unconnected stable-5.0, and a same-stream release only a look-ahead channel carries', async () => {
+    // Shaped like live Cincinnati in Nov 2026: stable-4.22 nodes name
+    // candidate-4.23 and fast-5.0 but not stable-5.0, which exists with only
+    // 5.0.z and no 4.22 upgrade sources. candidate-4.23 carries 4.22.23,
+    // which stable-4.22 does not.
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(rawGraphJson(['4.22.10', '4.22.15', '4.22.20'], [[0, 1], [1, 2], [0, 2]], 'stable-4.22,candidate-4.23,fast-5.0'))],
+          [
+            'candidate-4.23|amd64',
+            jsonHandler(
+              rawGraphJson(
+                ['4.22.15', '4.22.20', '4.22.23', '4.23.0-ec.1', '4.22.15+build.1'],
+                [[0, 2], [1, 2], [2, 3], [1, 3], [0, 4]],
+                'candidate-4.23,candidate-5.1,fast-5.0',
+              ),
+            ),
+          ],
+          ['fast-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0', '5.0.1'], [[0, 1], [1, 2]], 'fast-5.0,stable-5.0,candidate-5.1'))],
+          ['stable-5.0|amd64', jsonHandler(rawGraphJson(['5.0.0', '5.0.1'], [[0, 1]], 'stable-5.0,fast-5.0'))],
+          [
+            'candidate-5.1|amd64',
+            jsonHandler(rawGraphJson(['4.23.0-ec.1', '5.0.1', '5.0.2', '5.1.0-ec.1'], [[0, 3], [1, 2], [2, 3]], 'candidate-5.1')),
+          ],
+        ]),
+      ),
+      'empty',
+    );
+
+    const { options, expected, actual } = await routeEveryReachableTarget(
+      '?channel=stable-4.22&arch=amd64&start=4.22.15',
+      client,
+      'stable-4.22',
+    );
+
+    expect(options.filter((o) => o.reachable).map((o) => o.version)).toEqual(
+      expect.arrayContaining(['5.1.0-ec.1', '5.0.2', '5.0.1', '5.0.0', '4.23.0-ec.1', '4.22.23', '4.22.20']),
+    );
+    expect(actual).toEqual(expected);
+  });
+
+  it('offers and routes a target more than three streams past the anchor (eus-4.18 to 5.0.1)', async () => {
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['eus-4.18|amd64', jsonHandler(rawGraphJson(['4.16.33', '4.17.5', '4.18.10'], [[0, 1], [1, 2]], 'eus-4.18,stable-4.19'))],
+          ['stable-4.19|amd64', jsonHandler(rawGraphJson(['4.18.10', '4.19.3'], [[0, 1]], 'stable-4.19,eus-4.20'))],
+          ['eus-4.20|amd64', jsonHandler(rawGraphJson(['4.19.3', '4.20.4'], [[0, 1]], 'eus-4.20,stable-4.21'))],
+          ['stable-4.21|amd64', jsonHandler(rawGraphJson(['4.20.4', '4.21.2'], [[0, 1]], 'stable-4.21,eus-4.22'))],
+          ['eus-4.22|amd64', jsonHandler(rawGraphJson(['4.21.2', '4.22.20'], [[0, 1]], 'eus-4.22,fast-5.0'))],
+          ['fast-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.1'], [[0, 1]], 'fast-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+
+    const { options, expected, actual, paths } = await routeEveryReachableTarget(
+      '?channel=eus-4.18&arch=amd64&start=4.16.33',
+      client,
+      'eus-4.18',
+    );
+
+    expect(options.find((o) => o.version === '5.0.1')).toEqual({
+      version: '5.0.1',
+      reachable: true,
+      via: { channel: 'fast-5.0', classFallback: true },
+    });
+    expect(actual).toEqual(expected);
+    expect(paths.get('5.0.1')).toEqual(['eus-4.18', 'eus-4.18', 'stable-4.19', 'eus-4.20', 'stable-4.21', 'eus-4.22', 'fast-5.0']);
+  });
+});
+
+describe('usePlanner — manual refresh', () => {
+  it('rebuilds look-ahead targets from the refreshed anchor, so every reachable option still routes', async () => {
+    // The refreshed stable-4.22 no longer names fast-5.0, so 5.0.1 has no
+    // route from it.
+    let refreshed = false;
+    const client = makeClient(
+      withSeed(
+        new Map([
+          [
+            'stable-4.22|amd64',
+            () => {
+              const channels = refreshed ? 'stable-4.22' : 'stable-4.22,fast-5.0';
+              return Promise.resolve(fakeJsonResponse(rawGraphJson(['4.22.15', '4.22.20'], [[0, 1]], channels)));
+            },
+          ],
+          ['fast-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.1'], [[0, 1]], 'fast-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15');
+    const { result } = renderHook(() => usePlanner(client));
+    await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+    await waitFor(() => expect(result.current.target.groups.flatMap((g) => g.options).map((o) => o.version)).toContain('5.0.1'));
+    const firstFetchedAt = result.current.freshness?.fetchedAt;
+
+    refreshed = true;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    act(() => result.current.freshness?.onRefresh());
+    await waitFor(() => expect(result.current.freshness?.fetchedAt).not.toBe(firstFetchedAt));
+    await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+
+    const { expected, actual } = await routeEachReachableOption(result, 'stable-4.22');
+    expect(actual).toEqual(expected);
   });
 });
 

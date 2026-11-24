@@ -1,120 +1,42 @@
 import { useCallback } from 'react';
-import { parseChannelName } from '../design/channels';
-import { candidateChannelsForStream } from '../design/forwardChannel';
-import { compareStreams, formatStream, type Stream } from '../engine/version';
-import type { GraphClient } from '../graph/client';
-import type { Arch, Graph } from '../graph/types';
+import { discoverLookahead, type LookaheadDiscovery } from '../engine/lookahead';
+import type { GraphClient, GraphResult } from '../graph/client';
+import type { Arch } from '../graph/types';
 import { ok, type Result } from '../lib/result';
+import { makeGraphLoader } from './graphLoader';
 import { type AsyncResult, useAsyncResult } from './useAsyncResult';
 
-/**
- * Bound on how many streams beyond the anchor's own are fetched for
- * look-ahead targets (plan.md §6 "Look-ahead targets (bidirectional
- * stitching)": "be pragmatic about fetch cost -- do not fetch every channel
- * in existence on page load"). Only channels that real membership data
- * already names are fetched, so this is at most `LOOKAHEAD_STEPS` extra
- * requests, only once the user has selected a channel, and cached by
- * `GraphClient` afterward -- including for the engine's later forward walk.
- */
-const LOOKAHEAD_STEPS = 3;
-
-export interface LookaheadSegment {
-  readonly channel: string;
-  readonly graph: Graph;
-  /** True when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
-  readonly classFallback: boolean;
-  /** The anchor's class, which had no channel at this stream -- present iff `classFallback` is true. */
-  readonly requestedClass?: string;
+/** Look-ahead discovered from one loaded anchor graph. */
+export interface LookaheadSnapshot {
+  /** `GraphResult.fetchedAt` of the anchor graph this was discovered from: it names one cache entry, so one graph. */
+  readonly anchorFetchedAt: number;
+  readonly discovery: LookaheadDiscovery;
 }
 
 /**
- * Lazily discovers up to `LOOKAHEAD_STEPS` channels in streams newer than
- * the anchor's, lowest stream first. Which streams come next is read from
- * channel membership, not computed: a node's metadata lists every channel it
- * belongs to, including the next streams' channels it is an upgrade source
- * for (4.22.z lists `candidate-4.23` and `candidate-5.0`). Neither "4.23"
- * nor "5.0" can be derived from "4.22" arithmetically, and both are real
- * successors. Each fetched segment's own membership extends the frontier, so
- * 5.1 is found through `candidate-5.0`.
- *
- * At each stream the class is chosen by `candidateChannelsForStream` (shared
- * with engine/stitch.ts so the two prefer channels identically), restricted
- * to names membership attests.
- *
- * Uses `GraphClient` directly rather than the engine's `GraphLoader`
- * injection seam: this is a UI-only concern (populating a dropdown before
- * any path search has run), and it needs the client's two-tier cache.
- *
- * Returns an empty list when `anchorChannel` doesn't match Cincinnati's
- * `<class>-<major>.<minor>` naming convention, and degrades to the segments
- * found so far on any fetch failure -- this is a dropdown convenience, not a
- * place to surface hard errors.
+ * The look-ahead channels beyond `channel` (engine/lookahead.ts), discovered
+ * from the anchor graph the dropdowns are built from rather than a separate
+ * fetch of it, so a manual refresh of the anchor rediscovers. Read through
+ * `GraphClient`'s cache. Never errors outward: a failed look-ahead fetch is
+ * recorded in `discovery.failure` and means fewer targets offered, not a
+ * broken dropdown.
  */
-export async function discoverLookaheadSegments(
-  client: GraphClient,
-  anchorChannel: string,
-  arch: Arch,
-  signal?: AbortSignal,
-): Promise<readonly LookaheadSegment[]> {
-  const anchor = parseChannelName(anchorChannel);
-  if (!anchor) return [];
-  const anchorResult = await client.getGraph({ channel: anchorChannel, arch }, { signal });
-  if (!anchorResult.ok) return [];
-
-  const attested = new Set(anchorResult.value.graph.channelNames);
-  const visitedStreams = new Set<string>([formatStream(anchor)]);
-  const segments: LookaheadSegment[] = [];
-
-  while (segments.length < LOOKAHEAD_STEPS) {
-    const stream = lowestNewerStream(attested, anchor, visitedStreams);
-    if (!stream) break;
-    visitedStreams.add(formatStream(stream));
-
-    for (const channel of candidateChannelsForStream(anchor.cls, stream).filter((name) => attested.has(name))) {
-      const result = await client.getGraph({ channel, arch }, { signal });
-      if (!result.ok) {
-        if (result.error.kind === 'empty') continue;
-        return segments;
-      }
-      const classFallback = parseChannelName(channel)?.cls !== anchor.cls;
-      segments.push({ channel, graph: result.value.graph, classFallback, requestedClass: classFallback ? anchor.cls : undefined });
-      for (const name of result.value.graph.channelNames) attested.add(name);
-      break;
-    }
-  }
-  return segments;
-}
-
-function lowestNewerStream(channelNames: ReadonlySet<string>, than: Stream, exclude: ReadonlySet<string>): Stream | undefined {
-  let lowest: Stream | undefined;
-  for (const name of channelNames) {
-    const parsed = parseChannelName(name);
-    if (!parsed || compareStreams(parsed, than) <= 0 || exclude.has(formatStream(parsed))) continue;
-    if (!lowest || compareStreams(parsed, lowest) < 0) lowest = { major: parsed.major, minor: parsed.minor };
-  }
-  return lowest;
-}
-
-/**
- * Fetches (and caches, via `discoverLookaheadSegments`) the look-ahead
- * segments for the currently selected `channel`, active only once a channel
- * is actually selected. This never errors outward -- a failed lookahead
- * fetch degrades to "fewer look-ahead targets offered" (see
- * `discoverLookaheadSegments`'s doc), not a broken dropdown -- so the result
- * type's error is `never`.
- */
-export function useLookaheadSegments(
+export function useLookahead(
   client: GraphClient,
   channel: string | undefined,
   arch: Arch,
-): AsyncResult<readonly LookaheadSegment[], never> {
-  const active = channel !== undefined;
-  const depsKey = channel ? `${channel}|${arch}` : '';
+  anchor: GraphResult | undefined,
+): AsyncResult<LookaheadSnapshot, never> {
+  const active = channel !== undefined && anchor !== undefined;
+  const depsKey = active ? `${channel}|${arch}|${anchor.fetchedAt}` : '';
 
   const task = useCallback(
-    (signal: AbortSignal): Promise<Result<readonly LookaheadSegment[], never>> =>
-      discoverLookaheadSegments(client, channel as string, arch, signal).then(ok),
-    [client, channel, arch],
+    async (signal: AbortSignal): Promise<Result<LookaheadSnapshot, never>> => {
+      const { graph, fetchedAt } = anchor as GraphResult;
+      const discovery = await discoverLookahead(makeGraphLoader(client, { signal }), channel as string, graph, arch);
+      return ok({ anchorFetchedAt: fetchedAt, discovery });
+    },
+    [client, channel, arch, anchor],
   );
 
   return useAsyncResult(active, depsKey, task);

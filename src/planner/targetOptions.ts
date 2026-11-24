@@ -1,7 +1,8 @@
-import { reachableFrom } from '../engine/reachability';
+import type { ChannelSegment } from '../engine/lookahead';
+import { shortestPathsFrom } from '../engine/pathfinder';
+import { routeAcrossSegments } from '../engine/stitch';
 import { compareVersions, formatStream, streamOf } from '../engine/version';
 import type { Graph, Version } from '../graph/types';
-import type { LookaheadSegment } from './lookaheadTargets';
 
 /** Newest-first version list for the start dropdown (plan.md §6 / Q7 -- "sorted with compareVersions, newest first"). */
 export function buildStartOptions(graph: Graph): readonly Version[] {
@@ -20,46 +21,42 @@ export interface TargetOption {
  * One newest-first list of every version other than `start` that does not
  * rank below it, across the selected (anchor) channel and its look-ahead
  * segments. A build of the start release (`4.22.1-rc.1+build.1` from
- * `4.22.1-rc.1`) ranks equal in SemVer yet is a real hop, so it stays. A
- * version in the anchor wins over the same version in a segment.
+ * `4.22.1-rc.1`) ranks equal in SemVer yet is a real hop, so it stays.
  *
- * Reachability carries a frontier from `start` through the anchor and then
- * each segment in turn, walking only that graph's own edges (plan.md §4:
- * never union edges across graphs). The frontier is the union over every
- * earlier graph, because successor streams can be siblings (4.23 and 5.0
- * both follow 4.22) rather than a chain.
+ * A version in the anchor is reachable when the anchor's own edges reach it,
+ * exactly the stitcher's single-graph case. Any other version is reachable
+ * when `routeAcrossSegments` -- the route search the stitcher itself uses --
+ * finds a route to it, and `via` names the channel that route ends on, so
+ * choosing a reachable option always yields that path. `classFallback` is
+ * set when any hop of the route leaves the anchor's class.
  */
 export function buildTargetOptions(
   anchor: Graph,
   start: Version,
-  segments: readonly LookaheadSegment[],
+  segments: readonly ChannelSegment[],
 ): readonly TargetOption[] {
-  const sources = [
-    { graph: anchor, via: undefined },
-    ...segments.map((s) => ({ graph: s.graph, via: { channel: s.channel, classFallback: s.classFallback } })),
-  ];
-  const seen = new Set<Version>();
-  let frontier: ReadonlySet<Version> = new Set([start]);
-  const options: TargetOption[] = [];
+  const inAnchor = shortestPathsFrom(anchor, start);
+  // The anchor's channel name never surfaces: routes are read only for
+  // versions outside the anchor, whose last hop is on a look-ahead segment.
+  const routes = routeAcrossSegments([{ channel: '', graph: anchor, classFallback: false }, ...segments], start);
+  const isCandidate = (version: Version) => version !== start && compareVersions(version, start) >= 0;
+  const options = new Map<Version, TargetOption>();
 
-  for (const { graph, via } of sources) {
-    const reachable = new Set<Version>();
-    for (const { version } of graph.nodes) {
-      if (frontier.has(version)) for (const next of reachableFrom(graph, version)) reachable.add(next);
+  for (const { version } of anchor.nodes) {
+    if (isCandidate(version)) options.set(version, { version, reachable: inAnchor.has(version), via: undefined });
+  }
+  for (const segment of segments) {
+    for (const { version } of segment.graph.nodes) {
+      if (options.has(version) || !isCandidate(version)) continue;
+      const route = routes.get(version);
+      const via = route
+        ? { channel: route.hops.at(-1)?.sourceChannel as string, classFallback: route.fallbackHops > 0 }
+        : { channel: segment.channel, classFallback: segment.classFallback };
+      options.set(version, { version, reachable: route !== undefined, via });
     }
-    for (const { version } of graph.nodes) {
-      if (seen.has(version)) continue;
-      seen.add(version);
-      const order = compareVersions(version, start);
-      if (version === start || order < 0) continue;
-      // The stitcher only walks look-ahead graphs into streams newer than the
-      // anchor, so it cannot route to a build that ties the start's precedence there.
-      options.push({ version, reachable: reachable.has(version) && (via === undefined || order > 0), via });
-    }
-    frontier = new Set([...frontier, ...reachable]);
   }
 
-  return options.sort((a, b) => compareVersions(b.version, a.version));
+  return [...options.values()].sort((a, b) => compareVersions(b.version, a.version));
 }
 
 export function versionStream(version: Version): string {

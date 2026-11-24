@@ -160,7 +160,7 @@ value here. Instead: the best path per *distinct intermediate-minor waypoint*, c
 only "capped at three" without saying three of what; the implementation returns two
 alternates alongside the primary.)
 
-**Stitching** is target-channel-first. Fetch the target's channel; if the start version
+**Stitching** is anchor-first. Fetch the selected channel; if the start version
 isn't in it, walk back to the same class one stream older (the highest older stream among
 the current graph's own nodes, see §6 "Major-version boundaries") until it is. Where two graphs disagree
 about an overlapping release, the later channel wins. We never union edges across graphs
@@ -269,15 +269,34 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > **Implemented.** `PathHop.sourceChannel` (engine/types.ts) now carries this on every hop
 > the stitcher returns, single- or multi-graph alike. `stitchAndFindPath`
 > (engine/stitch.ts) is bidirectional: it fetches the anchor once, then walks backward to
-> cover `start` and/or forward to cover `target` as needed, in the same fetch. Forward
-> walking starts at the *target's own stream* (not one past the anchor), so a channel
-> that already reaches back far enough — `eus-4.22` sharing the 4.20.x band with
-> `eus-4.20` — joins directly with no unnecessary intermediate channel, exactly matching
-> the table above. A class fallback (`StitchInfo.classFallbacks`) is surfaced in both the
-> target dropdown (`TargetSelect`, "drops to <class>") and the result banner
-> (`StitchBanner`) when it's used. See the forward-walk tests in
+> cover `start` and/or forward to cover `target` as needed, in the same fetch. A class
+> fallback (`StitchInfo.classFallbacks`) is surfaced in both the target dropdown
+> (`TargetSelect`, "class change") and the result banner (`StitchBanner`) when the route
+> walks a fallback channel. See the forward-walk tests in
 > `engine/__tests__/stitch.test.ts` for the exact algorithm, including the
 > multi-stream-with-fallback case.
+>
+> **One forward walk, one route search.** The target dropdown and the stitcher once chose
+> forward channels by two different walks, and the dropdown offered targets the stitcher
+> could not route. The stitcher started at the target's stream and took the first
+> non-empty class, so an unconnected `stable-5.0` (5.0.z only, no 4.22 sources) beat the
+> `fast-5.0` the dropdown used. It never walked forward for a release in the anchor's own
+> stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
+> three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
+> `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
+> stream is named (safety cap 12 streams). Both also read reachability from
+> `routeAcrossSegments` (engine/stitch.ts), a layered shortest-path DP over the anchor
+> plus every look-ahead segment. Its frontier carries across segments, so a segment can
+> contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
+> though `stable-4.21` sits between them in the list. An option marked reachable is
+> therefore routable by construction, and its `via` names the channel its route ends on.
+> A version in the anchor is still routed on the anchor's own edges only, with full
+> alternates.
+>
+> **One snapshot.** The planner discovers look-ahead from the anchor graph the dropdowns
+> show, not a separate fetch of it, keyed on that graph's fetch time. The path search then
+> routes against that same anchor graph and discovery instead of refetching and
+> rediscovering. A manual refresh therefore rebuilds the options and the route together.
 
 ### Major-version boundaries (4.22 → 5.0)
 
@@ -297,13 +316,17 @@ the live API on 2026-11-01:
 `5.-1`, and "the stream after 4.22" is both 4.23 and 5.0. Two facts in every graph answer
 it directly:
 
-- *Walking toward older streams* (the stitcher's backward walk, and its forward walk
-  stepping down from the target): a channel's nodes include its upgrade sources, so the
+- *Walking toward older streams* (the stitcher's backward walk): a channel's nodes
+  include its upgrade sources, so the
   previous stream is the highest stream among its own nodes below its own
   (`candidate-5.0` → 4.22).
-- *Walking toward newer streams* (look-ahead discovery): each node's membership lists the
+- *Walking toward newer streams* (look-ahead discovery, which is also the stitcher's
+  forward walk): each node's membership lists the
   newer channels it is an upgrade source for (`stable-4.22` nodes name `candidate-4.23`
   and `candidate-5.0`). Discovery fetches only those named channels, lowest stream first.
+  Because successors are siblings, a channel that fails to load is skipped, not fatal:
+  a 503 from `candidate-4.23` must not hide `candidate-5.0`. The failure is reported only
+  when no route reaches the target.
 
 So `stable-4.22`, start 4.22.z, target 5.0.0-rc.x stitches `stable-4.22` → `candidate-5.0`
 and emits `oc adm upgrade channel candidate-5.0` at the last `stable-4.22` station on the
@@ -397,53 +420,46 @@ indexing `Graph.channelNames`):
 > channel the cluster is currently on**. Switch to a channel that version actually belongs
 > to — never to a name assembled from a class and a minor.
 
-**Where the switch is attributed matters.** The command runs while the cluster is standing
-on a release, so the switch belongs to **the earliest station on the path that is already a
-member of the destination channel** — not to the destination of the hop that leaves the old
-channel.
+**Where the switch is attributed matters.** Each hop runs on the channel whose graph
+supplied its edge, and the switch belongs to **the station where that channel changes**:
+the release the cluster stands on before the first hop the new channel supplies, not the
+destination of that hop. Once the cluster is on channel X, each `oc adm upgrade --to` takes
+X's edge with the risks X attaches to it. Another channel can list both releases of a hop,
+or even publish the same edge, and still attach different risks (an `Always` risk where X
+has none), so a hop is never moved onto a channel other than the one that supplied it.
 
 Worked example, `eus-4.20` → `4.22.9`:
 
-| Station | member of `eus-4.22` |
+| Station | next hop supplied by |
 |---|---|
-| 4.18.2 | no |
-| 4.18.51 | no |
-| 4.19.41 | no |
-| **4.20.33** | **yes ← switch here** |
-| 4.21.28 | yes |
-| 4.22.9 | yes |
+| 4.18.2 | `eus-4.20` |
+| 4.18.51 | `eus-4.20` |
+| 4.19.41 | `eus-4.20` |
+| **4.20.33** | **`eus-4.22` ← switch here** |
+| 4.21.28 | `eus-4.22` |
+| 4.22.9 | (target) |
 
-The cluster reaches 4.20.33 on `eus-4.20`, and 4.20.33 is also in `eus-4.22`, so that is the
-first point the switch is possible — and therefore where the map's interchange marker and
-the `oc adm upgrade channel` line belong. Marking 4.21.28 is wrong: by then the switch has
-already had to happen.
+The cluster reaches 4.20.33 on `eus-4.20`, and the next hop (4.20.33 → 4.21.28) is
+`eus-4.22`'s edge, so the switch runs while standing on 4.20.33. That is where the map's
+interchange marker and the `oc adm upgrade channel` line belong. Marking 4.21.28 is wrong:
+by then the switch has already had to happen.
 
-The exception is a switch *into* a class fallback (`eus` → `stable`, `stable` →
-`candidate`). Switching there as early as possible would move the cluster off its own
-class for longer than the path needs, so that switch stays at the last station the path
-spends on the earlier channel.
+Where several channels could supply the same hops, the route search (§4) decides which one
+does. On a tie it keeps the route it already has, so the cluster stays on its current
+channel, or on its own class, until a hop needs the next one.
 
 A channel name must never be constructed; it must only ever be read from real membership
 data or from the set of channels the stitcher actually fetched.
 
-> **Implemented.** `stitchPrimaryAcrossSegments`'s layered DP (engine/stitch.ts) picks its
-> segment boundary for path *cost* (fewest hops, then risk, then patch level) or plain edge
-> availability, not for early attribution -- so on a path where several *consecutive*
-> stations all belong to the destination channel, the DP's own boundary can legitimately
-> land later than the earliest one (see `stitch.test.ts`'s "several consecutive shared
-> stations" case, where the forward channel's own edges only start from the *last* of three
-> shared 4.20.x stations). `reattributeSwitches` (engine/stitch.ts) runs immediately
-> after the DP and relabels `PathHop.sourceChannel` to the earliest station on the path that
-> is a real member of the channel about to be used, checked directly against each fetched
-> segment's own node list (`versionsOf`, never a constructed name) -- a pure relabelling
-> pass that never changes which versions or edges are on the path. It's applied per
-> crossing independently, so a path through three-or-more channels gets each boundary
-> corrected on its own. `design/commands.ts` was already comparing consecutive hops'
-> `sourceChannel` correctly; the remaining bug was that `UpgradeMap` and `HopDetail` both
-> anchored the switch on the *arriving* station (`hop.to`) of the hop carrying
-> `channelSwitch`, one station later than where the switch actually happens -- both now key
-> off `hop.from` instead, so the ring, the inline tag, and the hop-detail copy all name the
-> same station the command sequence already implied.
+> **History.** An earlier `reattributeSwitches` pass moved each switch back to the earliest
+> station the destination channel could take over, relabelling hops after the route search.
+> It failed three ways, each patched in turn: it moved the cluster onto `candidate` early
+> (fixed by exempting class fallbacks), it moved hops onto a channel that listed both
+> releases but did not publish the edge (fixed by checking edges), and it moved hops onto a
+> channel that published the edge with an `Always` risk while still showing the original
+> channel's empty risk list. All three came from one premise, that a hop can run on any
+> channel that has the edge. The pass was deleted. `UpgradeMap` and `HopDetail` anchor the
+> switch on the hop's `from`, the station the cluster stands on when it runs.
 
 **Consequence: within a single-graph query, a channel switch can never be required.**
 Verified across all five pinned fixtures — 546 nodes total, **zero** that are not members

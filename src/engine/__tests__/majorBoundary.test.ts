@@ -104,7 +104,21 @@ describe('stitching across the 4.22 -> 5.0 major boundary (live fixtures)', () =
     expect(switches[0]).toBe(commands.at(-1));
   });
 
-  it('steps back from candidate-5.0 to the 4.22 stream its own upgrade sources name, not to "5.-1"', async () => {
+  it('still reaches candidate-5.0 when its sibling candidate-4.23 fails to load', async () => {
+    const loader: GraphLoader = async (channel, arch) =>
+      channel === 'candidate-4.23' ? err({ kind: 'network', message: 'Service Unavailable', status: 503 }) : fixtureLoader()(channel, arch);
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.22',
+      arch: 'amd64',
+      start: v('4.22.20'),
+      target: v('5.0.0-rc.8'),
+    });
+    if (!result.ok) throw new Error(describeStitchError(result.error));
+    expect(result.value.stitch.channelsUsed).toEqual(['stable-4.22', 'candidate-5.0']);
+    expect(result.value.primary.versions).toEqual(['4.22.20', '5.0.0-rc.8']);
+  });
+
+  it('walks forward from stable-4.21 through the channels membership names, reaching 5.0 without minor arithmetic', async () => {
     const calls: string[] = [];
     const result = await stitchAndFindPath(fixtureLoader(calls), {
       targetChannel: 'stable-4.21',
@@ -114,8 +128,9 @@ describe('stitching across the 4.22 -> 5.0 major boundary (live fixtures)', () =
     });
     if (!result.ok) throw new Error(describeStitchError(result.error));
 
-    expect(result.value.stitch.channelsUsed).toEqual(['stable-4.21', 'candidate-5.0', 'stable-4.22']);
-    expect(calls).toEqual(['stable-4.21', 'stable-5.0', 'fast-5.0', 'candidate-5.0', 'stable-4.22']);
+    expect(result.value.stitch.channelsUsed).toEqual(['stable-4.21', 'stable-4.22', 'candidate-5.0']);
+    // Only channels a fetched node names; the unnamed stable-5.0 and fast-5.0 are never probed.
+    expect(calls).toEqual(['stable-4.21', 'stable-4.22', 'candidate-4.23', 'candidate-5.0', 'candidate-5.1']);
     expect(result.value.primary.versions.at(-1)).toBe('5.0.0-rc.8');
   });
 
