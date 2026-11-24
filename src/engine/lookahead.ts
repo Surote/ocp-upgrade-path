@@ -90,10 +90,12 @@ export async function discoverLookahead(
   const queued: { readonly channel: string; readonly start: () => void }[] = [];
   let inFlight = 0;
   // The answer the walk awaits leaves its slot to the walk's next turn, which
-  // first reorders the queue by what that answer revealed.
+  // first reorders the queue by what that answer revealed; `reserved` keeps
+  // another call's completion from handing that slot to the old queue first.
   let awaited: string | undefined;
+  let reserved = 0;
   const startQueued = () => {
-    while (inFlight < LOOKAHEAD_WINDOW) {
+    while (inFlight + reserved < LOOKAHEAD_WINDOW) {
       const call = queued.shift();
       if (!call) return;
       call.start();
@@ -107,7 +109,8 @@ export async function discoverLookahead(
         resolve(call);
         const done = () => {
           inFlight -= 1;
-          if (channel !== awaited) startQueued();
+          if (channel === awaited) reserved = 1;
+          else startQueued();
         };
         void call.then(done, done);
       };
@@ -125,6 +128,7 @@ export async function discoverLookahead(
     }
     const position = new Map(frontier.map(({ channel }, i) => [channel, i]));
     queued.sort((a, b) => (position.get(a.channel) ?? 0) - (position.get(b.channel) ?? 0));
+    reserved = 0;
     startQueued();
     const pending = fetches.get(next.channel);
     // The cap went on fetches a graph taken since then pushed behind `next`.
@@ -144,6 +148,8 @@ export async function discoverLookahead(
     found.push({ ...next, graph: result.value });
     for (const name of result.value.channelNames) attested.add(name);
   }
+  reserved = 0;
+  startQueued();
   // A fetched graph can name a stream older than one already fetched (only
   // 5.1 names 4.23), and the route search never returns to an earlier stream.
   found.sort((a, b) => compareStreams(a.stream, b.stream) || b.rank - a.rank);

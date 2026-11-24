@@ -59,7 +59,11 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
  * answers next. Calls still waiting after the discovery returns answer too,
  * so `fetched` holds every call it ever makes.
  */
-async function scheduled(graphs: Readonly<Record<string, Graph | GraphError>>, anchor: Graph, pick: (waiting: readonly string[]) => number) {
+async function scheduled(
+  graphs: Readonly<Record<string, Graph | GraphError>>,
+  anchor: Graph,
+  pick: (waiting: readonly string[]) => number | readonly number[],
+) {
   const inner = loaderFor(graphs);
   const waiting: { channel: string; answer: () => void }[] = [];
   const fetched: string[] = [];
@@ -81,7 +85,12 @@ async function scheduled(graphs: Readonly<Record<string, Graph | GraphError>>, a
   };
   let discovery: Awaited<ReturnType<typeof discoverLookahead>> | undefined;
   void discoverLookahead(loader, 'stable-4.5', anchor, 'amd64').then((d) => (discovery = d));
-  for (await settle(); waiting.length > 0; await settle()) waiting.splice(pick(waiting.map((call) => call.channel)), 1)[0]?.answer();
+  for (await settle(); waiting.length > 0; await settle()) {
+    const picked = pick(waiting.map((call) => call.channel));
+    // Several picks answer in the same tick, before the discovery resumes.
+    const answering = (typeof picked === 'number' ? [picked] : [...picked]).sort((a, b) => b - a).map((i) => waiting.splice(i, 1)[0]);
+    for (const call of answering) call?.answer();
+  }
   if (!discovery) throw new Error('discovery waits on no loader call');
   return { discovery, fetched, maxInFlight };
 }
@@ -152,6 +161,27 @@ describe('look-ahead discovery does not depend on response timing', () => {
     expect(slowLast.maxInFlight).toBeLessThanOrEqual(MAX_IN_FLIGHT);
     expect(slowLast.discovery.channelsTried).toEqual(['stable-4.6', ...revealed, ...slow]);
     expect(slowLast.discovery.channelsTried).toEqual(inOrder.discovery.channelsTried);
+  });
+
+  it('keeps the awaited answer\'s slot for the channels it reveals when a prefetch answers in the same tick', async () => {
+    const slow = ['stable-4.20', 'stable-4.21', 'stable-4.22', 'stable-4.23', 'stable-4.24'];
+    const pushedBack = ['stable-4.12', 'stable-4.13', 'stable-4.14', 'stable-4.15', 'stable-4.16'];
+    const ahead = ['candidate-4.6', 'stable-4.7', 'stable-4.8', 'stable-4.9', 'stable-4.10', 'stable-4.11'];
+    const graphs: Record<string, Graph> = Object.fromEntries([...slow, ...pushedBack, ...ahead].map((name) => [name, graph([], { nodes: ['4.6.1'], channels: [name] })]));
+    graphs['stable-4.6'] = graph([], { nodes: ['4.6.1'], channels: ['stable-4.6', 'fast-4.6', ...pushedBack] });
+    graphs['fast-4.6'] = graph([], { nodes: ['4.6.2'], channels: ['fast-4.6', ...ahead] });
+    const anchor = graph([], { nodes: ['4.5.0'], channels: ['stable-4.5', 'stable-4.6', ...slow] });
+
+    // fast-4.6 (awaited) and stable-4.20 (a prefetch) answer together; otherwise non-slow calls first.
+    const { fetched, maxInFlight } = await scheduled(graphs, anchor, (waiting) => {
+      const awaitedAt = waiting.indexOf('fast-4.6');
+      const slowAt = waiting.indexOf('stable-4.20');
+      if (awaitedAt >= 0 && slowAt >= 0) return [awaitedAt, slowAt];
+      return Math.max(0, waiting.findIndex((channel) => !slow.includes(channel)));
+    });
+
+    expect(fetched.indexOf('candidate-4.6')).toBeLessThan(fetched.indexOf('stable-4.13'));
+    expect(maxInFlight).toBeLessThanOrEqual(MAX_IN_FLIGHT);
   });
 
   it('requests the channel the walk waits on before prefetches a later graph pushed back', async () => {
