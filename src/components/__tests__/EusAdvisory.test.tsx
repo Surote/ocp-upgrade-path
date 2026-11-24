@@ -64,7 +64,7 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
 
     const [leg] = legItems() as [HTMLElement];
     expect(leg.querySelector('h3')?.textContent).toBe('Leg 1: 4.18 → 4.20 (Control Plane Only update not available on this route)');
-    expect(leg).toHaveTextContent(/the update from 4\.18\.42 to 4\.19\.43 comes from candidate-4\.20/);
+    expect(leg).toHaveTextContent(/The update from 4\.18\.42 to 4\.19\.43 comes from candidate-4\.20/);
     expect(leg).toHaveTextContent(/only after every update involved is available in a stable channel/);
     expect(leg.textContent).not.toMatch(/"paused"|pause workers before/i);
   });
@@ -77,7 +77,7 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
     const [first, second] = legItems() as [HTMLElement, HTMLElement];
     expect(first).toHaveTextContent(/"paused":true/);
     expect(second.querySelector('h3')?.textContent).toBe('Leg 2: 4.18 → 4.20 (Control Plane Only update not available on this route)');
-    expect(second).toHaveTextContent(/the update from 4\.19\.55 to 4\.20\.46 comes from fast-4\.20/);
+    expect(second).toHaveTextContent(/The update from 4\.19\.55 to 4\.20\.46 comes from fast-4\.20/);
     expect(second.textContent).not.toMatch(/"paused"/);
   });
 });

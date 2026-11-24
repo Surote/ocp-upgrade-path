@@ -79,9 +79,10 @@ function UnavailableLegNote({ leg, n }: { readonly leg: UnavailableLeg; readonly
         Leg {n}: {formatStream(leg.from)} → {formatStream(leg.to)} (Control Plane Only update not available on this route)
       </h3>
       <p className="panel__hint">
-        Keep worker pools unpaused for this leg: the update from {from} to {to} comes from {sourceChannel ?? 'an unrecorded channel'}, and Red
-        Hat offers a Control Plane Only update only after every update involved is available in a stable channel. Update through{' '}
-        {formatStream(leg.via)} as a standard update, or plan this leg on eus-{formatStream(leg.to)} once its releases reach it.
+        Don't pause worker pools for this leg. The update from {from} to {to} comes from{' '}
+        {sourceChannel ?? 'an unrecorded channel'}, and Red Hat offers a Control Plane Only update only after every update involved is
+        available in a stable channel. Take this leg as a standard update, or plan it on eus-{formatStream(leg.to)} once these releases
+        reach that channel.
       </p>
     </>
   );
