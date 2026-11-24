@@ -73,8 +73,10 @@ describe('App', () => {
     expect(list).toHaveTextContent('4.20.32');
   });
 
-  it('shows hop/station detail only once something on the map is selected', async () => {
+  it('keeps the AI caveat visible and shows hop/station detail only once something on the map is selected', async () => {
     render(<App graphClient={makeClient()} />);
+
+    expect(screen.getByText('AI-generated.').closest('[role="note"]')).toHaveTextContent(/Verify with Red Hat docs before acting/);
 
     await waitFor(() => expect(screen.getByRole('option', { name: 'demo-4.21' })).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'demo-4.21' } });

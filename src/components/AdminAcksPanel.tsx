@@ -37,7 +37,7 @@ export function AdminAcksPanel({ path }: { readonly path: Path }) {
           const kcs = kcsLinkFor(stream);
           const name = formatStream(stream);
           return (
-            <li key={name} className="admin-acks-item">
+            <li key={name}>
               <h3>Entering {name}</h3>
               {keys.length > 0 ? (
                 <>

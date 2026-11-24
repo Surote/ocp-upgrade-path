@@ -1,26 +1,41 @@
 /*
- * Phase 4 — the design phase. Plain CSS, no framework. Organised by region;
- * class selectors throughout (never bare-element rules fighting a class for
- * the same property — the classic specificity failure mode at this size).
+ * Plain CSS, no framework, organised by region. Sections are flat and
+ * separated by whitespace and hairlines; colour is reserved for the lanes,
+ * risk severity and the one interactive accent.
  */
 
 main {
-  max-width: 1040px;
+  max-width: 960px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 20px 64px;
-  text-align: left;
+  padding: 28px 20px 48px;
 }
 
 /* ---------------------------------------------------------------- header */
 
 .app-header {
-  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-header h1 {
+  margin: 0;
 }
 
 .app-tagline {
   color: var(--text-muted);
-  max-width: 60ch;
+}
+
+.ai-note {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.ai-note strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 /* ------------------------------------------------------------ control rail */
@@ -28,15 +43,13 @@ main {
 .control-rail {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  margin: 24px 0;
-  padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  gap: 12px;
+  margin: 20px 0 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
   position: sticky;
-  top: 12px;
+  top: 0;
   z-index: 10;
 }
 
@@ -44,12 +57,6 @@ main {
   .control-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     position: static;
-  }
-}
-
-@media (max-width: 460px) {
-  .control-rail {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -61,17 +68,16 @@ main {
 }
 
 .field label {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 0.8rem;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .field select {
   font: inherit;
-  padding: 8px 10px;
-  border-radius: 8px;
+  font-size: 0.95rem;
+  padding: 6px 8px;
+  border-radius: 6px;
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text-h);
@@ -81,98 +87,78 @@ main {
   opacity: 0.55;
 }
 
+.field .text-muted {
+  font-size: 0.75rem;
+}
+
 .field-error {
   color: var(--risk-always);
   font-size: 0.85rem;
 }
 
-.field-error button {
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text-h);
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-
 .notices {
-  border: 1px solid var(--risk-conditional);
-  background: var(--risk-conditional-bg);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-left: 2px solid var(--risk-conditional);
+  padding: 2px 0 2px 12px;
   margin: 16px 0;
+  font-size: 0.9rem;
 }
 
 .notices ul {
   margin: 0;
-  padding-left: 20px;
+  padding-left: 18px;
 }
 
 .freshness {
   color: var(--text-muted);
-  font-size: 0.85rem;
-  margin: 8px 2px 0;
+  font-size: 0.8rem;
+  margin-top: 8px;
 }
 
+.field-error button,
 .freshness button {
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text-h);
-  border-radius: 6px;
-  padding: 2px 8px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
   cursor: pointer;
-  margin-left: 6px;
 }
 
 /* ----------------------------------------------------------- result shell */
 
 .result-section {
-  margin-top: 28px;
+  margin-top: 24px;
 }
 
 .path-result-hint {
   color: var(--text-muted);
-  padding: 32px 0;
-  text-align: center;
+  padding: 24px 0;
 }
 
 .path-result-error {
   color: var(--risk-always);
-  background: var(--risk-always-bg);
-  border: 1px solid var(--risk-always);
-  border-radius: 8px;
-  padding: 12px 16px;
+  border-left: 2px solid var(--risk-always);
+  padding: 4px 0 4px 12px;
 }
 
 .stitch-banner {
-  background: var(--accent-bg);
-  border: 1px solid var(--accent);
-  color: var(--text-h);
-  border-radius: 8px;
-  padding: 8px 14px;
-  margin-bottom: 12px;
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px 12px;
+  margin-bottom: 16px;
   font-size: 0.9rem;
-}
-
-.stitch-banner p {
-  margin: 0;
+  color: var(--text-h);
 }
 
 .stitch-banner p + p {
   margin-top: 6px;
 }
 
-/* A class fallback (eus -> stable, stable -> candidate) is a support-posture change, not just an
-   audit note -- given the same visual weight as an "always" risk so it reads
-   as a warning, not a footnote (plan.md §6 requirement 5). */
+/* A class fallback (eus -> stable, stable -> candidate) changes the support
+   posture, so it gets the "always" risk colour: a warning, not a footnote
+   (plan.md §6 requirement 5). */
 .stitch-banner__fallback {
   color: var(--risk-always);
-}
-
-/* ------------------------------------------------------------- route summary */
-
-.route-summary {
-  margin-bottom: 8px;
 }
 
 .route-summary ol {
@@ -183,8 +169,7 @@ main {
   gap: 6px;
   margin: 0;
   padding: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-h);
 }
 
@@ -198,23 +183,34 @@ main {
 .route-summary__meta {
   color: var(--text-muted);
   font-size: 0.85rem;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 /* --------------------------------------------------------------------- map */
 
+/* One severity colour per state, read by the map badge, legend, and risk
+   cards. Shape (▲/◆/✓) and words carry severity too, never colour alone. */
+.risk-pill--always,
+.map-legend__item--always,
+.risk-card--always {
+  --sev: var(--risk-always);
+}
+.risk-pill--conditional,
+.map-legend__item--conditional,
+.risk-card--conditional {
+  --sev: var(--risk-conditional);
+}
+.risk-pill--clean,
+.map-legend__item--clean {
+  --sev: var(--clean);
+}
+
 .map-wrap {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  padding: 16px 8px 12px;
-  margin: 12px 0 20px;
+  margin: 16px 0 8px;
 }
 
 .map-scroll {
   overflow-x: auto;
-  padding-bottom: 4px;
 }
 
 .upgrade-map {
@@ -223,178 +219,114 @@ main {
 
 .upgrade-map text {
   font-family: var(--sans);
-  fill: var(--text-h);
-}
-
-.station__label {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.station__risk-count {
-  font-family: var(--mono);
-  font-weight: 700;
-}
-
-.station__risk-count--always {
-  fill: var(--risk-always);
-}
-
-.station__risk-count--conditional {
-  fill: var(--risk-conditional);
-}
-
-.station__caption {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-size: 10px;
   fill: var(--text-muted);
 }
 
-.interchange-tag {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.upgrade-map .station__label {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  fill: var(--text-h);
+}
+
+.upgrade-map .interchange-tag {
+  font-weight: 600;
   fill: var(--accent);
 }
 
-/* lane colours -- deterministic per minor, design/lanes.ts */
+/* lane colours, deterministic per minor (design/lanes.ts) */
 .lane-0 {
-  stroke: var(--lane-0);
-  fill: var(--lane-0);
+  --lane: var(--lane-0);
 }
 .lane-1 {
-  stroke: var(--lane-1);
-  fill: var(--lane-1);
+  --lane: var(--lane-1);
 }
 .lane-2 {
-  stroke: var(--lane-2);
-  fill: var(--lane-2);
+  --lane: var(--lane-2);
 }
 .lane-3 {
-  stroke: var(--lane-3);
-  fill: var(--lane-3);
+  --lane: var(--lane-3);
 }
 .lane-4 {
-  stroke: var(--lane-4);
-  fill: var(--lane-4);
+  --lane: var(--lane-4);
 }
 .lane-5 {
-  stroke: var(--lane-5);
-  fill: var(--lane-5);
+  --lane: var(--lane-5);
+}
+
+.hop-segment,
+.station {
+  cursor: pointer;
 }
 
 .hop-segment__line {
-  /* Bold, transit-map-weight lane stroke -- not a hairline rule with dots on it. */
-  stroke-width: 9;
+  stroke: var(--lane);
+  stroke-width: 3;
   stroke-linecap: round;
 }
 
 .hop-segment__hit {
   stroke: transparent;
-  stroke-width: 27;
-  pointer-events: stroke;
-  cursor: pointer;
+  stroke-width: 24;
 }
 
-.hop-segment {
-  cursor: pointer;
+.station__hit {
+  fill: transparent;
 }
 
 .hop-segment:focus-visible .hop-segment__line,
 .hop-segment.is-selected .hop-segment__line {
-  stroke-width: 12;
+  stroke-width: 5;
 }
 
-.hop-segment:focus-visible .hop-segment__hit {
-  stroke: color-mix(in srgb, var(--focus) 35%, transparent);
-}
-
-/* A visible focus indicator that works regardless of the element's own lane
-   colour (a stroke-colour-only ring is too low-contrast against a lane hue
-   that happens to be close to --focus, e.g. lane-0's indigo) -- `outline`
-   draws around the whole element's bounding box independent of its fill/
-   stroke, so it reads the same on every lane and every risk state. */
+/* Focus rings sit on the page background or the badge's opaque fill, never
+   on a lane hue, so they keep their contrast on every lane colour. */
 .hop-segment:focus-visible,
 .station:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
+  outline: none;
 }
 
-.station {
-  cursor: pointer;
+.station:focus-visible .station__hit,
+.hop-segment:focus-visible .risk-pill rect {
+  stroke: var(--focus);
+  stroke-width: 2;
 }
 
 .station__dot {
-  stroke-width: 3;
-  stroke: var(--surface);
+  fill: var(--lane);
+  stroke: var(--bg);
+  stroke-width: 2;
 }
 
-.station--terminal .station__dot {
-  stroke-width: 3.5;
-}
-
-.station:focus-visible .station__dot,
 .station.is-selected .station__dot {
   stroke: var(--focus);
-  stroke-width: 3.5;
+  stroke-width: 3;
 }
 
 .station__no-advisory-ring {
   fill: none;
   stroke: var(--border-strong);
-  stroke-width: 1;
   stroke-dasharray: 2 2;
 }
 
-/* Interchange = a ring around the station -- the standard transit-map mark
-   for "this stop connects to a different line", drawn where the ring is
-   part of the station itself rather than a small glyph floating above the
-   row (which read as detached and crowded the TARGET caption). */
 .interchange-ring {
   fill: none;
   stroke: var(--accent);
-  stroke-width: 2.5;
-  stroke-dasharray: 4 3;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
 }
 
-/* Risk pill riding directly ON the segment line (same y as the line, drawn
-   after it) -- an opaque capsule inset into the route, not a tinted overlay
-   the thick lane stroke would bleed through. Shape (▲/◆/✓) plus the word in
-   the aria-label carry severity alongside colour, never colour alone. */
+/* Opaque fill so the lane line doesn't show through the badge. */
 .risk-pill rect {
-  fill: var(--surface);
-  stroke-width: 2;
+  fill: var(--bg);
+  stroke: var(--sev);
 }
 
-.risk-pill text {
+.upgrade-map .risk-pill text {
   font-family: var(--mono);
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.risk-pill--always rect {
-  stroke: var(--risk-always);
-}
-.risk-pill--always text {
-  fill: var(--risk-always);
-}
-
-.risk-pill--conditional rect {
-  stroke: var(--risk-conditional);
-}
-.risk-pill--conditional text {
-  fill: var(--risk-conditional);
-}
-
-.risk-pill--clean rect {
-  stroke: var(--clean);
-}
-.risk-pill--clean text {
-  fill: var(--clean);
+  font-weight: 600;
+  fill: var(--sev);
 }
 
 .map-legend {
@@ -402,55 +334,46 @@ main {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  margin: 10px 4px 0;
+  margin: 8px 0 0;
   padding: 0;
   font-size: 0.78rem;
   color: var(--text-muted);
 }
 
-.map-legend__item--always {
-  color: var(--risk-always);
-}
-.map-legend__item--conditional {
-  color: var(--risk-conditional);
-}
-.map-legend__item--clean {
-  color: var(--clean);
+.map-legend__item {
+  color: var(--sev, inherit);
 }
 
-/* ------------------------------------------------------------------ panels */
+.map-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+/* --------------------------------------------------------------- sections */
 
 .detail-grid {
   display: grid;
-  /* minmax(0, 1fr), not a bare 1fr: a grid track's automatic minimum is its
-     items' min-content width, which for an unbreakable long token (a
-     digest, an errata URL) can be wider than the viewport -- minmax(0, ..)
-     lets the track (and the panel inside it) actually shrink to fit,
-     instead of forcing the whole page to scroll sideways. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-@media (max-width: 760px) {
-  .detail-grid {
-    grid-template-columns: 1fr;
-  }
+  /* min(100%, ..) and a 0 minimum let a track shrink below an unbreakable
+     token (a digest, an errata URL) instead of scrolling the page sideways;
+     auto-fit gives a lone selection the full width. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  column-gap: 32px;
 }
 
 .panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 18px;
-  margin-bottom: 16px;
-  /* Same min-width:0 reasoning as .detail-grid above -- a flex/grid item
-     otherwise refuses to shrink below its content's min-content width. */
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+  margin-top: 28px;
   min-width: 0;
 }
 
 .panel a {
   overflow-wrap: anywhere;
+}
+
+.panel h3 {
+  margin-top: 16px;
 }
 
 .panel__head {
@@ -460,9 +383,13 @@ main {
   gap: 12px;
 }
 
+.panel__head h2 {
+  margin: 0;
+}
+
 .panel__hint {
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
 .text-muted {
@@ -473,30 +400,25 @@ main {
 
 .interchange-note {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
-  background: var(--accent-bg);
   color: var(--text-h);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 0.88rem;
+  border-left: 2px solid var(--accent);
+  padding-left: 12px;
+  font-size: 0.9rem;
   margin: 10px 0;
-}
-
-.interchange-note__icon {
-  font-size: 1.1rem;
 }
 
 .hop-commands {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 10px 0 16px;
+  margin: 10px 0 0;
 }
 
 .command-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -504,9 +426,8 @@ main {
 
 .command-line code {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 240px;
   overflow-wrap: anywhere;
-  word-break: break-word;
   white-space: normal;
 }
 
@@ -520,64 +441,47 @@ main {
 
 /* ------------------------------------------------------------------ risks */
 
-.risk-card-list {
+.risk-card-list,
+.admin-acks-list,
+.alternates-list {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
 }
 
 .risk-card {
-  border-radius: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-}
-
-.risk-card--always {
-  border-color: var(--risk-always);
-  background: var(--risk-always-bg);
-}
-
-.risk-card--conditional {
-  border-color: var(--risk-conditional);
-  background: var(--risk-conditional-bg);
+  border-left: 2px solid var(--sev);
+  padding-left: 12px;
 }
 
 .risk-card__head {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
   font-weight: 600;
 }
 
-.risk-badge {
-  font-size: 0.9rem;
-}
-
-.risk-card--always .risk-badge,
-.risk-card--always .risk-card__class {
-  color: var(--risk-always);
-}
-
-.risk-card--conditional .risk-badge,
-.risk-card--conditional .risk-card__class {
-  color: var(--risk-conditional);
+.risk-badge,
+.risk-card__class {
+  color: var(--sev);
 }
 
 .risk-card__class {
-  text-transform: uppercase;
-  font-size: 0.72rem;
-  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
 .risk-card__name {
   color: var(--text-h);
+  overflow-wrap: anywhere;
 }
 
 .risk-card__message {
-  margin: 6px 0;
+  margin: 4px 0 6px;
   font-size: 0.9rem;
 }
 
@@ -585,7 +489,7 @@ main {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 4px;
   font-size: 0.85rem;
 }
 
@@ -613,20 +517,13 @@ main {
 }
 
 .risk-clean {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   color: var(--clean);
-  background: var(--clean-bg);
-  border: 1px solid var(--clean);
-  border-radius: 8px;
-  padding: 10px 14px;
   margin-top: 8px;
   font-weight: 500;
 }
 
 .risk-clean__icon {
-  font-size: 1rem;
+  margin-right: 6px;
 }
 
 /* -------------------------------------------------------------- node detail */
@@ -635,15 +532,12 @@ main {
   margin: 8px 0 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .node-detail-list dt {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.8rem;
   color: var(--text-muted);
-  margin-bottom: 2px;
 }
 
 .node-detail-list dd {
@@ -652,7 +546,6 @@ main {
 
 .digest {
   max-width: 100%;
-  overflow-wrap: anywhere;
 }
 
 .chip-list {
@@ -667,19 +560,17 @@ main {
 .chip {
   font-family: var(--mono);
   font-size: 0.78rem;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 10px;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 2px 8px;
 }
 
 /* --------------------------------------------------------------- commands */
 
 .script-block {
   background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 16px;
+  border-radius: 6px;
+  padding: 12px 14px;
   overflow-x: auto;
   margin: 10px 0 0;
 }
@@ -692,85 +583,48 @@ main {
   white-space: pre;
 }
 
-/* ------------------------------------------------------- guidance panels */
-/* Shared look for anything that is this tool's own addition on top of the
-   graph, not something Cincinnati asserts -- the EUS/Control-Plane-Only
-   advisory and the admin-acks panel both use this (plan.md §6). */
+/* ------------------------------------------------------- guidance sections */
+/* This tool's own additions on top of the graph (EUS advisory, admin-acks),
+   not something Cincinnati asserts: a dashed divider instead of a solid one,
+   plus the label, keeps them visibly separate (plan.md §6). */
 
 .panel--guidance {
-  border: 1.5px dashed var(--risk-conditional);
-  background: var(--surface-2);
+  border-top-style: dashed;
+  border-top-color: var(--border-strong);
 }
 
 .guidance-label {
-  display: inline-block;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 500;
   color: var(--text-muted);
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
-/* --------------------------------------------------------- admin acks */
-
-.admin-acks-list {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.admin-acks-item {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.admin-acks-item:first-child {
-  border-top: none;
-  padding-top: 0;
-}
-
-.admin-acks-item h3 {
+.admin-acks-list h3 {
   font-size: 0.95rem;
-  margin-bottom: 6px;
+  margin: 0 0 4px;
 }
 
 .admin-acks-command {
-  flex: 1 1 auto;
+  flex: 1 1 320px;
   min-width: 0;
   margin: 8px 0 0;
 }
 
 .admin-acks-unknown {
   color: var(--risk-always);
-  font-weight: 500;
   margin: 4px 0;
 }
 
 /* ---------------------------------------------------------------- alternates */
 
 .alternates-list {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.alternate-route {
-  opacity: 0.82;
-  border-left: 3px solid var(--border-strong);
-  padding-left: 12px;
+  gap: 10px;
 }
 
 .alternate-route__meta {
   font-size: 0.8rem;
   color: var(--text-muted);
-  margin-bottom: 4px;
 }
 
 .alternate-route__stops {
@@ -784,40 +638,28 @@ main {
   font-size: 0.9rem;
 }
 
-.alternate-route__stops li {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
 .alternate-route__stops li + li::before {
   content: '→';
   color: var(--text-muted);
-  margin-right: 5px;
-}
-
-.stop-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  margin-right: 6px;
 }
 
 /* -------------------------------------------------------------- copy button */
 
 .copy-button {
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--text-h);
+  color: var(--text);
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 3px 10px;
   font-size: 0.78rem;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .copy-button:hover {
-  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text-h);
 }
 
 /* ------------------------------------------------------------------- focus */
@@ -830,8 +672,6 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-/* -------------------------------------------------------------------- motion */
-
 @media (prefers-reduced-motion: no-preference) {
   .hop-segment__line,
   .station__dot {
@@ -841,65 +681,18 @@ summary:focus-visible {
   }
 }
 
-/* ---------------------------------------------------------------- AI banner */
-/* Persistent, non-dismissible notice (App.tsx) -- deliberately its own
-   visual register: not a risk colour (nothing is wrong), not the accent
-   colour used for interactive chrome and interchange marks, so it can't be
-   mistaken for either. Sits first in <main>, above the page header, so it is
-   always in view without scrolling on load. */
-
-.ai-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--accent);
-  border-radius: 10px;
-  padding: 10px 14px;
-  margin-bottom: 20px;
-  font-size: 0.85rem;
-  color: var(--text);
-}
-
-.ai-banner p {
-  margin: 0;
-}
-
-.ai-banner__badge {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-}
-
-@media (max-width: 570px) {
-  .ai-banner {
-    font-size: 0.8rem;
-  }
-}
-
 /* -------------------------------------------------------------- method footer */
 
 .method-footer {
   margin-top: 40px;
   border-top: 1px solid var(--border);
-  padding-top: 16px;
+  padding-top: 14px;
 }
 
 .method-details summary {
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-h);
-  padding: 4px 0;
 }
 
 .method-details[open] summary {
@@ -919,7 +712,6 @@ summary:focus-visible {
 
 .method-body p,
 .method-body li {
-  color: var(--text);
   font-size: 0.92rem;
 }
 
@@ -929,10 +721,4 @@ summary:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-@media (max-width: 570px) {
-  .method-body {
-    max-width: 100%;
-  }
 }

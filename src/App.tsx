@@ -18,10 +18,10 @@ export interface AppProps {
 }
 
 /**
- * Phase 4 layout (design brief): a persistent control rail (the four
- * cascading dropdowns) up top, the transit map as the hero, then hop detail,
- * commands and risk summary below -- all driven by `usePlanner`, which owns
- * every stateful/async concern. This component is rendering only.
+ * Layout: header, the control rail (the four cascading dropdowns), the
+ * transit map, then whatever detail is selected and the commands, risks and
+ * alternates as flat sections. `usePlanner` owns every stateful/async
+ * concern; this component is rendering only.
  */
 function App({ graphClient }: AppProps = {}) {
   const [client] = useState(() => graphClient ?? new GraphClient());
@@ -29,11 +29,10 @@ function App({ graphClient }: AppProps = {}) {
 
   return (
     <main>
-      <AiGeneratedBanner />
-
       <header className="app-header">
         <h1>OpenShift Upgrade Path Planner</h1>
         <p className="app-tagline">The safest recommended hop sequence between two OpenShift releases, per Red Hat's own update graph.</p>
+        <AiGeneratedBanner />
       </header>
 
       <Notices notices={planner.notices} />
