@@ -354,6 +354,35 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(option?.via).toEqual({ channel: 'stable-4.21', classFallback: false });
   });
 
+  it('tries a preferred channel a later graph names for a stream already reached through a fallback, keeping the fallback that joins it', async () => {
+    // stable-5.0 has no 4.22 upgrade sources, so only fast-5.0's 5.0.z name it.
+    const anchor = rawGraph(['4.22.20'], [], 'ANCHOR', ['stable-4.22', 'fast-5.0']);
+    const fast50 = rawGraph(['4.22.20', '5.0.0'], [[0, 1]], 'F50', ['fast-5.0', 'stable-5.0']);
+    const stable50 = rawGraph(['5.0.0', '5.0.3'], [[0, 1]], 'S50', ['stable-5.0']);
+    const loader: GraphLoader = async (channel) => {
+      if (channel === 'stable-4.22') return ok(anchor);
+      if (channel === 'fast-5.0') return ok(fast50);
+      if (channel === 'stable-5.0') return ok(stable50);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.22',
+      arch: 'amd64',
+      start: v('4.22.20'),
+      target: v('5.0.3'),
+    });
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.primary.hops.map((h) => [h.to, h.sourceChannel])).toEqual([
+      [v('5.0.0'), 'fast-5.0'],
+      [v('5.0.3'), 'stable-5.0'],
+    ]);
+
+    const { segments } = await discoverLookahead(loader, 'stable-4.22', anchor, 'amd64');
+    const option = buildTargetOptions(anchor, v('4.22.20'), segments).find((o) => o.version === v('5.0.3'));
+    expect(option).toEqual({ version: v('5.0.3'), reachable: true, via: { channel: 'stable-5.0', classFallback: true } });
+  });
+
   it('gives up as targetNeverFound when no channel walking forward holds the target', async () => {
     const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR', ['eus-4.20', 'eus-4.22']);
     const eus422 = rawGraph(['4.20.0', '4.22.0'], [[0, 1]], 'E422');
