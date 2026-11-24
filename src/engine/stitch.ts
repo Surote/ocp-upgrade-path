@@ -1,12 +1,12 @@
 import { formatChannelName, parseChannelName } from '../design/channels';
-import { FALLBACK_CLASSES } from '../design/forwardChannel';
 import type { Arch, Graph, GraphNode, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { type ChannelSegment, discoverLookahead, type LookaheadDiscovery } from './lookahead';
-import { extendRoutesInGraph, findPathsInGraph } from './pathfinder';
+import { findPathsInGraph } from './pathfinder';
+import { routeAcrossSegments } from './routeSearch';
 import { dedupeRisks } from './risks';
 import { compareStreams, type Stream, streamOf } from './version';
-import type { GraphLoader, Path, PathCost, PathHop, StitchError, StitchedPathResult } from './types';
+import type { GraphLoader, Path, StitchError, StitchedPathResult } from './types';
 
 /**
  * Stitching, per plan.md §4 and §6 "Look-ahead targets (bidirectional
@@ -138,85 +138,7 @@ async function loadAnchorAndBackward(
   return err({ kind: 'startNeverFound', start, channelsTried });
 }
 
-// --- Multi-graph routing (see module doc: never union edges) ---
-
-export interface Route {
-  readonly cost: PathCost;
-  /**
-   * Hops walked on a class-fallback segment, counted per class in
-   * `FALLBACK_CLASSES` order (stable, fast, candidate): time spent off the
-   * anchor's class.
-   */
-  readonly fallbackHops: readonly number[];
-  /** Each hop's `sourceChannel` names the segment whose own edge it walks. */
-  readonly hops: readonly PathHop[];
-}
-
-type RouteRank = Pick<Route, 'cost' | 'fallbackHops'>;
-
-const NO_FALLBACK_HOPS: readonly number[] = FALLBACK_CLASSES.map(() => 0);
-
-/**
- * Support posture before length (plan.md §6 "Forward channel preference"):
- * fewest hops on candidate, then fast, then a stable fallback, and only then
- * hops, risk and the patch tie-break. A release the anchor's class reaches in
- * five hops is not worth moving a production cluster onto candidate to save
- * one, and the dropdown's `via` reads the same ranking, so it names the
- * channel this route ends on. Every term is a per-hop sum and each hop adds
- * one to `hops`, so the order stays a valid shortest-path cost.
- */
-function compareRoutes(a: RouteRank, b: RouteRank): number {
-  for (let tier = FALLBACK_CLASSES.length - 1; tier >= 0; tier -= 1) {
-    const diff = (a.fallbackHops[tier] as number) - (b.fallbackHops[tier] as number);
-    if (diff !== 0) return diff;
-  }
-  if (a.cost.hops !== b.cost.hops) return a.cost.hops - b.cost.hops;
-  if (a.cost.riskWeight !== b.cost.riskWeight) return a.cost.riskWeight - b.cost.riskWeight;
-  return a.cost.tieBreak - b.cost.tieBreak;
-}
-
-/**
- * The best route from `start` to every version reachable through `segments`
- * taken in order, never mixing edges from two segments in one step. Both the
- * target dropdown (planner/targetOptions.ts) and `stitchAndFindPath` read
- * their answer from this one function, so a target the dropdown marks
- * reachable is one the stitcher routes, through the same channels.
- *
- * A layered shortest-path DP: the frontier holds the cheapest route found so
- * far to each version. Each segment is searched once, seeded at every
- * frontier version it also contains -- a version present in both graphs,
- * the only legal join -- with that route's cost, and walked with its own
- * edges only (`extendRoutesInGraph`). The frontier carries across segments
- * rather than being replaced, so a segment can contribute no hops: 5.0 can
- * join 4.22 directly even when the sibling stream 4.23 sits between them in
- * the list. Cost only accumulates, so the frontier ends holding the
- * minimum-cost route to each version for the given segment order.
- */
-export function routeAcrossSegments(segments: readonly ChannelSegment[], start: Version): ReadonlyMap<Version, Route> {
-  const routes = new Map<Version, Route>([[start, { cost: { hops: 0, riskWeight: 0, tieBreak: 0 }, fallbackHops: NO_FALLBACK_HOPS, hops: [] }]]);
-
-  for (const segment of segments) {
-    const members = versionsOf(segment.graph);
-    const seeds = new Map([...routes].filter(([version]) => members.has(version)));
-    const tier = segment.classFallback ? FALLBACK_CLASSES.indexOf(parseChannelName(segment.channel)?.cls as string) : -1;
-    const step = (rank: RouteRank, hop: { readonly riskWeight: number; readonly toPatch: number }): RouteRank => ({
-      cost: { hops: rank.cost.hops + 1, riskWeight: rank.cost.riskWeight + hop.riskWeight, tieBreak: rank.cost.tieBreak - hop.toPatch },
-      fallbackHops: rank.fallbackHops.map((n, i) => (i === tier ? n + 1 : n)),
-    });
-
-    for (const [to, extended] of extendRoutesInGraph<RouteRank>(segment.graph, seeds, step, compareRoutes)) {
-      if (extended.hops.length === 0) continue;
-      const existing = routes.get(to);
-      if (existing && compareRoutes(extended.cost, existing) >= 0) continue;
-      const seedRoute = seeds.get(extended.seed) as Route;
-      routes.set(to, {
-        ...extended.cost,
-        hops: [...seedRoute.hops, ...extended.hops.map((h) => ({ ...h, sourceChannel: segment.channel }))],
-      });
-    }
-  }
-  return routes;
-}
+export { routeAcrossSegments } from './routeSearch';
 
 /** An anchor graph the caller already loaded, and the look-ahead it discovered from that same graph. */
 export interface AnchorSnapshot {
