@@ -13,9 +13,9 @@ import { compareStreams, type Stream } from './version';
 const MAX_LOOKAHEAD_FETCHES = 48;
 
 /**
- * How many of the walk's next channels are fetched ahead of it. Each
- * Cincinnati response streams at a few hundred KB/s, so a stream's channels
- * finish far sooner side by side.
+ * How many of the walk's next channels are fetched ahead of it, and how many
+ * requests are in flight at once. Each Cincinnati response streams at a few
+ * hundred KB/s, so a stream's channels finish far sooner side by side.
  */
 const LOOKAHEAD_WINDOW = 6;
 
@@ -84,6 +84,35 @@ export async function discoverLookahead(
   // contents, never on which response came first, so neither does which
   // channels the cap leaves out.
   const fetches = new Map<string, Promise<LoadResult>>();
+  // A graph can push prefetches still in flight behind the channels it
+  // reveals, so the requests a turn selects wait here, in walk order, for a
+  // free slot.
+  const queued: { readonly channel: string; readonly start: () => void }[] = [];
+  let inFlight = 0;
+  // The answer the walk awaits leaves its slot to the walk's next turn, which
+  // first reorders the queue by what that answer revealed.
+  let awaited: string | undefined;
+  const startQueued = () => {
+    while (inFlight < LOOKAHEAD_WINDOW) {
+      const call = queued.shift();
+      if (!call) return;
+      call.start();
+    }
+  };
+  const request = (channel: string) =>
+    new Promise<LoadResult>((resolve) => {
+      const start = () => {
+        inFlight += 1;
+        const call = loader(channel, arch);
+        resolve(call);
+        const done = () => {
+          inFlight -= 1;
+          if (channel !== awaited) startQueued();
+        };
+        void call.then(done, done);
+      };
+      queued.push({ channel, start });
+    });
   for (;;) {
     const frontier = untriedChannels(attested, anchor, channelsTried);
     const next = frontier[0];
@@ -92,11 +121,15 @@ export async function discoverLookahead(
     // later graph pushes back can spend a request the walk needs.
     const window = frontier.length + channelsTried.length >= MAX_LOOKAHEAD_FETCHES ? 1 : LOOKAHEAD_WINDOW;
     for (const { channel } of frontier.slice(0, window)) {
-      if (!fetches.has(channel) && fetches.size < MAX_LOOKAHEAD_FETCHES) fetches.set(channel, loader(channel, arch));
+      if (!fetches.has(channel) && fetches.size < MAX_LOOKAHEAD_FETCHES) fetches.set(channel, request(channel));
     }
+    const position = new Map(frontier.map(({ channel }, i) => [channel, i]));
+    queued.sort((a, b) => (position.get(a.channel) ?? 0) - (position.get(b.channel) ?? 0));
+    startQueued();
     const pending = fetches.get(next.channel);
     // The cap went on fetches a graph taken since then pushed behind `next`.
     if (!pending) break;
+    awaited = next.channel;
     const result = await pending;
     channelsTried.push(next.channel);
     if (!result.ok) {
