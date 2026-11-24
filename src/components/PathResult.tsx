@@ -94,8 +94,6 @@ export function PathResult({
     channelNames,
     multiGraph: stitch.multiGraph,
   });
-  const start = primary.versions[0];
-  const target = primary.versions[primary.versions.length - 1];
 
   const toggleHop = (index: number) => setSelectedHop((prev) => (prev === index ? null : index));
   const toggleStation = (index: number) => setSelectedStation((prev) => (prev === index ? null : index));
@@ -144,7 +142,7 @@ export function PathResult({
       <CommandScript commands={commands} />
       <RiskSummary riskSummary={primary.riskSummary} applicability={riskApplicability} />
       <AdminAcksPanel path={primary} />
-      {start && target && <EusAdvisory start={start} target={target} />}
+      <EusAdvisory versions={primary.versions} />
       <AlternatesPanel alternates={alternates} channelsUsed={stitch.channelsUsed} />
     </div>
   );

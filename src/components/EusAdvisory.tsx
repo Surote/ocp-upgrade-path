@@ -1,46 +1,54 @@
-import { evaluateEusAdvisory } from '../design/eus';
+import { buildLegScript, controlPlaneOnlyLegs } from '../design/eus';
+import { formatStream } from '../engine/version';
 import type { Version } from '../graph/types';
+import { CopyButton } from './CopyButton';
 
 /**
- * The EUS-to-EUS worker-pause advisory (plan.md §6 "The EUS advisory").
- * Cincinnati does not encode this -- `evaluateEusAdvisory` is pure UI-side
- * detection from the start/target minors, not something read off the graph.
- * Rendered as a visually distinct block and explicitly labelled "guidance,
- * not something Cincinnati asserted", per the plan's own instruction.
- *
- * **Terminology.** Red Hat renamed this procedure: it is documented today as
- * a **"Control Plane Only update"**, not "EUS-to-EUS" -- the old doc path
- * (`.../updating_clusters/preparing-eus-eus-upgrade`) 404s. "EUS-to-EUS" is
- * kept as a recognisable alias in the heading, since that's still what
- * operators call it in conversation, but the link and the primary label use
- * Red Hat's current name.
+ * Control Plane Only (formerly EUS-to-EUS) guidance for the route's actual
+ * versions (plan.md §6 "The EUS advisory"). Cincinnati does not encode this,
+ * so it is rendered as a separate block labelled as guidance. Red Hat
+ * renamed the procedure; "EUS-to-EUS" stays in the heading as the name
+ * operators still use.
  */
-export function EusAdvisory({ start, target }: { readonly start: Version; readonly target: Version }) {
-  const advisory = evaluateEusAdvisory(start, target);
-  if (!advisory.applies) return null;
-
-  const docsUrl = `https://docs.redhat.com/en/documentation/openshift_container_platform/4.${advisory.targetMinor}/html/updating_clusters/performing-a-cluster-update#control-plane-only-update`;
+export function EusAdvisory({ versions }: { readonly versions: readonly Version[] }) {
+  const legs = controlPlaneOnlyLegs(versions);
+  if (legs.length === 0) return null;
 
   return (
     <aside className="panel panel--guidance" aria-labelledby="eus-heading">
       <p className="guidance-label">Guidance, not API-derived</p>
-      <h2 id="eus-heading">
-        Control Plane Only update (EUS-to-EUS): 4.{advisory.startMinor} → 4.{advisory.targetMinor}
-      </h2>
-      <p>
-        This crosses {advisory.targetMinor - advisory.startMinor} minors between two EUS (even-numbered) releases. Cincinnati's
-        graph doesn't say so, but Red Hat recommends pausing worker <code>MachineConfigPool</code>s first, so nodes reboot
-        once for the whole jump instead of once per hop.
+      <h2 id="eus-heading">Control Plane Only updates (EUS-to-EUS)</h2>
+      <p className="panel__hint">
+        Red Hat's Control Plane Only update moves a cluster between two even-numbered minors with only a single reboot of
+        worker nodes. It covers one such step, so this route takes {legs.length === 1 ? 'one leg' : `${legs.length} legs`}.
+        Unpause after each leg and let workers finish updating before the next: if pools are not unpaused, the cluster is not
+        permitted to update to any future minor version. Keep each pause short, since a paused pool doesn't receive the rotated{' '}
+        <code>kube-apiserver-to-kubelet-signer</code> CA certificate. Patch any custom worker pools the same way.
       </p>
-      <pre className="script-block">
-        <code>{"oc patch mcp/worker --type merge --patch '{\"spec\":{\"paused\":true}}'"}</code>
-      </pre>
-      <p className="panel__hint">Unpause the pool only after every hop above has completed, and complete the whole sequence within 60 days.</p>
-      <p>
-        <a href={docsUrl} target="_blank" rel="noopener noreferrer">
-          Red Hat docs: Control Plane Only update ↗
-        </a>
-      </p>
+      <ol className="cpo-leg-list" aria-label="Control Plane Only legs">
+        {legs.map((leg, i) => {
+          const script = buildLegScript(leg);
+          return (
+            <li key={leg.pauseAt}>
+              <h3>
+                Leg {i + 1}: {formatStream(leg.from)} → {formatStream(leg.to)} (pause workers before {formatStream(leg.via)},
+                unpause at {formatStream(leg.to)})
+              </h3>
+              <div className="command-line">
+                <pre className="script-block cpo-leg-command">
+                  <code>{script}</code>
+                </pre>
+                <CopyButton text={script} label={`Copy leg ${i + 1} commands`} />
+              </div>
+              <p className="panel__hint">
+                <a href={leg.docsUrl} target="_blank" rel="noopener noreferrer">
+                  Red Hat docs: Control Plane Only update to {formatStream(leg.to)} ↗
+                </a>
+              </p>
+            </li>
+          );
+        })}
+      </ol>
     </aside>
   );
 }
