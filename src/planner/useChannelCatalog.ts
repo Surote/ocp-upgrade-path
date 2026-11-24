@@ -76,10 +76,13 @@ export function useChannelCatalog(client: GraphClient): ChannelCatalog {
 
   const seedChannelNames = seed.status === 'success' ? seed.value.graph.channelNames : undefined;
 
+  // Read once the seed lands, not at mount: another tab may have recorded
+  // names meanwhile. The sweep skips exactly these, so the list shows them.
+  const cached = useMemo(() => (seedChannelNames ? client.channelNames.read() : undefined), [client, seedChannelNames]);
+
   useEffect(() => {
     const oldest = seedChannelNames && oldestStream(seedChannelNames);
-    if (!seedChannelNames || !oldest) return;
-    const cached = client.channelNames.read();
+    if (!seedChannelNames || !cached || !oldest) return;
     const controller = new AbortController();
     const load = makeGraphLoader(client, { signal: controller.signal });
     void probeChannels(
@@ -97,15 +100,12 @@ export function useChannelCatalog(client: GraphClient): ChannelCatalog {
       },
     );
     return () => controller.abort();
-  }, [client, seedChannelNames, addChannels]);
+  }, [client, seedChannelNames, cached, addChannels]);
 
   const channels = useMemo(() => {
-    const merged = new Set(known);
-    if (seedChannelNames) {
-      for (const name of seedChannelNames) merged.add(name);
-    }
+    const merged = new Set([...known, ...(seedChannelNames ?? []), ...(cached?.present ?? [])]);
     return sortChannels([...merged].filter(isListedChannel));
-  }, [known, seedChannelNames]);
+  }, [known, seedChannelNames, cached]);
 
   return {
     channels,
