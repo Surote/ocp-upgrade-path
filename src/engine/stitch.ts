@@ -3,7 +3,8 @@ import type { Arch, Graph, GraphNode, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { type ChannelSegment, discoverLookahead, type LookaheadDiscovery } from './lookahead';
 import { findPathsInGraph } from './pathfinder';
-import { routeAcrossSegments } from './routeSearch';
+import { NO_CONSTRAINTS, type RouteConstraints } from './routeConstraints';
+import { buildRoutingModel, type Route, type RoutingModel, searchRoutes } from './routeSearch';
 import { dedupeRisks } from './risks';
 import { compareStreams, type Stream, streamOf } from './version';
 import type { GraphLoader, Path, StitchError, StitchedPathResult } from './types';
@@ -157,6 +158,10 @@ export interface AnchorSnapshot {
  * Given `anchor`, routes against that snapshot instead of fetching the
  * anchor and rediscovering look-ahead, so the result matches target options
  * built from the same snapshot.
+ *
+ * `constraints` pins stops and picks the risk policy (engine/routeConstraints.ts).
+ * Stops narrow the one route search rather than splitting it into legs, so
+ * every channel rule applies across a stop exactly as it does elsewhere.
  */
 export async function stitchAndFindPath(
   loader: GraphLoader,
@@ -166,9 +171,11 @@ export async function stitchAndFindPath(
     readonly start: Version;
     readonly target: Version;
     readonly anchor?: AnchorSnapshot;
+    readonly constraints?: RouteConstraints;
   },
 ): Promise<Result<StitchedPathResult, StitchError>> {
   const { targetChannel: anchorChannel, arch, start, target } = params;
+  const constraints = params.constraints ?? NO_CONSTRAINTS;
 
   const loaded = await loadAnchorAndBackward(loader, anchorChannel, arch, start, params.anchor?.graph);
   if (!loaded.ok) {
@@ -176,29 +183,27 @@ export async function stitchAndFindPath(
   }
   const { anchor, backward } = loaded.value;
   const targetInAnchor = versionsOf(anchor.graph).has(target);
+  const singleGraph = backward.length === 0 && targetInAnchor;
 
-  if (backward.length === 0 && targetInAnchor) {
-    // Fast path (also the common case -- every worked example in plan.md
-    // resolves within a single graph): full alternates support.
+  let lookahead: readonly ChannelSegment[] = [];
+  let lookaheadFailure: LookaheadDiscovery['failure'];
+  let alternates: readonly Path[] = [];
+  if (singleGraph) {
+    // The common case (every worked example in plan.md resolves within a
+    // single graph): the single-graph engine names why no path exists and
+    // finds the waypoint alternates. Its alternates ignore stops and rank by
+    // the recommended order, so they are offered only when neither applies.
     const singleGraphResult = findPathsInGraph(anchor.graph, start, target);
     if (!singleGraphResult.ok) {
       return err(singleGraphResult.error);
     }
-    const withProvenance = (p: Path): Path => ({
-      ...p,
-      hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })),
-    });
-    return ok({
-      primary: withProvenance(singleGraphResult.value.primary),
-      alternates: singleGraphResult.value.alternates.map(withProvenance),
-      stitch: { channelsUsed: [anchor.channel], classFallbacks: [], multiGraph: false },
-      nodeInfo: buildNodeInfo([anchor]),
-    });
-  }
-
-  let lookahead: readonly ChannelSegment[] = [];
-  let lookaheadFailure: LookaheadDiscovery['failure'];
-  if (!targetInAnchor) {
+    if (constraints.stops.length === 0 && constraints.riskPolicy === 'recommended') {
+      alternates = singleGraphResult.value.alternates.map((p) => ({
+        ...p,
+        hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })),
+      }));
+    }
+  } else if (!targetInAnchor) {
     const discovery = params.anchor?.lookahead ?? (await discoverLookahead(loader, anchorChannel, anchor.graph, arch));
     lookaheadFailure = discovery.failure;
     if (!discovery.segments.some((segment) => versionsOf(segment.graph).has(target))) {
@@ -211,24 +216,46 @@ export async function stitchAndFindPath(
     lookahead = discovery.segments;
   }
 
-  const chain = [...backward, anchor, ...lookahead];
-  const route = routeAcrossSegments(chain, start).get(target);
-  if (!route) {
+  const model = buildRoutingModel([...backward, anchor, ...lookahead]);
+  const found = findRoute(model, start, target, constraints);
+  if (!found.ok) {
+    if (found.error.kind === 'stopUnreachable') return err(found.error);
     // Start and target are each present but no shared version joins them,
     // unless the channel that failed to load would have.
     // No cross-graph `nearestReachable`: the single-graph path computes one
     // per plan.md §4, and multi-graph stitching does not attempt it.
     return err(lookaheadFailure ? { kind: 'loadFailed', ...lookaheadFailure } : { kind: 'unreachable', start, target });
   }
+  const route = found.value;
+  const comparison = constraints.riskPolicy === 'recommended' ? lowerRiskRoute(model, start, target, constraints, route) : undefined;
+  const toPath = (r: Route): Path => ({
+    versions: [start, ...r.hops.map((h) => h.to)],
+    hops: r.hops,
+    cost: r.cost,
+    riskSummary: dedupeRisks(r.hops.map((h) => h.risks)),
+  });
+  const riskComparison = comparison && { route: comparison.route && toPath(comparison.route), conditionalFree: comparison.conditionalFree };
 
-  const routedChannels = new Set(route.hops.map((h) => h.sourceChannel));
-  const usedLookahead = lookahead.filter((segment) => routedChannels.has(segment.channel));
+  if (singleGraph) {
+    return ok({
+      primary: toPath(route),
+      riskComparison,
+      alternates,
+      stitch: { channelsUsed: [anchor.channel], classFallbacks: [], multiGraph: false },
+      nodeInfo: buildNodeInfo([anchor]),
+    });
+  }
+
+  const channelsOf = (r: Route | undefined) => (r ? r.hops.map((h) => h.sourceChannel) : []);
+  const primaryChannels = new Set(channelsOf(route));
+  const usedLookahead = lookahead.filter((segment) => primaryChannels.has(segment.channel));
+  const shownChannels = new Set([...primaryChannels, ...channelsOf(comparison?.route)]);
+  const shownLookahead = lookahead.filter((segment) => shownChannels.has(segment.channel));
   const anchorSideFirst = [...backward].reverse();
-  const versions = [start, ...route.hops.map((h) => h.to)];
-  const { hops } = route;
 
   return ok({
-    primary: { versions, hops, cost: route.cost, riskSummary: dedupeRisks(hops.map((h) => h.risks)) },
+    primary: toPath(route),
+    riskComparison,
     // Multi-graph alternates are out of scope: computing them soundly would
     // mean repeating the layered DP once per candidate waypoint per segment,
     // and the trick that makes single-graph alternates cheap doesn't hold
@@ -241,6 +268,52 @@ export async function stitchAndFindPath(
       ),
       multiGraph: true,
     },
-    nodeInfo: buildNodeInfo([...usedLookahead].reverse().concat(anchor, anchorSideFirst)),
+    nodeInfo: buildNodeInfo([...shownLookahead].reverse().concat(anchor, anchorSideFirst)),
   });
+}
+
+/**
+ * The best route honoring `constraints`, or why there is none. A stop that
+ * is the start or target, or that no route through the earlier stops
+ * reaches, is named; when every stop is reached but the target is not from
+ * the last, the last stop is named. A target unreachable even without stops
+ * is `unreachable`.
+ */
+function findRoute(
+  model: RoutingModel,
+  start: Version,
+  target: Version,
+  constraints: RouteConstraints,
+): Result<Route, Extract<StitchError, { kind: 'stopUnreachable' }> | { readonly kind: 'unreachable' }> {
+  const { stops } = constraints;
+  const misplaced = stops.findIndex((stop) => stop === start || stop === target);
+  const layers = misplaced < 0 ? searchRoutes(model, start, constraints) : [];
+  const route = layers.at(-1)?.get(target);
+  if (route) return ok(route);
+  if (stops.length === 0 || !searchRoutes(model, start, { ...constraints, stops: [] })[0]?.has(target)) {
+    return err({ kind: 'unreachable' });
+  }
+  let index = misplaced;
+  if (index < 0) index = stops.findIndex((stop, i) => !layers[i + 1]?.has(stop));
+  if (index < 0) index = stops.length - 1;
+  return err({ kind: 'stopUnreachable', index, stop: stops[index] as Version });
+}
+
+/**
+ * The `avoidConditional` route under the same stops, when it carries fewer
+ * risk occurrences than `primary` (fewer `Always`, or as many and fewer
+ * conditional). Posture ranks first under both policies, so it never trades
+ * the anchor's class for less risk.
+ */
+function lowerRiskRoute(
+  model: RoutingModel,
+  start: Version,
+  target: Version,
+  constraints: RouteConstraints,
+  primary: Route,
+): { readonly route: Route | undefined; readonly conditionalFree: boolean } {
+  const avoiding = searchRoutes(model, start, { ...constraints, riskPolicy: 'avoidConditional' }).at(-1)?.get(target) as Route;
+  const lower = avoiding.always - primary.always || avoiding.conditional - primary.conditional;
+  const route = lower < 0 ? avoiding : undefined;
+  return { route, conditionalFree: (route ?? primary).conditional === 0 };
 }
