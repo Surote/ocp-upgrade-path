@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { parseRawGraph } from '../../graph/parse';
 import type { Version } from '../../graph/types';
 import { buildGraph } from '../../test-utils/buildGraph';
+import { loadFixture } from '../../test-utils/fixtures';
 import { buildStartOptions, buildTargetOptions } from '../targetOptions';
 
 function v(s: string): Version {
@@ -126,5 +128,32 @@ describe('buildTargetOptions -- with look-ahead channels', () => {
       { channel: 'candidate-5.0', graph: seg50, classFallback: true, requestedClass: 'stable' },
     ]);
     expect(options.find((o) => o.version === v('5.0.0-rc.1'))?.reachable).toBe(true);
+  });
+});
+
+describe('buildTargetOptions -- cost on a start-version change', () => {
+  it('builds stable-4.20 options from 4.18.2 across three pinned look-ahead graphs within a 10 ms median', () => {
+    // Runs synchronously on every start change, so it must stay well inside
+    // a frame. The pre-routing implementation took about 3 ms here.
+    const fixture = (channel: string) => {
+      const parsed = parseRawGraph(loadFixture(`${channel}.json`), { channel, arch: 'amd64' });
+      if (!parsed.ok) throw new Error(`fixture ${channel} did not parse`);
+      return parsed.value;
+    };
+    const anchor = fixture('stable-4.20');
+    const segments = [
+      { channel: 'stable-4.21', graph: fixture('stable-4.21'), classFallback: false },
+      { channel: 'stable-4.22', graph: fixture('stable-4.22'), classFallback: false },
+      { channel: 'candidate-5.0', graph: fixture('candidate-5.0'), classFallback: true, requestedClass: 'stable' },
+    ];
+    buildTargetOptions(anchor, v('4.18.2'), segments);
+    const times: number[] = [];
+    for (let run = 0; run < 9; run += 1) {
+      const t0 = performance.now();
+      const options = buildTargetOptions(anchor, v('4.18.2'), segments);
+      times.push(performance.now() - t0);
+      expect(options.some((o) => o.version === v('5.0.0-rc.8') && o.reachable)).toBe(true);
+    }
+    expect(times.sort((a, b) => a - b)[4]).toBeLessThan(10);
   });
 });
