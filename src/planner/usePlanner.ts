@@ -21,7 +21,7 @@ import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
 import { conditionalRisks, type RiskId } from '../engine/risks';
 import { useLookahead } from './lookaheadTargets';
-import { channelGroupLabel } from './sortChannels';
+import { channelGroupLabel, sortChannels } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
 import { useGraphForSelection } from './useGraphForSelection';
@@ -182,6 +182,16 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   }, [loadedChannelNames, addChannels]);
 
   const graph = graphState.status === 'success' ? graphState.value.graph : undefined;
+
+  // The catalog stops at the 4.14 floor, but a saved link can select an older
+  // channel. Once its graph loads the planner routes on it, so list it too.
+  const listedChannels = useMemo(
+    () =>
+      channel && graph && !channelCatalog.channels.includes(channel)
+        ? sortChannels([...channelCatalog.channels, channel])
+        : channelCatalog.channels,
+    [channel, graph, channelCatalog.channels],
+  );
 
   // Look-ahead target discovery (plan.md §6), keyed on the loaded anchor
   // graph -- it doesn't need `start` to discover *which* channels exist
@@ -384,7 +394,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   return {
     channel: {
       value: channel ?? '',
-      groups: groupByStream(channelCatalog.channels, channelGroupLabel),
+      groups: groupByStream(listedChannels, channelGroupLabel),
       loading: channelCatalog.loading,
       error: channelCatalog.error,
       onChange: setChannel,
