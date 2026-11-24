@@ -358,6 +358,33 @@ On that snapshot no route to 5.0.1 is free of conditional risk.
 4.21→4.22 crossing. Stops move where it lands, and `riskComparison` reports that no
 conditional-free route exists.
 
+### Risks marked not applicable
+
+A conditional risk fires only on clusters its PromQL matches, and only the
+cluster-version operator evaluates that rule on the real cluster. An operator who has
+checked a rule against their cluster can mark the risk "Doesn't apply to my cluster" on
+its card, in the risk summary or the hop detail. `RouteConstraints.notApplicable` holds
+the marked names (`RiskName`, branded) and the link carries them as `na=Name1,Name2`.
+
+**A mark waives conditional occurrences only, and only from counting.** A marked risk's
+conditional occurrences leave `Route.conditional`, so the `avoidConditional` ranking,
+`riskComparison` and its `conditionalFree` ignore them. An `Always` occurrence of the same
+name still counts, and `Always` cards offer no mark. The `recommended` ranking reads the
+published risk weight and never changes with a mark. Every hop and the risk summary still
+show the risk. A marked card is de-emphasized and says the claim is the operator's.
+Route facts keep it in the count: "7 hops · 1 distinct risk (1 marked not applicable) · no
+other conditional risks".
+
+**A link's marks are checked before they apply.** Once the anchor and look-ahead graphs
+load, each name must exactly match a conditional risk on them. Any other name is dropped
+with a notice that names it, and is never matched onto a different risk.
+
+On the Nov 2026 `eus-4.18` snapshot, marking `VSphereConfigCloudControllerCrash` leaves the
+route from `4.16.33` to `5.0.1` unchanged and removes "No lower-risk route exists". It does
+change the `avoidConditional` route to `4.22.23`: once the risk no longer counts, the
+route through 4.17.59, 4.18.59, 4.19.55, 4.20.46 and 4.21.42 ties the clean one on risk
+and hops and wins on patch level.
+
 ### Major-version boundaries (4.22 → 5.0)
 
 Channel names are `<class>-<major>.<minor>`, parsed in one place (`design/channels.ts`,
