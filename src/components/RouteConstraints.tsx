@@ -1,9 +1,13 @@
 import type { StopOption } from '../engine/routeConstraints';
 import type { RouteConstraintsViewModel, StopFieldViewModel } from '../planner/usePlanner';
 
-/** The channel is named only when picking this stop means routing through a channel other than the selected one. */
+/**
+ * "Reachable on", not "via": the planned route can arrive on another channel
+ * of equal rank, and naming that one exactly would take a route search per
+ * option (1.7 s for the 365 options of eus-4.18 4.16.33 → 5.0.1).
+ */
 function optionLabel(option: StopOption, selectedChannel: string): string {
-  return option.channel === selectedChannel ? option.version : `${option.version} · via ${option.channel}`;
+  return option.channel === selectedChannel ? option.version : `${option.version} · reachable on ${option.channel}`;
 }
 
 function StopField({ index, model, selectedChannel }: { readonly index: number; readonly model: StopFieldViewModel; readonly selectedChannel: string }) {

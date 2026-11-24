@@ -128,14 +128,14 @@ describe('route stops', () => {
     expect(screen.getByRole('button', { name: 'Add stop' })).toBeEnabled();
   });
 
-  it('lists stop options grouped by stream, newest first, naming the channel only when it differs', async () => {
+  it('lists stop options grouped by stream, newest first, naming where each is reachable when it is not the selected channel', async () => {
     await renderAt(BASE);
     fireEvent.click(screen.getByRole('button', { name: 'Add stop' }));
 
     const stop = screen.getByLabelText('Stop 1');
     expect(stop.id).toBe('stop-0');
     expect(renderedGroups(stop)).toEqual([
-      ['4.20', ['4.20.5 · via fast-4.20']],
+      ['4.20', ['4.20.5 · reachable on fast-4.20']],
       ['4.19', ['4.19.41', '4.19.40']],
     ]);
   });

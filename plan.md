@@ -344,7 +344,9 @@ the stops before the gap, and backward from the target through the stops after i
 version qualifies when the earliest stream group a route reaches it in is no later than
 the latest group a route onward can start in. On the Nov 2026 `eus-4.18` snapshot,
 `4.16.33 → 5.0.1` offers 309 stops at the first gap. Pinning each of the 390 versions in
-turn routes for exactly those 309.
+turn routes for exactly those 309. Each option names the most conservative channel a route can
+arrive on ("reachable on eus-4.20"), not the channel the planned route takes. Naming that
+exactly needs a route search per option, 1.7 s for that list of 365.
 
 On that snapshot no route to 5.0.1 is free of conditional risk.
 `VSphereConfigCloudControllerCrash` sits on every route's 4.19→4.20, 4.20→4.21 or

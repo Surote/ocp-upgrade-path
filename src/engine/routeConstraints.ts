@@ -40,7 +40,11 @@ export interface RiskComparison {
 /** One selectable version for the stop being edited. */
 export interface StopOption {
   readonly version: Version;
-  /** The channel whose graph supplies this version on a route that honors every other stop. */
+  /**
+   * The most conservative channel a route honoring every other stop can
+   * arrive at this version on. The route the search plans through it may
+   * arrive on another channel, so this is a possible arrival, not the plan's.
+   */
   readonly channel: string;
 }
 
@@ -87,10 +91,9 @@ export function buildStopOptions(
 }
 
 /**
- * The segment a route arrives at `version` on, among hops a route past the
- * earlier stops can take and still go on: the anchor's class first, then the
- * least drastic fallback, then the earliest group. That is the order the
- * recommended route ranks by, short of a full search per version.
+ * The most conservative segment a route can arrive at `version` on, among
+ * hops a route past the earlier stops can take and still go on: the anchor's
+ * class first, then the least drastic fallback, then the earliest group.
  */
 function arrivingChannel(model: RoutingModel, forward: ReadonlyMap<Version, number>, version: Version, latest: number): string {
   let best: { readonly tier: number; readonly segment: number } | undefined;
