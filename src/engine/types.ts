@@ -115,11 +115,19 @@ export type GraphLoader = (channel: string, arch: Arch) => Promise<Result<Graph,
 export interface ClassFallback {
   /** The real channel actually used, e.g. `stable-4.21`. */
   readonly channel: string;
-  /** The class that was preferred but unavailable at this channel's stream, e.g. `eus`. */
+  /** The anchor's class, which the route could not stay on at this channel's stream, e.g. `eus`. */
   readonly requestedClass: string;
+  /**
+   * Why: `unpublished` when Cincinnati returned an empty graph for that
+   * class's channel at this stream; `unverified` when fetching it failed, so
+   * whether it has a route is unknown; `noRoute` otherwise -- the channel is
+   * published, or no release on the way names it, and either way no route
+   * on it reaches the target.
+   */
+  readonly requestedStatus: 'unpublished' | 'unverified' | 'noRoute';
 }
 
-/** Which channels the stitcher actually used, in fetch order -- for the audit banner, per plan.md §4/§6. */
+/** Which channels the stitcher used, each once in fetch order. The banner's route-order sequence comes from hop provenance (components/routeFacts.ts `channelSequence`). */
 export interface StitchInfo {
   readonly channelsUsed: readonly string[];
   /**
@@ -133,7 +141,10 @@ export interface StitchInfo {
 }
 
 export interface StitchedPathResult {
+  /** The route under the request's `RiskPolicy`, honoring every stop. */
   readonly primary: Path;
+  /** Present only under the `recommended` policy: the lower-risk counterpart (engine/routeConstraints.ts). */
+  readonly riskComparison?: import('./routeConstraints').RiskComparison;
   /**
    * Waypoint alternates. Only populated when the whole path was found within
    * a single fetched graph (the common case, including every case the
@@ -145,18 +156,16 @@ export interface StitchedPathResult {
   readonly alternates: readonly Path[];
   readonly stitch: StitchInfo & { readonly multiGraph: boolean };
   /**
-   * Canonical node info (payload, errataUrl, channel membership) by version,
-   * across every stitched graph -- "later channel wins on conflict" per
-   * plan.md §4: when the same version appears in more than one fetched graph,
-   * the entry from whichever graph is closer to the target (fetched earlier
-   * in the target-channel-first walk-back) is kept. This is the *only* place
-   * data from different graphs is merged; edges are never unioned (see
-   * engine/stitch.ts).
+   * Node info (payload, errataUrl, channel membership) for each station of
+   * `primary`, read from the graph that supplied the hop arriving at it (the
+   * start from the first hop's graph), so a hop's `--to-image` digest comes
+   * from the channel it runs on (plan.md §4). Other routes' stations are absent.
    */
   readonly nodeInfo: ReadonlyMap<Version, GraphNode>;
 }
 
 export type StitchError =
+  | Readonly<{ kind: 'stopUnreachable'; index: number; stop: Version }>
   | Readonly<{ kind: 'invalidChannel'; channel: string }>
   | Readonly<{ kind: 'loadFailed'; channel: string; error: GraphError }>
   | Readonly<{ kind: 'startNeverFound'; start: Version; channelsTried: readonly string[] }>

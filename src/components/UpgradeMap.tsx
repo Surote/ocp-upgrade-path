@@ -26,7 +26,7 @@ const R = 6; // station dot radius
 const R_HIT = 14; // invisible station click/tap target
 
 const ROW_Y = 32;
-const CAPTION_Y = ROW_Y - 20; // "start"/"target"
+const CAPTION_Y = ROW_Y - 20; // "start"/"target"/"stop"
 const LABEL_Y = ROW_Y + 26; // version number
 const TAG_Y = LABEL_Y + 14; // "⇄ <channel>" switch note, interchange stations only
 const MAP_HEIGHT = TAG_Y + 6;
@@ -94,6 +94,7 @@ export function UpgradeMap({
   path,
   nodeInfo,
   commands,
+  pinnedStops = [],
   selectedHopIndex,
   selectedStationIndex,
   onSelectHop,
@@ -102,6 +103,8 @@ export function UpgradeMap({
   readonly path: Path;
   readonly nodeInfo: ReadonlyMap<Version, GraphNode>;
   readonly commands: readonly HopCommand[];
+  /** Operator-pinned versions, captioned "stop" above their station; the caption row is reserved, so geometry is unchanged. */
+  readonly pinnedStops?: readonly Version[];
   readonly selectedHopIndex: number | null;
   readonly selectedStationIndex: number | null;
   readonly onSelectHop: (index: number) => void;
@@ -177,6 +180,7 @@ export function UpgradeMap({
             const isStart = i === 0;
             const isTarget = i === n - 1;
             const isTerminal = isStart || isTarget;
+            const isPinned = !isTerminal && pinnedStops.includes(version);
             // Interchange = an actually-emitted channel switch on the hop
             // *departing* this station (design/commands.ts), never a bare
             // minor crossing, and never the station the switching hop
@@ -194,6 +198,7 @@ export function UpgradeMap({
             const parts: string[] = [`Station ${version}`];
             if (isStart) parts.push('start');
             if (isTarget) parts.push('target');
+            if (isPinned) parts.push('pinned stop');
             if (isInterchange) parts.push(`interchange — switch to channel ${switchTo} before this hop`);
             parts.push(hasErrata ? 'advisory available' : 'no advisory published yet');
             if (incomingRisks !== undefined) {
@@ -203,7 +208,7 @@ export function UpgradeMap({
             return (
               <g
                 key={version}
-                className={`station${isTerminal ? ' station--terminal' : ''}${isInterchange ? ' station--interchange' : ''}${
+                className={`station${isTerminal ? ' station--terminal' : ''}${isPinned ? ' station--pinned' : ''}${isInterchange ? ' station--interchange' : ''}${
                   selected ? ' is-selected' : ''
                 }`}
                 transform={`translate(${x}, ${ROW_Y})`}
@@ -226,7 +231,7 @@ export function UpgradeMap({
                 {!hasErrata && <circle r={R + 3} className="station__no-advisory-ring" aria-hidden="true" />}
 
                 <text className="station__caption" y={CAPTION_Y - ROW_Y} textAnchor="middle" aria-hidden="true">
-                  {isStart ? 'start' : isTarget ? 'target' : ''}
+                  {isStart ? 'start' : isTarget ? 'target' : isPinned ? 'stop' : ''}
                 </text>
 
                 <text className="station__label" y={LABEL_Y - ROW_Y} textAnchor="middle" aria-hidden="true">

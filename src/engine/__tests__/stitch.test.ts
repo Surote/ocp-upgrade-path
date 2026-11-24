@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { buildHopCommands } from '../../design/commands';
 import { parseRawGraph } from '../../graph/parse';
 import type { Graph, Version } from '../../graph/types';
 import { err, ok, type Result } from '../../lib/result';
 import type { GraphError } from '../../graph/errors';
+import { buildTargetOptions } from '../../planner/targetOptions';
+import { loadFixture } from '../../test-utils/fixtures';
+import { discoverLookahead } from '../lookahead';
 import { stitchAndFindPath } from '../stitch';
 import type { GraphLoader } from '../types';
+import * as fx from './routeFixtures';
 
 function v(s: string): Version {
   return s as Version;
@@ -116,7 +121,7 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     expect(result.value.alternates).toEqual([]);
   });
 
-  it('"later channel wins": nodeInfo for the overlapping junction node comes from the target-side (later) channel', async () => {
+  it('reads each station\'s node metadata from the graph that supplied the hop arriving at it', async () => {
     const result = await stitchAndFindPath(makeLoader([]), {
       targetChannel: 'stable-4.20',
       arch: 'amd64',
@@ -125,10 +130,10 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     });
     if (!result.ok) throw result.error;
 
-    // 4.19.5 exists in both stable-4.20 (payload tag "A", fetched first / later
-    // channel) and stable-4.19 (tag "B", fetched via walk-back). "A" must win.
-    const junction = result.value.nodeInfo.get(v('4.19.5'));
-    expect(junction?.payload).toContain('sha256:A-');
+    // 4.19.5 is in stable-4.20 (tag "A") and stable-4.19 (tag "B"); the hop arriving at it runs on stable-4.19.
+    expect(result.value.nodeInfo.get(v('4.18.1'))?.payload).toContain('sha256:B-');
+    expect(result.value.nodeInfo.get(v('4.19.5'))?.payload).toContain('sha256:B-');
+    expect(result.value.nodeInfo.get(v('4.20.1'))?.payload).toContain('sha256:A-');
   });
 
   it('never fabricates a transition: two graphs with NO shared/overlapping version cannot be stitched into a path, even if each individually has usable edges', async () => {
@@ -276,7 +281,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     if (!result.ok) return;
     expect(calls).toEqual(['eus-4.20', 'eus-4.21', 'stable-4.21']); // same class probed first, per plan.md §6
     expect(result.value.stitch.channelsUsed).toEqual(['eus-4.20', 'stable-4.21']);
-    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.21', requestedClass: 'eus' }]);
+    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.21', requestedClass: 'eus', requestedStatus: 'unpublished' }]);
     expect(result.value.primary.hops.at(-1)?.sourceChannel).toBe('stable-4.21');
   });
 
@@ -307,7 +312,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     // (same class), then 4.23 (no eus channel, falls back to stable).
     expect(calls).toEqual(['eus-4.20', 'eus-4.22', 'eus-4.23', 'stable-4.23']);
     expect(result.value.stitch.channelsUsed).toEqual(['eus-4.20', 'eus-4.22', 'stable-4.23']);
-    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.23', requestedClass: 'eus' }]);
+    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.23', requestedClass: 'eus', requestedStatus: 'unpublished' }]);
     expect(result.value.primary.versions).toEqual([
       v('4.18.0'),
       v('4.19.0'),
@@ -321,6 +326,86 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     // latter is the genuine eus -> stable drop the UI must call out.
     const sourceChannels = result.value.primary.hops.map((h) => h.sourceChannel);
     expect(sourceChannels).toEqual(['eus-4.20', 'eus-4.20', 'eus-4.22', 'eus-4.22', 'stable-4.23']);
+  });
+
+  it('keeps a reachable same-class route over a shorter one on candidate, in both the route and the target dropdown', async () => {
+    const anchor = rawGraph(['4.20.0'], [], 'ANCHOR', ['stable-4.20', 'stable-4.21', 'candidate-4.22']);
+    const stable421 = rawGraph(['4.20.0', '4.21.0', '4.21.1'], [[0, 1], [1, 2]], 'S421');
+    const candidate422 = rawGraph(['4.20.0', '4.21.1', '4.22.0'], [[0, 1], [1, 2]], 'C422');
+    const loader: GraphLoader = async (channel) => {
+      if (channel === 'stable-4.20') return ok(anchor);
+      if (channel === 'stable-4.21') return ok(stable421);
+      if (channel === 'candidate-4.22') return ok(candidate422);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.20',
+      arch: 'amd64',
+      start: v('4.20.0'),
+      target: v('4.21.1'),
+    });
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.primary.hops.map((h) => [h.to, h.sourceChannel])).toEqual([
+      [v('4.21.0'), 'stable-4.21'],
+      [v('4.21.1'), 'stable-4.21'],
+    ]);
+    expect(result.value.stitch.classFallbacks).toEqual([]);
+
+    const { segments } = await discoverLookahead(loader, 'stable-4.20', anchor, 'amd64');
+    const option = buildTargetOptions(anchor, v('4.20.0'), segments).find((o) => o.version === v('4.21.1'));
+    expect(option?.via).toEqual({ channel: 'stable-4.21', classFallback: false });
+  });
+
+  it('tries a preferred channel a later graph names for a stream already reached through a fallback, keeping the fallback that joins it', async () => {
+    // stable-5.0 has no 4.22 upgrade sources, so only fast-5.0's 5.0.z name it.
+    const anchor = rawGraph(['4.22.20'], [], 'ANCHOR', ['stable-4.22', 'fast-5.0']);
+    const fast50 = rawGraph(['4.22.20', '5.0.0'], [[0, 1]], 'F50', ['fast-5.0', 'stable-5.0']);
+    const stable50 = rawGraph(['5.0.0', '5.0.3'], [[0, 1]], 'S50', ['stable-5.0']);
+    const loader: GraphLoader = async (channel) => {
+      if (channel === 'stable-4.22') return ok(anchor);
+      if (channel === 'fast-5.0') return ok(fast50);
+      if (channel === 'stable-5.0') return ok(stable50);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.22',
+      arch: 'amd64',
+      start: v('4.22.20'),
+      target: v('5.0.3'),
+    });
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.primary.hops.map((h) => [h.to, h.sourceChannel])).toEqual([
+      [v('5.0.0'), 'fast-5.0'],
+      [v('5.0.3'), 'stable-5.0'],
+    ]);
+
+    const { segments } = await discoverLookahead(loader, 'stable-4.22', anchor, 'amd64');
+    const option = buildTargetOptions(anchor, v('4.22.20'), segments).find((o) => o.version === v('5.0.3'));
+    expect(option).toEqual({ version: v('5.0.3'), reachable: true, via: { channel: 'stable-5.0', classFallback: true } });
+  });
+
+  it('records that the preferred class is published but has no route, when a fallback enters a stream its published channel cannot', async () => {
+    // Shaped like live Cincinnati in Nov 2026: stable-5.0 exists with 5.0.z only, no 4.22 upgrade sources.
+    const anchor = rawGraph(['4.22.15', '4.22.20'], [[0, 1]], 'ANCHOR', ['stable-4.22', 'fast-5.0']);
+    const fast50 = rawGraph(['4.22.20', '5.0.0', '5.0.1'], [[0, 1], [1, 2]], 'F50', ['fast-5.0', 'stable-5.0']);
+    const stable50 = rawGraph(['5.0.0', '5.0.1'], [[0, 1]], 'S50', ['stable-5.0', 'fast-5.0']);
+    const loader: GraphLoader = async (channel) => {
+      if (channel === 'stable-4.22') return ok(anchor);
+      if (channel === 'fast-5.0') return ok(fast50);
+      if (channel === 'stable-5.0') return ok(stable50);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.22',
+      arch: 'amd64',
+      start: v('4.22.15'),
+      target: v('5.0.1'),
+    });
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'fast-5.0', requestedClass: 'stable', requestedStatus: 'noRoute' }]);
   });
 
   it('gives up as targetNeverFound when no channel walking forward holds the target', async () => {
@@ -430,6 +515,27 @@ describe('stitchAndFindPath — failure modes', () => {
     });
   });
 
+  it('never joins two channels through a downgrade, even when that is the only shared release', async () => {
+    const anchor = rawGraph(['4.20.1', '4.20.10'], [[0, 1]], 'ANCHOR', ['stable-4.20', 'stable-4.22']);
+    // The only release stable-4.22 shares with the anchor's route is 4.20.10,
+    // and its only way on starts by stepping back to 4.20.5.
+    const forward = rawGraph(['4.20.10', '4.20.5', '4.22.1'], [[0, 1], [1, 2]], 'FWD');
+    const loader: GraphLoader = async (channel) => {
+      if (channel === 'stable-4.20') return ok(anchor);
+      if (channel === 'stable-4.22') return ok(forward);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.20',
+      arch: 'amd64',
+      start: v('4.20.1'),
+      target: v('4.22.1'),
+    });
+
+    expect(result.ok ? result.value.primary.versions : result.error.kind).toBe('unreachable');
+  });
+
   it('gives up as startNeverFound once a walked-back channel holds nothing older to step back to', async () => {
     const graph418 = rawGraph(['4.0.0', '4.1.0'], [[0, 1]], 'X');
     const graph417 = rawGraph(['4.0.0'], [], 'Y');
@@ -454,5 +560,72 @@ describe('stitchAndFindPath — failure modes', () => {
     if (result.error.kind !== 'startNeverFound') return;
     expect(result.error.channelsTried).toEqual(['stable-4.1', 'stable-4.0']);
     expect(channelsFetched).toEqual(['stable-4.1', 'stable-4.0']);
+  });
+});
+
+describe('single-graph alternates', () => {
+  it('offers alternates distinct from the primary on screen (candidate-4.20 fixture)', async () => {
+    const parsed = parseRawGraph(loadFixture('candidate-4.20.json'), { channel: 'candidate-4.20', arch: 'amd64' });
+    if (!parsed.ok) throw new Error('fixture did not parse');
+    const loader: GraphLoader = async () => ok(parsed.value);
+
+    const result = await stitchAndFindPath(loader, { targetChannel: 'candidate-4.20', arch: 'amd64', start: v('4.18.14'), target: v('4.20.0-ec.2') });
+
+    if (!result.ok) throw new Error(result.error.kind);
+    const shown = [result.value.primary, ...result.value.alternates].map((p) => p.versions.join(' > '));
+    expect(new Set(shown).size).toBe(shown.length);
+    expect(shown.some((route) => route.includes('4.19.0-rc.2'))).toBe(true);
+    expect(shown.some((route) => route.includes('4.19.0-rc.3'))).toBe(true);
+  });
+});
+
+describe('node metadata follows hop provenance', () => {
+  it('takes a hop\'s --to-image digest from the graph that supplied the hop, not a graph only the lower-risk route uses', async () => {
+    const anchor = fx.graph([], { nodes: ['4.20.0'] });
+    const stable421 = fx.graph([['4.20.0', '4.21.2']]);
+    const stable422 = fx.graph([], { risks: [{ from: '4.20.0', to: '4.22.0', name: 'R' }] });
+    // Only the lower-risk route walks stable-4.23, and it holds 4.22.0 under another digest.
+    const stable423 = fx.graph([['4.21.2', '4.22.0']], { nodes: ['4.21.0'] });
+    const segment = (channel: string, graph: Graph) => ({ channel, graph, classFallback: false as const });
+    const lookahead = [segment('stable-4.21', stable421), segment('stable-4.22', stable422), segment('stable-4.23', stable423)];
+    const noFetch: GraphLoader = async (channel) => {
+      throw new Error(`unexpected fetch of ${channel}`);
+    };
+
+    const result = await stitchAndFindPath(noFetch, {
+      targetChannel: 'stable-4.20',
+      arch: 'amd64',
+      start: v('4.20.0'),
+      target: v('4.22.0'),
+      anchor: { graph: anchor, lookahead: { segments: lookahead, channelsTried: lookahead.map((s) => s.channel) } },
+    });
+
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.primary.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.22']);
+    expect(result.value.riskComparison?.route?.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.21', 'stable-4.23']);
+    const [command] = buildHopCommands(result.value.primary, 'stable-4.20', result.value.nodeInfo, { channelNames: [], multiGraph: true });
+    const digest = stable422.nodes.find((n) => n.version === '4.22.0')?.payload as string;
+    expect(digest).not.toBe(stable423.nodes.find((n) => n.version === '4.22.0')?.payload);
+    expect(command?.upgradeToImage).toBe(`oc adm upgrade --to-image=${digest} --allow-explicit-upgrade`);
+  });
+});
+
+describe('response order', () => {
+  it('plans the same route whatever order Cincinnati lists nodes and edges in', async () => {
+    // Two routes tie on every ranked term; Cincinnati shuffles node order on each response.
+    const edges: [string, string][] = [
+      ['4.22.15', '5.0.0-rc.3'],
+      ['4.22.15', '5.0.0-rc.4'],
+      ['5.0.0-rc.3', '5.1.0-ec.1'],
+      ['5.0.0-rc.4', '5.1.0-ec.1'],
+    ];
+    const plan = async (order: [string, string][]) => {
+      const g = fx.graph(order, { nodes: [...new Set(order.flat())].reverse() });
+      const result = await stitchAndFindPath(async () => ok(g), { targetChannel: 'candidate-5.1', arch: 'amd64', start: v('4.22.15'), target: v('5.1.0-ec.1') });
+      if (!result.ok) throw new Error(result.error.kind);
+      return result.value.primary.versions;
+    };
+
+    expect(await plan([...edges].reverse())).toEqual(await plan(edges));
   });
 });

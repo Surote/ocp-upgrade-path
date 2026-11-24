@@ -2,26 +2,24 @@ import { parseChannelName } from '../design/channels';
 import { candidateChannelsForStream } from '../design/forwardChannel';
 import type { GraphError } from '../graph/errors';
 import type { Arch, Graph } from '../graph/types';
-import type { GraphLoader } from './types';
+import type { ClassFallback, GraphLoader } from './types';
 import { compareStreams, formatStream, type Stream } from './version';
 
 /**
  * Safety bound only. Discovery normally ends when no fetched graph names a
- * newer stream; an eus-4.18 anchor reaches 5.1 in seven streams.
+ * newer channel it has not tried; an eus-4.18 anchor reaches 5.1 in seven
+ * streams and 19 fetches (Nov 2026). Twelve streams, four classes each.
  */
-const MAX_LOOKAHEAD_STREAMS = 12;
+const MAX_LOOKAHEAD_FETCHES = 48;
 
-export interface ChannelSegment {
-  readonly channel: string;
-  readonly graph: Graph;
-  /** True when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
-  readonly classFallback: boolean;
-  /** The anchor's class, which had no channel at this stream -- present iff `classFallback` is true. */
-  readonly requestedClass?: string;
-}
+/** `classFallback` is true when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
+export type ChannelSegment = { readonly channel: string; readonly graph: Graph } & (
+  | { readonly classFallback: false }
+  | ({ readonly classFallback: true } & Omit<ClassFallback, 'channel'>)
+);
 
 export interface LookaheadDiscovery {
-  /** Lowest stream first, at most one channel per stream. */
+  /** Lowest stream first; within a stream, every channel that loaded, least preferred first. */
   readonly segments: readonly ChannelSegment[];
   /** Every channel fetched, in fetch order. */
   readonly channelsTried: readonly string[];
@@ -34,7 +32,7 @@ export interface LookaheadDiscovery {
 }
 
 /**
- * The channels beyond the anchor, one per newer stream, that both the target
+ * The channels beyond the anchor, by newer stream, that both the target
  * dropdown (planner/targetOptions.ts) and the stitcher's forward walk
  * (engine/stitch.ts) use. Sharing this one walk is what makes every target
  * the dropdown marks reachable routable by the stitcher.
@@ -46,12 +44,16 @@ export interface LookaheadDiscovery {
  * from "4.22" arithmetically, and both are real successors. Each fetched
  * segment's own membership extends the frontier, so 5.1 is found through a
  * 4.23 or 5.0 channel. Only membership-attested names are fetched: a channel
- * that exists but no earlier node names (`stable-5.0` holding only 5.0.z)
- * has no upgrade sources here, so it can't join the walk.
+ * that exists but no reached node names has no release in common with the
+ * walk, so it can't join it.
  *
- * At each stream the class is chosen by `candidateChannelsForStream`,
- * restricted to attested names; an empty channel falls through to the next.
- * A channel that fails to load is recorded in `failure` and its stream skipped.
+ * Every attested channel of a class `candidateChannelsForStream` names is
+ * fetched, preferred class first, up to the safety cap. Discovery never
+ * decides a fallback is unneeded: whether a route needs fast-5.2 depends on
+ * which channels reach it, which only the route search (`routeAcrossSegments`)
+ * knows, and it ranks posture first, so it uses the preferred channel
+ * wherever that reaches. A channel that fails to load is recorded in
+ * `failure`, and its stream gets no further channels.
  */
 export async function discoverLookahead(
   loader: GraphLoader,
@@ -60,47 +62,76 @@ export async function discoverLookahead(
   arch: Arch,
 ): Promise<LookaheadDiscovery> {
   const anchor = parseChannelName(anchorChannel);
-  const found: { readonly stream: Stream; readonly segment: ChannelSegment }[] = [];
+  const found: Found[] = [];
   const channelsTried: string[] = [];
   if (!anchor) return { segments: [], channelsTried };
 
   const attested = new Set(anchorGraph.channelNames);
-  const visitedStreams = new Set<string>([formatStream(anchor)]);
+  const failedStreams = new Set<string>();
+  const emptyChannels = new Set<string>();
+  const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
-  for (let step = 0; step < MAX_LOOKAHEAD_STREAMS; step += 1) {
-    const stream = lowestNewerStream(attested, anchor, visitedStreams);
-    if (!stream) break;
-    visitedStreams.add(formatStream(stream));
-
-    for (const channel of candidateChannelsForStream(anchor.cls, stream).filter((name) => attested.has(name))) {
-      channelsTried.push(channel);
-      const result = await loader(channel, arch);
-      if (!result.ok) {
-        if (result.error.kind === 'empty') continue;
-        // Skip the stream rather than try the next class: a transient error
-        // must not silently move the plan onto another class.
-        failure ??= { channel, error: result.error };
-        break;
+  for (let fetches = 0; fetches < MAX_LOOKAHEAD_FETCHES; fetches += 1) {
+    const next = nextChannel(attested, anchor, channelsTried, failedStreams);
+    if (!next) break;
+    channelsTried.push(next.channel);
+    const result = await loader(next.channel, arch);
+    if (!result.ok) {
+      if (result.error.kind === 'empty') {
+        emptyChannels.add(next.channel);
+        continue;
       }
-      const classFallback = parseChannelName(channel)?.cls !== anchor.cls;
-      found.push({ stream, segment: { channel, graph: result.value, classFallback, requestedClass: classFallback ? anchor.cls : undefined } });
-      for (const name of result.value.channelNames) attested.add(name);
-      break;
+      failure ??= { channel: next.channel, error: result.error };
+      failedChannels.add(next.channel);
+      // Stop at this stream rather than try the next class: a transient
+      // error must not silently move the plan onto another class.
+      failedStreams.add(formatStream(next.stream));
+      continue;
     }
+    found.push({ ...next, graph: result.value });
+    for (const name of result.value.channelNames) attested.add(name);
   }
   // A fetched graph can name a stream older than one already fetched (only
-  // 5.1 names 4.23), and routeAcrossSegments visits each segment once.
-  found.sort((a, b) => compareStreams(a.stream, b.stream));
-  return { segments: found.map((f) => f.segment), channelsTried, failure };
+  // 5.1 names 4.23), and the route search never returns to an earlier stream.
+  found.sort((a, b) => compareStreams(a.stream, b.stream) || b.rank - a.rank);
+  const segments = found.map(({ channel, stream, rank, graph }): ChannelSegment => {
+    if (rank === 0) return { channel, graph, classFallback: false };
+    const requested = candidateChannelsForStream(anchor.cls, stream)[0] as string;
+    const requestedStatus = emptyChannels.has(requested) ? 'unpublished' : failedChannels.has(requested) ? 'unverified' : 'noRoute';
+    return { channel, graph, classFallback: true, requestedClass: anchor.cls, requestedStatus };
+  });
+  return { segments, channelsTried, failure };
 }
 
-function lowestNewerStream(channelNames: ReadonlySet<string>, than: Stream, exclude: ReadonlySet<string>): Stream | undefined {
-  let lowest: Stream | undefined;
-  for (const name of channelNames) {
+interface Candidate {
+  readonly channel: string;
+  readonly stream: Stream;
+  /** Position in `candidateChannelsForStream`: 0 is the anchor's own class. */
+  readonly rank: number;
+}
+
+interface Found extends Candidate {
+  readonly graph: Graph;
+}
+
+/** The next channel to fetch: the most preferred attested channel not yet tried at the lowest newer stream that has one. */
+function nextChannel(
+  attested: ReadonlySet<string>,
+  anchor: Stream & { readonly cls: string },
+  tried: readonly string[],
+  failedStreams: ReadonlySet<string>,
+): Candidate | undefined {
+  let best: Candidate | undefined;
+  for (const name of attested) {
     const parsed = parseChannelName(name);
-    if (!parsed || compareStreams(parsed, than) <= 0 || exclude.has(formatStream(parsed))) continue;
-    if (!lowest || compareStreams(parsed, lowest) < 0) lowest = { major: parsed.major, minor: parsed.minor };
+    if (!parsed || compareStreams(parsed, anchor) <= 0 || failedStreams.has(formatStream(parsed)) || tried.includes(name)) continue;
+    const stream = { major: parsed.major, minor: parsed.minor };
+    const rank = candidateChannelsForStream(anchor.cls, stream).indexOf(name);
+    if (rank < 0) continue;
+    if (!best || compareStreams(stream, best.stream) < 0 || (compareStreams(stream, best.stream) === 0 && rank < best.rank)) {
+      best = { channel: name, stream, rank };
+    }
   }
-  return lowest;
+  return best;
 }

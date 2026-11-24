@@ -1,4 +1,4 @@
-import type { Graph, NodeIndex, Version } from '../graph/types';
+import type { Graph, GraphNode, NodeIndex, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { dedupeRisks, RiskIndex, riskWeight } from './risks';
 import { compareStreams, compareVersions, formatStream, parseVersion, type Stream, streamOf } from './version';
@@ -53,12 +53,18 @@ function combineCost(a: CostTuple, b: CostTuple): CostTuple {
  * node's position in `graph.nodes`, per graph/types.ts -- so these arrays are
  * plain index-addressed lookups, not a re-mint of the brand from anything
  * outside the graph's own established index space).
+ *
+ * Edges that lower SemVer precedence are dropped: an upgrade plan never steps
+ * back, and a multi-graph route could otherwise join two channels through
+ * one (4.20.10 -> 4.20.5). Equal precedence stays, since a build of the same
+ * release (`+build.1`) is a real hop.
  */
 function buildAdjacency(graph: Graph): { forward: NodeIndex[][]; reverse: NodeIndex[][] } {
   const n = graph.nodes.length;
   const forward: NodeIndex[][] = Array.from({ length: n }, () => []);
   const reverse: NodeIndex[][] = Array.from({ length: n }, () => []);
   for (const [from, to] of graph.edges) {
+    if (compareVersions((graph.nodes[to] as GraphNode).version, (graph.nodes[from] as GraphNode).version) < 0) continue;
     (forward[from] as NodeIndex[]).push(to);
     (reverse[to] as NodeIndex[]).push(from);
   }
@@ -297,13 +303,13 @@ function findWaypointAlternates(
   bwd: DijkstraResult,
   startIdx: NodeIndex,
   targetIdx: NodeIndex,
-  primary: Path,
+  primary: readonly Version[],
 ): readonly Path[] {
   const startStream = streamOf(versions[startIdx] as Version);
   const targetStream = streamOf(versions[targetIdx] as Version);
 
-  const primarySignature = waypointSignature(primary.versions, startStream, targetStream);
-  const bestPerSignature = new Map<string, Path>([[primarySignature, primary]]);
+  const primarySignature = waypointSignature(primary, startStream, targetStream);
+  const bestPerSignature = new Map<string, Path>();
 
   for (let i = 0; i < versions.length; i += 1) {
     if (i === startIdx || i === targetIdx) continue;
@@ -365,64 +371,22 @@ export function shortestPathsFrom(graph: Graph, start: Version): ReadonlyMap<Ver
   return paths;
 }
 
-/** A route found by `extendRoutesInGraph`: the seed it starts from, its total cost, and the hops walked in this graph. */
-export interface ExtendedRoute<C> {
-  readonly seed: Version;
-  readonly cost: C;
-  readonly hops: readonly PathHop[];
-}
-
-/**
- * Extends routes that already reach some of `graph`'s versions (`seeds`,
- * each with the cost accumulated so far) through `graph`'s own edges, in one
- * multi-source search: the cheapest extension to every reachable version,
- * whichever seed it starts from. A seed nothing cheaper reaches maps to
- * itself with no hops. `step` adds one hop to a cost; it must strictly
- * increase the cost under `compare`.
- */
-export function extendRoutesInGraph<C>(
-  graph: Graph,
-  seeds: ReadonlyMap<Version, C>,
-  step: (cost: C, hop: { readonly riskWeight: number; readonly toPatch: number }) => C,
-  compare: (a: C, b: C) => number,
-): ReadonlyMap<Version, ExtendedRoute<C>> {
-  const versions = graph.nodes.map((n) => n.version);
-  const indexOf = new Map(versions.map((ver, i) => [ver, i as NodeIndex] as const));
-  const sources: (readonly [NodeIndex, C])[] = [];
-  for (const [ver, cost] of seeds) {
-    const idx = indexOf.get(ver);
-    if (idx !== undefined) sources.push([idx, cost]);
-  }
-
-  const riskIndex = new RiskIndex(graph.conditionalEdges);
-  const edgeCost = makeEdgeCost(riskIndex, versions, 'forward');
-  const { forward } = buildAdjacency(graph);
-  const { dist, pred } = dijkstra(versions.length, forward, sources, (cost, u, v) => step(cost, edgeCost(u, v)), compare);
-
-  const routes = new Map<Version, ExtendedRoute<C>>();
-  dist.forEach((cost, i) => {
-    if (cost === undefined) return;
-    const chain: NodeIndex[] = [i as NodeIndex];
-    for (let p = pred[i]; p !== undefined; p = pred[p]) chain.push(p);
-    chain.reverse();
-    const hops: PathHop[] = [];
-    for (let k = 0; k + 1 < chain.length; k += 1) {
-      const from = versions[chain[k] as NodeIndex] as Version;
-      const to = versions[chain[k + 1] as NodeIndex] as Version;
-      hops.push({ from, to, risks: riskIndex.risksFor(from, to) });
-    }
-    routes.set(versions[i] as Version, { seed: versions[chain[0] as NodeIndex] as Version, cost, hops });
-  });
-  return routes;
-}
-
 /**
  * Finds the recommended upgrade path from `start` to `target` within a single
  * `Graph`, plus up to two waypoint alternates, per plan.md §4. Pure: no
  * network, no `GraphClient` -- callers (including the stitcher, engine/stitch.ts)
  * supply the `Graph` they've already fetched/validated.
+ *
+ * Alternates differ in waypoint from `shownPrimary` when given, else from
+ * this function's own primary. The stitcher displays its route search's
+ * primary, which can break a tie differently, so it passes that one.
  */
-export function findPathsInGraph(graph: Graph, start: Version, target: Version): Result<FindPathSuccess, NoPathReason> {
+export function findPathsInGraph(
+  graph: Graph,
+  start: Version,
+  target: Version,
+  shownPrimary?: readonly Version[],
+): Result<FindPathSuccess, NoPathReason> {
   const versions = graph.nodes.map((n) => n.version);
   const indexOfVersion = new Map<Version, NodeIndex>();
   versions.forEach((ver, i) => indexOfVersion.set(ver, i as NodeIndex));
@@ -457,7 +421,7 @@ export function findPathsInGraph(graph: Graph, start: Version, target: Version):
   const primary = buildPathFromChain(versions, riskIndex, primaryChain, targetDist);
 
   const bwd = dijkstraFrom(n, reverse, makeEdgeCost(riskIndex, versions, 'backward'), targetIdx);
-  const alternates = findWaypointAlternates(versions, riskIndex, fwd, bwd, startIdx, targetIdx, primary);
+  const alternates = findWaypointAlternates(versions, riskIndex, fwd, bwd, startIdx, targetIdx, shownPrimary ?? primary.versions);
 
   return ok({ primary, alternates });
 }

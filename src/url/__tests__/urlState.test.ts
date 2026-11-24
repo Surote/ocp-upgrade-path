@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseUrlState, resolveUrlArch, serializeUrlState, syncUrlState } from '../urlState';
+import { parseUrlState, resolveUrlArch, resolveUrlRiskPolicy, serializeUrlState, syncUrlState } from '../urlState';
 
 describe('parseUrlState', () => {
   it('parses all four params', () => {
@@ -117,5 +117,39 @@ describe('syncUrlState', () => {
       window.history.replaceState = originalReplace;
       window.history.pushState = originalPush;
     }
+  });
+});
+
+describe('stops and avoid', () => {
+  it('round-trips ordered stops and avoid=conditional through a readable query string', () => {
+    const qs = serializeUrlState({
+      channel: 'eus-4.18',
+      start: '4.16.33',
+      target: '5.0.1',
+      stops: ['4.18.20', '4.20.12'],
+      riskPolicy: 'avoidConditional',
+    });
+    expect(qs).toContain('stops=4.18.20,4.20.12');
+    expect(qs).toContain('avoid=conditional');
+    const parsed = parseUrlState(qs);
+    expect(parsed.stops).toEqual(['4.18.20', '4.20.12']);
+    expect(resolveUrlRiskPolicy(parsed.avoid)).toEqual({ riskPolicy: 'avoidConditional' });
+  });
+
+  it('omits stops and avoid under the recommended policy with no stops', () => {
+    const qs = serializeUrlState({ channel: 'eus-4.18', stops: ['', ''], riskPolicy: 'recommended' });
+    expect(qs).toBe('channel=eus-4.18');
+    expect(parseUrlState(qs).stops).toBeUndefined();
+    expect(resolveUrlRiskPolicy(undefined)).toEqual({ riskPolicy: 'recommended' });
+  });
+
+  it('keeps an unparseable stop for the planner to flag, dropping only blank entries', () => {
+    expect(parseUrlState('?stops=4.18.20,,banana, ').stops).toEqual(['4.18.20', 'banana']);
+  });
+
+  it('degrades an unknown avoid value to recommended with a notice', () => {
+    const resolved = resolveUrlRiskPolicy('everything');
+    expect(resolved.riskPolicy).toBe('recommended');
+    expect(resolved.notice).toMatch(/everything/);
   });
 });

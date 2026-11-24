@@ -1,4 +1,5 @@
 import type { Path } from '../engine/types';
+import { routeFacts } from './routeFacts';
 
 /**
  * A plain-text accessible alternative to the SVG map (quality floor: "SVG
@@ -7,7 +8,6 @@ import type { Path } from '../engine/types';
  * as a compact route header for every reader, not only assistive tech.
  */
 export function RouteSummary({ path }: { readonly path: Path }) {
-  const riskCount = path.riskSummary.length;
   return (
     <div className="route-summary">
       <ol aria-label="Upgrade path stops">
@@ -18,7 +18,7 @@ export function RouteSummary({ path }: { readonly path: Path }) {
         ))}
       </ol>
       <p className="route-summary__meta">
-        {path.hops.length} hop{path.hops.length === 1 ? '' : 's'} · {riskCount === 0 ? 'no risks' : `${riskCount} distinct risk(s)`}
+        {routeFacts(path)}
       </p>
     </div>
   );

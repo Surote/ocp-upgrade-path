@@ -192,3 +192,35 @@ describe('UpgradeMap — labels and switch tags fit the fixed-size map', () => {
     }
   });
 });
+
+describe('UpgradeMap — pinned stops', () => {
+  afterEach(cleanup);
+
+  function renderMap(pinnedStops?: readonly Version[]) {
+    return render(
+      <UpgradeMap
+        path={PATH}
+        nodeInfo={EMPTY_NODE_INFO}
+        commands={COMMANDS}
+        pinnedStops={pinnedStops}
+        selectedHopIndex={null}
+        selectedStationIndex={null}
+        onSelectHop={noop}
+        onSelectStation={noop}
+      />,
+    );
+  }
+
+  it('captions and announces a pinned stop at its station without changing the map size', () => {
+    const { container } = renderMap();
+    const unpinnedWidth = container.querySelector('svg')?.getAttribute('width');
+    cleanup();
+
+    const pinned = renderMap([v('4.20.33')]);
+    const station = screen.getByRole('button', { name: /^Station 4\.20\.33,/ });
+    expect(station).toHaveAccessibleName(expect.stringContaining('pinned stop'));
+    expect(station).toHaveTextContent('stop');
+    expect(screen.getByRole('button', { name: /^Station 4\.19\.41,/ })).not.toHaveAccessibleName(expect.stringContaining('pinned stop'));
+    expect(pinned.container.querySelector('svg')?.getAttribute('width')).toBe(unpinnedWidth);
+  });
+});

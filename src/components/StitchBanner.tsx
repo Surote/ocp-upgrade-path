@@ -1,10 +1,17 @@
 import { parseChannelName } from '../design/channels';
 import type { ClassFallback } from '../engine/types';
 
+const FALLBACK_REASON: Record<ClassFallback['requestedStatus'], (requestedClass: string) => string> = {
+  unpublished: () => 'none is published there',
+  noRoute: (cls) => `no route on a ${cls} channel reaches it from here`,
+  unverified: (cls) => `the ${cls} channel for that stream could not be loaded, so a route there could not be verified`,
+};
+
 /**
- * Names which channels were stitched together, whenever more than one was
- * used, so the path stays auditable (plan.md §4/§6). Never shown for a
- * single-channel result.
+ * Names the channels the route moves through, in route order with each
+ * return shown (`channelSequence`), whenever there is more than one, so the
+ * path stays auditable against the map and commands (plan.md §4/§6). Never
+ * shown for a single-channel result.
  *
  * `classFallbacks` (plan.md §6 "Forward channel preference") names every
  * channel in that list that substitutes a different class for the anchor's
@@ -16,23 +23,24 @@ import type { ClassFallback } from '../engine/types';
  * notice by comparing channel-name prefixes themselves.
  */
 export function StitchBanner({
-  channelsUsed,
+  channels,
   classFallbacks,
 }: {
-  readonly channelsUsed: readonly string[];
+  readonly channels: readonly string[];
   readonly classFallbacks: readonly ClassFallback[];
 }) {
-  if (channelsUsed.length <= 1) return null;
+  if (channels.length <= 1) return null;
   return (
     <div className="stitch-banner">
       <p>
-        <strong>Assembled across channels:</strong> {channelsUsed.join(' → ')}
+        <strong>Assembled across channels:</strong> {channels.join(' → ')}
       </p>
       {classFallbacks.map((fb) => (
         <p key={fb.channel} className="stitch-banner__fallback" role="alert">
           <strong>Channel class change:</strong> {fb.channel} was used instead of a <span className="mono">{fb.requestedClass}</span>{' '}
-          channel for that version stream, because none is published there — this changes the cluster's support posture at that
-          step, not just its version.
+          channel for that version stream, because{' '}
+          {FALLBACK_REASON[fb.requestedStatus](fb.requestedClass)} —
+          this changes the cluster's support posture at that step, not just its version.
           {parseChannelName(fb.channel)?.cls === 'candidate' && (
             <>
               {' '}

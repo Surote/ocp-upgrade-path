@@ -96,6 +96,117 @@ main {
   font-size: 0.85rem;
 }
 
+/* Stops and the risk policy: one compact row under the rail, not sticky,
+   so pinning stops never makes the sticky rail taller. */
+.route-constraints {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.stop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 8px 12px;
+}
+
+.stop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stop-field label {
+  font-weight: 500;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.stop-field__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.stop-field select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-h);
+}
+
+.stop-field select[aria-invalid='true'] {
+  border-color: var(--risk-always);
+}
+
+.stop-field__remove {
+  border: none;
+  background: none;
+  padding: 2px 8px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.stop-field__remove:hover {
+  color: var(--text-h);
+}
+
+.stop-field .field-error {
+  font-size: 0.8rem;
+}
+
+.route-constraints__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  font-size: 0.9rem;
+}
+
+.text-button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.text-button:not(:disabled):hover {
+  text-decoration: underline;
+}
+
+.text-button:disabled {
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.checkbox-field input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .notices {
   border-left: 2px solid var(--risk-conditional);
   padding: 2px 0 2px 12px;
@@ -161,7 +272,8 @@ main {
   color: var(--risk-always);
 }
 
-.route-summary ol {
+.route-summary ol,
+.lower-risk__stops {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
@@ -173,7 +285,8 @@ main {
   color: var(--text-h);
 }
 
-.route-summary li + li::before {
+.route-summary li + li::before,
+.lower-risk__stops li + li::before {
   content: '→';
   color: var(--text-muted);
   margin-right: 6px;
@@ -184,6 +297,43 @@ main {
   color: var(--text-muted);
   font-size: 0.85rem;
   margin-top: 2px;
+}
+
+/* The lower-risk counterpart sits under the route it would replace. */
+.lower-risk {
+  border-left: 2px solid var(--clean);
+  padding: 2px 0 2px 12px;
+  margin-top: 12px;
+}
+
+.lower-risk__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.lower-risk__title {
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.lower-risk__stops {
+  margin-top: 4px;
+  font-size: 0.9rem;
+}
+
+.lower-risk__meta {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
+.lower-risk--none {
+  border-left-color: var(--border-strong);
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
 /* --------------------------------------------------------------------- map */
@@ -228,6 +378,11 @@ main {
   font-size: 12px;
   font-weight: 500;
   fill: var(--text-h);
+}
+
+.upgrade-map .station--pinned .station__caption {
+  font-weight: 600;
+  fill: var(--accent);
 }
 
 .upgrade-map .interchange-tag {
@@ -668,6 +823,7 @@ main {
 a:focus-visible,
 button:focus-visible,
 select:focus-visible,
+input:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;

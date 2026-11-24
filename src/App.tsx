@@ -7,6 +7,7 @@ import { FreshnessBanner } from './components/FreshnessBanner';
 import { MethodExplainer } from './components/MethodExplainer';
 import { Notices } from './components/Notices';
 import { PathResult } from './components/PathResult';
+import { RouteConstraints } from './components/RouteConstraints';
 import { StartSelect } from './components/StartSelect';
 import { TargetSelect } from './components/TargetSelect';
 import { GraphClient } from './graph/client';
@@ -43,11 +44,19 @@ function App({ graphClient }: AppProps = {}) {
         <StartSelect id="start" model={planner.start} />
         <TargetSelect id="target" model={planner.target} />
       </form>
+      <RouteConstraints model={planner.constraints} selectedChannel={planner.channel.value} />
 
       <FreshnessBanner model={planner.freshness} />
 
       <section className="result-section" aria-label="Upgrade path result">
-        <PathResult result={planner.result} channel={planner.channel.value || undefined} channelNames={planner.channelNames} />
+        <PathResult
+          result={planner.result}
+          channel={planner.channel.value || undefined}
+          channelNames={planner.channelNames}
+          routeHold={planner.routeHold}
+          pinnedStops={planner.pinnedStops}
+          onUseLowerRisk={() => planner.constraints.onRiskPolicyChange('avoidConditional')}
+        />
       </section>
 
       <MethodExplainer />

@@ -69,6 +69,7 @@ Established by querying the live endpoint, not from documentation.
 | Node | `{version, payload, metadata{…}}` | Errata URL present on all `stable`/`fast` nodes, **but absent on 17/171 `candidate-4.20` nodes** — type it optional |
 | Bad channel | HTTP **200** with empty arrays | Validate on content, not status code |
 | Conditional updates | Listed **only** in `conditionalEdges`, never also in `edges` (0 overlap across all 7 pinned fixtures) | Fold them into the traversable edge set at parse time; `conditionalEdges` stays the per-edge risk table. Skipping them hid every risk and made e.g. all 4.21→4.22 updates in `stable-4.22` unreachable |
+| Node order | Shuffled on every response (4 fetches of `candidate-5.0`, Nov 2026: 4 orders, one edge set) | Sort nodes and edges at parse time; route ties break by list order, so a permalink could otherwise plan another route after a refetch |
 | Graph size | 267 KB → 219 KB trimmed → 27 KB gzip | Whole channel set fits in server memory |
 | Risk density | 1175 / 2422 edges (~49%) | Ranking on risk has real signal |
 | Risk types | 36 `Always` vs 202 `PromQL` | Hiding conditional risks would hide ~85% of them |
@@ -163,17 +164,20 @@ alternates alongside the primary.)
 **Stitching** is anchor-first. Fetch the selected channel; if the start version
 isn't in it, walk back to the same class one stream older (the highest older stream among
 the current graph's own nodes, see §6 "Major-version boundaries") until it is. Where two graphs disagree
-about an overlapping release, the later channel wins. We never union edges across graphs
+about an overlapping release, each hop uses its own graph's edge, risks and payload. We never union edges across graphs
 — that could synthesise a transition Red Hat has not published in any single channel. A
 banner names which channels were stitched, so the path stays auditable.
 
 A stitched result is therefore a *sequential composition of per-segment shortest paths*,
 joined only at a version present in both graphs — never a merged adjacency. Junctions are
-ranked by hops, then risk weight, then hops walked on a class-fallback channel (§6
-"Forward channel preference"), then the patch tie-break. Within one graph every hop shares
-a channel, so the extra term never changes a single-graph result. Node metadata
-is the one thing that legitimately merges across graphs, under the later-channel-wins
-rule. **Multi-graph stitches return the primary path only**; waypoint alternates are
+ranked by support posture first (§6 "Forward channel preference"): fewest hops on a
+`candidate` fallback, then `fast`, then `stable`, and only then hops, risk weight and the
+patch tie-break. A release the anchor's class reaches is never routed through a shorter
+fallback. Within one graph every hop shares a channel, so the posture terms never change a
+single-graph result. Node metadata follows the same provenance: each station's payload
+comes from the graph that supplied the hop arriving at it, so a `--to-image` digest always
+matches the channel that hop runs on, and a graph only the lower-risk route uses never
+supplies one. **Multi-graph stitches return the primary path only**; waypoint alternates are
 single-graph, because the cheap concatenation trick that makes them nearly free stops
 holding once a real channel boundary is crossed. Every worked example in this document
 resolves within one graph, so this affects only the long-range cases (`4.17.x → 4.21.x`).
@@ -284,8 +288,16 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
 > three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
-> stream is named (safety cap 12 streams). Both also read reachability from
-> `routeAcrossSegments` (engine/stitch.ts), a layered shortest-path DP over the anchor
+> channel is named that it has not tried (safety cap 48 fetches). It fetches every named
+> channel of a class the stream's preference order lists, fallbacks included, and never
+> decides from discovery order that a fallback is unneeded. Three successive review
+> findings came from such rules: a preferred channel named after a fallback hid it, and
+> so did one named before it (stable-5.0 naming stable-5.2 before fast-5.1 names the
+> fast-5.2 that alone holds the target). Which channel a route needs is the route search's
+> question. On the Nov 2026 snapshot this costs 19 fetches from `eus-4.18` (was 8) and 5
+> from `stable-4.22` (was 4), and the dropdown gains the prereleases only `candidate`
+> channels reach, marked as a class change. Both also read reachability from
+> `routeAcrossSegments` (engine/routeSearch.ts), a layered shortest-path DP over the anchor
 > plus every look-ahead segment. Its frontier carries across segments, so a segment can
 > contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
 > though `stable-4.21` sits between them in the list. An option marked reachable is
@@ -297,6 +309,54 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > show, not a separate fetch of it, keyed on that graph's fetch time. The path search then
 > routes against that same anchor graph and discovery instead of refetching and
 > rediscovering. A manual refresh therefore rebuilds the options and the route together.
+
+### Stops and risk policy
+
+An operator can pin **stops**, versions the route must pass through in order, and pick a
+**risk policy** (`RouteConstraints`, engine/routeConstraints.ts).
+
+**Stops narrow one search; they do not split it into legs.** The route search
+(engine/routeSearch.ts) tracks how many stops a route has passed, alongside the version.
+Arriving at the next stop advances that count and keeps the incoming channel. The next hop
+switches channel only if another segment supplies it, so the channel-switch rule above
+holds across a stop exactly as it does elsewhere. Concatenating per-leg searches would
+lose this: the cheapest arrival at a stop can be on a later channel than an arrival that
+can still reach the target. A stop that no route honors is reported as `stopUnreachable`
+with its position. A target that is unreachable without stops is still `unreachable`.
+
+**Channels of one stream form a group.** Segments stay in stream order, and a route never
+returns to an earlier stream's channel. Within one stream it moves freely. A route can
+enter 5.0 on `fast-5.0`, take a hop only `stable-5.0` publishes, and return to `fast-5.0`
+for the next hop. Each hop still runs on the segment that supplied its edge.
+
+**`avoidConditional` ranks risk before length, never before posture.** The order is
+support posture, then `Always` risk occurrences, then conditional ones, then hops, then
+the patch tie-break. Occurrences are counted per hop, so a risk on two hops counts twice,
+and they are deduplicated only for display. The policy never makes a fallback class
+eligible to dodge a risk. Under the default `recommended` policy the result also carries
+`riskComparison`, the `avoidConditional` route under the same stops when it has fewer
+occurrences, and whether the lowest-risk route is free of conditional risk. Single-graph
+waypoint alternates honor neither stops nor the policy, so they are offered only with no
+stops under `recommended`.
+
+**The stop dropdown offers only stops that route.** `buildStopOptions` makes two
+unweighted passes over the same transitions as the search: forward from the start through
+the stops before the gap, and backward from the target through the stops after it. A
+version qualifies when the earliest stream group a route reaches it in is no later than
+the latest group a route onward can start in. On the Nov 2026 `eus-4.18` snapshot,
+`4.16.33 → 5.0.1` offers 309 stops at the first gap. Pinning each of the 390 versions in
+turn routes for exactly those 309. Each option names the most conservative channel a route can
+arrive on ("reachable on eus-4.20"), not the channel the planned route takes. Naming that
+exactly needs a route search per option, 1.7 s for that list of 365. The target dropdown's `via`, by
+contrast, names the channel the route under the pinned stops and risk policy ends on: one
+more search per constraint change gives every target's route at once. Reachability there
+still ignores stops, so a target the stops rule out stays selectable and the stop is
+flagged.
+
+On that snapshot no route to 5.0.1 is free of conditional risk.
+`VSphereConfigCloudControllerCrash` sits on every route's 4.19→4.20, 4.20→4.21 or
+4.21→4.22 crossing. Stops move where it lands, and `riskComparison` reports that no
+conditional-free route exists.
 
 ### Major-version boundaries (4.22 → 5.0)
 
@@ -588,7 +648,7 @@ input: a container is running regardless, so the proxy became close to free and 
 shared cache and CORS independence with it.
 
 **Q3 · Q10 — Stitch channels; never union them.** Target-channel-first, walking back
-until the start version is covered, later channel winning on conflict. Unioning edges
+until the start version is covered, each hop reading its own graph. Unioning edges
 across graphs could invent a transition that appears in no single published channel.
 
 **Q4 · Q9 — Lexicographic Dijkstra over a cost tuple.** Hops, then risk weight, then

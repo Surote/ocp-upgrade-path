@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ChannelSegment } from '../../engine/lookahead';
 import { parseRawGraph } from '../../graph/parse';
 import type { Version } from '../../graph/types';
 import { buildGraph } from '../../test-utils/buildGraph';
@@ -29,7 +30,7 @@ describe('buildTargetOptions -- selected channel only', () => {
 
   it('offers a look-ahead build of the start release as reachable through the look-ahead channel that has the hop', () => {
     const anchor = buildGraph(['4.22.1-rc.1'], []);
-    const segment = { channel: 'stable-4.23', classFallback: false, graph: buildGraph(['4.22.1-rc.1', '4.22.1-rc.1+build.1'], [[0, 1]]) };
+    const segment = { channel: 'stable-4.23', classFallback: false as const, graph: buildGraph(['4.22.1-rc.1', '4.22.1-rc.1+build.1'], [[0, 1]]) };
     expect(buildTargetOptions(anchor, v('4.22.1-rc.1'), [segment])).toEqual([
       { version: v('4.22.1-rc.1+build.1'), reachable: true, via: { channel: 'stable-4.23', classFallback: false } },
     ]);
@@ -64,7 +65,7 @@ describe('buildTargetOptions -- with look-ahead channels', () => {
   it('merges look-ahead versions into one newest-first list, so 5.x sorts above in-channel 4.22.x', () => {
     const anchor = buildGraph(['4.22.0', '4.22.1', '4.22.5'], [[0, 1], [1, 2]]);
     const seg50 = buildGraph(['4.22.5', '5.0.0', '5.0.2'], [[0, 1], [1, 2]]);
-    const options = buildTargetOptions(anchor, v('4.22.0'), [{ channel: 'fast-5.0', graph: seg50, classFallback: true }]);
+    const options = buildTargetOptions(anchor, v('4.22.0'), [{ channel: 'fast-5.0', graph: seg50, classFallback: true, requestedClass: 'stable', requestedStatus: 'noRoute' }]);
     expect(options.map((o) => [o.version, o.via?.channel])).toEqual([
       [v('5.0.2'), 'fast-5.0'],
       [v('5.0.0'), 'fast-5.0'],
@@ -102,7 +103,7 @@ describe('buildTargetOptions -- with look-ahead channels', () => {
     const anchor = buildGraph(['4.18.0', '4.20.0'], [[0, 1]]);
     const forward = buildGraph(['4.20.0', '4.21.5'], [[0, 1]]);
     const options = buildTargetOptions(anchor, v('4.18.0'), [
-      { channel: 'stable-4.21', graph: forward, classFallback: true, requestedClass: 'eus' },
+      { channel: 'stable-4.21', graph: forward, classFallback: true, requestedClass: 'eus', requestedStatus: 'noRoute' },
     ]);
     expect(options.find((o) => o.version === v('4.21.5'))?.via?.classFallback).toBe(true);
   });
@@ -124,8 +125,8 @@ describe('buildTargetOptions -- with look-ahead channels', () => {
     const seg423 = buildGraph(['4.22.1', '4.23.0-ec.0'], [[0, 1]]);
     const seg50 = buildGraph(['4.22.5', '5.0.0-rc.1'], [[0, 1]]);
     const options = buildTargetOptions(anchor, v('4.22.0'), [
-      { channel: 'candidate-4.23', graph: seg423, classFallback: true, requestedClass: 'stable' },
-      { channel: 'candidate-5.0', graph: seg50, classFallback: true, requestedClass: 'stable' },
+      { channel: 'candidate-4.23', graph: seg423, classFallback: true, requestedClass: 'stable', requestedStatus: 'noRoute' },
+      { channel: 'candidate-5.0', graph: seg50, classFallback: true, requestedClass: 'stable', requestedStatus: 'noRoute' },
     ]);
     expect(options.find((o) => o.version === v('5.0.0-rc.1'))?.reachable).toBe(true);
   });
@@ -141,10 +142,10 @@ describe('buildTargetOptions -- cost on a start-version change', () => {
       return parsed.value;
     };
     const anchor = fixture('stable-4.20');
-    const segments = [
+    const segments: ChannelSegment[] = [
       { channel: 'stable-4.21', graph: fixture('stable-4.21'), classFallback: false },
       { channel: 'stable-4.22', graph: fixture('stable-4.22'), classFallback: false },
-      { channel: 'candidate-5.0', graph: fixture('candidate-5.0'), classFallback: true, requestedClass: 'stable' },
+      { channel: 'candidate-5.0', graph: fixture('candidate-5.0'), classFallback: true, requestedClass: 'stable', requestedStatus: 'noRoute' },
     ];
     buildTargetOptions(anchor, v('4.18.2'), segments);
     const times: number[] = [];

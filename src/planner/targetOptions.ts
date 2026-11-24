@@ -1,5 +1,6 @@
 import type { ChannelSegment } from '../engine/lookahead';
 import { shortestPathsFrom } from '../engine/pathfinder';
+import { NO_CONSTRAINTS, type RouteConstraints } from '../engine/routeConstraints';
 import { routeAcrossSegments } from '../engine/stitch';
 import { compareVersions, formatStream, streamOf } from '../engine/version';
 import type { Graph, Version } from '../graph/types';
@@ -29,16 +30,25 @@ export interface TargetOption {
  * finds a route to it, and `via` names the channel that route ends on, so
  * choosing a reachable option always yields that path. `classFallback` is
  * set when any hop of the route leaves the anchor's class.
+ *
+ * Reachability ignores `constraints`, so a target the pinned stops can't
+ * honor stays selectable and the stop is flagged instead. `via` follows the
+ * route the stitcher plans under `constraints`, falling back to the
+ * unconstrained route when the stops rule the target out.
  */
 export function buildTargetOptions(
   anchor: Graph,
   start: Version,
   segments: readonly ChannelSegment[],
+  constraints: RouteConstraints = NO_CONSTRAINTS,
 ): readonly TargetOption[] {
   const inAnchor = shortestPathsFrom(anchor, start);
   // The anchor's channel name never surfaces: routes are read only for
   // versions outside the anchor, whose last hop is on a look-ahead segment.
-  const routes = routeAcrossSegments([{ channel: '', graph: anchor, classFallback: false }, ...segments], start);
+  const routed: readonly ChannelSegment[] = [{ channel: '', graph: anchor, classFallback: false }, ...segments];
+  const routes = routeAcrossSegments(routed, start);
+  const unconstrained = constraints.stops.length === 0 && constraints.riskPolicy === 'recommended';
+  const planned = unconstrained ? routes : routeAcrossSegments(routed, start, constraints);
   const isCandidate = (version: Version) => version !== start && compareVersions(version, start) >= 0;
   const options = new Map<Version, TargetOption>();
 
@@ -49,8 +59,9 @@ export function buildTargetOptions(
     for (const { version } of segment.graph.nodes) {
       if (options.has(version) || !isCandidate(version)) continue;
       const route = routes.get(version);
-      const via = route
-        ? { channel: route.hops.at(-1)?.sourceChannel as string, classFallback: route.fallbackHops > 0 }
+      const shown = planned.get(version) ?? route;
+      const via = shown
+        ? { channel: shown.hops.at(-1)?.sourceChannel as string, classFallback: shown.fallbackHops.some((n) => n > 0) }
         : { channel: segment.channel, classFallback: segment.classFallback };
       options.set(version, { version, reachable: route !== undefined, via });
     }

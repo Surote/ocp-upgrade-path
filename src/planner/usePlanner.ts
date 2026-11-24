@@ -4,7 +4,9 @@ import type { GraphClient } from '../graph/client';
 import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
-import { parseUrlState, resolveUrlArch, syncUrlState } from '../url/urlState';
+import { parseUrlState, resolveUrlArch, resolveUrlRiskPolicy, syncUrlState } from '../url/urlState';
+import type { RiskPolicy, RouteConstraints, StopOption } from '../engine/routeConstraints';
+import { checkStops } from './stopFields';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
@@ -48,7 +50,8 @@ export interface TargetFieldViewModel {
   /**
    * Newer-than-start targets from the selected channel and the look-ahead
    * channels beyond it (plan.md §6: selecting `eus-4.20` must still offer
-   * `4.22.9`), merged newest first. A look-ahead target carries `via`.
+   * `4.22.9`), merged newest first. A look-ahead target carries `via`, the
+   * channel the route under the pinned stops and risk policy ends on.
    */
   readonly groups: readonly StreamGroup<TargetOption>[];
   /** True while look-ahead channels are still being fetched; in-channel targets are already listed. */
@@ -56,6 +59,27 @@ export interface TargetFieldViewModel {
   readonly disabled: boolean;
   readonly onChange: (version: string) => void;
 }
+
+export interface StopFieldViewModel {
+  readonly value: string;
+  /** Newest first, one group per stream. */
+  readonly groups: readonly StreamGroup<StopOption>[];
+  /** Set when the stop can't be honored; the route is withheld until it is removed or replaced. */
+  readonly error?: string;
+  readonly onChange: (version: string) => void;
+  readonly onRemove: () => void;
+}
+
+export interface RouteConstraintsViewModel {
+  readonly stops: readonly StopFieldViewModel[];
+  readonly canAddStop: boolean;
+  readonly onAddStop: () => void;
+  readonly riskPolicy: RiskPolicy;
+  readonly onRiskPolicyChange: (policy: RiskPolicy) => void;
+}
+
+/** Why no route is searched although start and target are set. */
+export type RouteHold = 'checkingStops' | 'invalidStops';
 
 export interface FreshnessViewModel {
   readonly fetchedAt: number;
@@ -67,6 +91,10 @@ export interface PlannerViewModel {
   readonly arch: ArchFieldViewModel;
   readonly start: StartFieldViewModel;
   readonly target: TargetFieldViewModel;
+  readonly constraints: RouteConstraintsViewModel;
+  /** The stops the route search was asked to honor, for marking on the map. */
+  readonly pinnedStops: readonly Version[];
+  readonly routeHold?: RouteHold;
   readonly freshness?: FreshnessViewModel;
   /** Visible notes for anything that degraded gracefully rather than crashing -- garbage URL params, an unresolvable start/target, a disabled target named by a permalink (plan.md Q21). */
   readonly notices: readonly string[];
@@ -104,11 +132,14 @@ export interface PlannerViewModel {
 export function usePlanner(client: GraphClient): PlannerViewModel {
   const initialUrl = useMemo(() => parseUrlState(window.location.search), []);
   const initialArch = useMemo(() => resolveUrlArch(initialUrl.arch, DEFAULT_ARCH), [initialUrl.arch]);
+  const initialRiskPolicy = useMemo(() => resolveUrlRiskPolicy(initialUrl.avoid), [initialUrl.avoid]);
 
   const [channel, setChannelState] = useState<string | undefined>(initialUrl.channel);
   const [arch, setArchState] = useState<Arch>(initialArch.arch);
   const [startRaw, setStartRaw] = useState(initialUrl.start ?? '');
   const [targetRaw, setTargetRaw] = useState(initialUrl.target ?? '');
+  const [stopsRaw, setStopsRaw] = useState<readonly string[]>(initialUrl.stops ?? []);
+  const [riskPolicy, setRiskPolicy] = useState<RiskPolicy>(initialRiskPolicy.riskPolicy);
 
   const channelCatalog = useChannelCatalog(client);
   const graphState = useGraphForSelection(client, channel, arch);
@@ -165,35 +196,77 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // Only a listed target is searched, so a permalink whose target is the
   // start or older gets the notice below and no route alongside it.
   const targetOption = targetOptions.find((o) => o.version === resolvedTarget);
+
+  const stopSegments = useMemo(
+    () => (graph && channel ? [{ channel, graph, classFallback: false as const }, ...lookaheadSegments] : NO_SEGMENTS),
+    [graph, channel, lookaheadSegments],
+  );
+  const stopRows = useMemo(
+    () =>
+      checkStops(stopsRaw, {
+        segments: stopSegments,
+        start: resolvedStart,
+        target: targetOption?.version,
+        discovered: !lookaheadLoading,
+      }),
+    [stopsRaw, stopSegments, resolvedStart, targetOption, lookaheadLoading],
+  );
+  const routeHold: RouteHold | undefined = stopRows.some((r) => r.check.kind === 'invalid')
+    ? 'invalidStops'
+    : stopRows.some((r) => r.check.kind === 'pending')
+      ? 'checkingStops'
+      : undefined;
+  const pinnedStops = useMemo(
+    () => stopRows.flatMap((r) => (r.check.kind === 'valid' ? [r.check.version] : [])),
+    [stopRows],
+  );
+  const routeConstraints = useMemo<RouteConstraints>(() => ({ stops: pinnedStops, riskPolicy }), [pinnedStops, riskPolicy]);
+  // Selection and stop checks read `targetOptions`; only the labels follow the
+  // constraints, since the stops are themselves checked against the target.
+  const shownTargetOptions = useMemo(() => {
+    const constrained = routeConstraints.stops.length > 0 || routeConstraints.riskPolicy !== 'recommended';
+    return graph && resolvedStart && constrained ? buildTargetOptions(graph, resolvedStart, lookaheadSegments, routeConstraints) : targetOptions;
+  }, [graph, resolvedStart, lookaheadSegments, routeConstraints, targetOptions]);
+
   const pathResult = usePathSearch(client, {
     channel,
     arch,
     start: resolvedStart,
-    target: targetOption?.version,
+    target: routeHold ? undefined : targetOption?.version,
     anchor: anchorResult && { ...anchorResult, lookahead: lookaheadSnapshot?.discovery },
+    constraints: routeConstraints,
   });
 
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
+  // Stops clear with the target; a target change keeps them, and any the
+  // new target can't honor is flagged rather than dropped.
   const setChannel = useCallback((next: string) => {
     setChannelState(next || undefined);
     setStartRaw('');
     setTargetRaw('');
+    setStopsRaw([]);
   }, []);
   const setArch = useCallback((next: Arch) => {
     setArchState(next);
     setStartRaw('');
     setTargetRaw('');
+    setStopsRaw([]);
   }, []);
   const setStart = useCallback((next: string) => {
     setStartRaw(next);
     setTargetRaw(''); // target's reachable set is keyed on start
+    setStopsRaw([]);
   }, []);
   const setTarget = useCallback((next: string) => setTargetRaw(next), []);
+  const addStop = useCallback(() => setStopsRaw((prev) => [...prev, '']), []);
+  const setStop = useCallback((index: number, next: string) => setStopsRaw((prev) => prev.map((s, i) => (i === index ? next : s))), []);
+  const removeStop = useCallback((index: number) => setStopsRaw((prev) => prev.filter((_, i) => i !== index)), []);
 
   // --- Notices: garbage/unresolvable input degrades gracefully with a visible note (Q21) ---
   const notices = useMemo(() => {
     const list: string[] = [];
     if (initialArch.notice) list.push(initialArch.notice);
+    if (initialRiskPolicy.notice) list.push(initialRiskPolicy.notice);
     if (graph && startRaw && !resolvedStart) {
       list.push(`Start version "${startRaw}" from the link was not found in channel "${channel}" -- please reselect.`);
     }
@@ -215,6 +288,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     return list;
   }, [
     initialArch.notice,
+    initialRiskPolicy.notice,
     graph,
     startRaw,
     resolvedStart,
@@ -227,8 +301,8 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   // --- Permalink sync: replaceState only, never a new history entry (Q21) ---
   useEffect(() => {
-    syncUrlState({ channel, arch, start: startRaw, target: targetRaw });
-  }, [channel, arch, startRaw, targetRaw]);
+    syncUrlState({ channel, arch, start: startRaw, target: targetRaw, stops: stopsRaw, riskPolicy });
+  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy]);
 
   return {
     channel: {
@@ -254,11 +328,26 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     },
     target: {
       value: targetRaw,
-      groups: groupByStream(targetOptions, (o) => versionStream(o.version)),
+      groups: groupByStream(shownTargetOptions, (o) => versionStream(o.version)),
       lookaheadLoading,
       disabled: !resolvedStart,
       onChange: setTarget,
     },
+    constraints: {
+      stops: stopRows.map((row, i) => ({
+        value: row.raw,
+        groups: groupByStream(row.options, (o) => versionStream(o.version)),
+        error: row.check.kind === 'invalid' ? row.check.message : undefined,
+        onChange: (version: string) => setStop(i, version),
+        onRemove: () => removeStop(i),
+      })),
+      canAddStop: resolvedStart !== undefined && targetOption !== undefined,
+      onAddStop: addStop,
+      riskPolicy,
+      onRiskPolicyChange: setRiskPolicy,
+    },
+    pinnedStops,
+    routeHold,
     freshness:
       graphState.status === 'success' ? { fetchedAt: graphState.value.fetchedAt, onRefresh: graphState.refresh } : undefined,
     notices,

@@ -2,7 +2,7 @@ import type { Stream } from '../engine/version';
 import { formatChannelName } from './channels';
 
 /** Most conservative support posture first. */
-const FALLBACK_CLASSES = ['stable', 'fast', 'candidate'] as const;
+export const FALLBACK_CLASSES: readonly string[] = ['stable', 'fast', 'candidate'];
 
 /**
  * Candidate channel names for reaching a stream while walking *forward*

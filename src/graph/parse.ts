@@ -130,11 +130,21 @@ export function parseRawGraph(
     }
   }
 
+  // Cincinnati lists nodes in a different order on every response, and route
+  // ties break by list order, so the same permalink could plan another route
+  // after a refetch. Nodes and edges are put in one canonical order here.
+  const order = raw.nodes.map((_, i) => i).sort((a, b) => byString(raw.nodes[a]?.version, raw.nodes[b]?.version));
+  const position = new Array<number>(nodeCount);
+  order.forEach((original, i) => {
+    position[original] = i;
+  });
+  const sortedRaw = order.map((i) => raw.nodes[i] as (typeof raw.nodes)[number]);
+
   const { channelNames, perNodeChannels } = internChannels(
-    raw.nodes.map((n) => n.metadata?.[CHANNELS_METADATA_KEY]),
+    sortedRaw.map((n) => n.metadata?.[CHANNELS_METADATA_KEY]),
   );
 
-  const nodes: GraphNode[] = raw.nodes.map((n, i) => ({
+  const nodes: GraphNode[] = sortedRaw.map((n, i) => ({
     version: mintVersion(n.version),
     payload: n.payload,
     errataUrl: n.metadata?.url,
@@ -142,7 +152,7 @@ export function parseRawGraph(
   }));
 
   const edges: Array<readonly [NodeIndex, NodeIndex]> = raw.edges.map(
-    ([from, to]) => [mintNodeIndex(from), mintNodeIndex(to)] as const,
+    ([from, to]) => [mintNodeIndex(position[from] as number), mintNodeIndex(position[to] as number)] as const,
   );
 
   const conditionalEdges: ConditionalEdgeGroup[] = raw.conditionalEdges.map(mapConditionalEdgeGroup);
@@ -171,7 +181,12 @@ export function parseRawGraph(
     }
   }
 
+  edges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   return ok({ nodes, edges, conditionalEdges, channelNames });
+}
+
+function byString(a: string | undefined, b: string | undefined): number {
+  return a === b ? 0 : (a ?? '') < (b ?? '') ? -1 : 1;
 }
 
 /**

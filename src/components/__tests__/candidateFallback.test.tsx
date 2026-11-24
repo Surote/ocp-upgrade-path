@@ -10,17 +10,46 @@ describe('marking a plan that relies on a candidate channel', () => {
   it('the result banner says the plan relies on a candidate channel', () => {
     render(
       <StitchBanner
-        channelsUsed={['stable-4.22', 'candidate-5.0']}
-        classFallbacks={[{ channel: 'candidate-5.0', requestedClass: 'stable' }]}
+        channels={['stable-4.22', 'candidate-5.0']}
+        classFallbacks={[{ channel: 'candidate-5.0', requestedClass: 'stable', requestedStatus: 'noRoute' }]}
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent(/relies on a candidate channel/);
   });
 
   it('an eus -> stable fallback is a class change but not a candidate warning', () => {
-    render(<StitchBanner channelsUsed={['eus-4.20', 'stable-4.21']} classFallbacks={[{ channel: 'stable-4.21', requestedClass: 'eus' }]} />);
+    render(<StitchBanner channels={['eus-4.20', 'stable-4.21']} classFallbacks={[{ channel: 'stable-4.21', requestedClass: 'eus', requestedStatus: 'unpublished' }]} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/Channel class change/);
     expect(screen.getByRole('alert')).not.toHaveTextContent(/candidate/);
+  });
+
+  it('a class change whose preferred channel failed to load says the route could not be verified, not that none exists', () => {
+    render(<StitchBanner channels={['stable-4.22', 'fast-5.0']} classFallbacks={[{ channel: 'fast-5.0', requestedClass: 'stable', requestedStatus: 'unverified' }]} />);
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/could not be verified/);
+    expect(alert).not.toHaveTextContent(/none is published|no route on a stable channel/);
+  });
+
+  it('a class change whose preferred channel is published but has no route says so without claiming none is published', () => {
+    render(
+      <StitchBanner
+        channels={['stable-4.22', 'fast-5.0', 'stable-5.0']}
+        classFallbacks={[{ channel: 'fast-5.0', requestedClass: 'stable', requestedStatus: 'noRoute' }]}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(/Channel class change/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/no route/);
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/none is published/);
+  });
+
+  it('a class change whose preferred channel is unpublished says none is published', () => {
+    render(
+      <StitchBanner
+        channels={['eus-4.20', 'stable-4.21']}
+        classFallbacks={[{ channel: 'stable-4.21', requestedClass: 'eus', requestedStatus: 'unpublished' }]}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(/none is published/);
   });
 
   it('the target dropdown names the channel a look-ahead target needs and flags the class change', () => {
