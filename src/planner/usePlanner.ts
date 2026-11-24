@@ -12,7 +12,7 @@ import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
 import { useLookahead } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
-import { buildStartOptions, buildTargetOptions, type TargetOption, versionStream } from './targetOptions';
+import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
 import { useGraphForSelection } from './useGraphForSelection';
 import { usePathSearch } from './usePathSearch';
@@ -242,6 +242,9 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     return graph && resolvedStart && constrained ? buildTargetOptions(graph, resolvedStart, lookaheadSegments, labelConstraints) : targetOptions;
   }, [graph, resolvedStart, lookaheadSegments, labelConstraints, targetOptions]);
 
+  const offered = <T extends { readonly version: Version }>(options: readonly T[], selected: string): readonly T[] =>
+    channel && resolvedStart ? offeredOptions(options, { channel, start: resolvedStart, selected }) : options;
+
   const pathResult = usePathSearch(client, {
     channel,
     arch,
@@ -342,7 +345,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     },
     target: {
       value: targetRaw,
-      groups: groupByStream(shownTargetOptions, (o) => versionStream(o.version)),
+      groups: groupByStream(offered(shownTargetOptions, targetRaw), (o) => versionStream(o.version)),
       lookaheadLoading,
       disabled: !resolvedStart,
       onChange: setTarget,
@@ -350,7 +353,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     constraints: {
       stops: stopRows.map((row, i) => ({
         value: row.raw,
-        groups: groupByStream(row.options, (o) => versionStream(o.version)),
+        groups: groupByStream(offered(row.options, row.raw), (o) => versionStream(o.version)),
         error: row.check.kind === 'invalid' ? row.check.message : undefined,
         onChange: (version: string) => setStop(i, version),
         onRemove: () => removeStop(i),

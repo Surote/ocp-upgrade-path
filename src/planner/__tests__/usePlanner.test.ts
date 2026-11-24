@@ -398,7 +398,7 @@ describe('usePlanner — every reachable target routes (dropdown and stitcher ag
     );
 
     expect(options.filter((o) => o.reachable).map((o) => o.version)).toEqual(
-      expect.arrayContaining(['5.1.0-ec.1', '5.0.2', '5.0.1', '5.0.0', '4.23.0-ec.1', '4.22.23', '4.22.20']),
+      expect.arrayContaining(['5.0.2', '5.0.1', '5.0.0', '4.22.23', '4.22.20']),
     );
     expect(actual).toEqual(expected);
   });

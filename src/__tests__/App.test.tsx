@@ -103,7 +103,7 @@ describe('App', () => {
     await waitFor(() => expect(within(targetSelect).getByRole('option', { name: /5\.0\.2/ })).toBeInTheDocument());
 
     expect(renderedGroups(targetSelect)).toEqual([
-      ['5.0', ['5.0.2 · via fast-5.0 (class change)', '5.0.0 · via fast-5.0 (class change)', '5.0.0-rc.8 · via fast-5.0 (class change) (not reachable)']],
+      ['5.0', ['5.0.2 · via fast-5.0 (class change)', '5.0.0 · via fast-5.0 (class change)']],
       ['4.22', ['4.22.11 (not reachable)', '4.22.10', '4.22.3']],
     ]);
     expect(renderedGroups(screen.getByLabelText('Start version'))).toEqual([
