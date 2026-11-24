@@ -825,6 +825,11 @@ main {
   margin: 4px 0 0;
 }
 
+.cpo-leg-command code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .admin-acks-unknown {
   color: var(--risk-always);
   margin: 4px 0;
