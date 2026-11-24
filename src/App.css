@@ -231,6 +231,7 @@ main {
 }
 
 .upgrade-map .interchange-tag {
+  font-family: var(--mono);
   font-weight: 600;
   fill: var(--accent);
 }

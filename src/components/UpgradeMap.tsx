@@ -11,14 +11,17 @@ import type { GraphNode, Version } from '../graph/types';
  * container, so dots, strokes, labels and spacing are the same size on every
  * viewport; a path wider than the screen scrolls inside `.map-scroll`.
  * Spacing depends only on the path: STATION_GAP and MARGIN_X are minimums
- * (a typical four-station path fits a 390px-wide phone), widened when the
- * longest version label (`4.18.0-rc.10`) would otherwise clip or collide.
+ * (a typical four-station path fits a 390px-wide phone), widened when a
+ * station's version label (`4.18.0-rc.10`) or switch tag would otherwise clip
+ * or collide with its neighbour's.
  */
 const STATION_GAP = 88;
 const MARGIN_X = 40;
-const LABEL_CHAR_PX = 7.2; // 12px IBM Plex Mono station label (App.css), 0.6em per glyph
-const LABEL_GAP = 16; // clear space between neighbouring labels
-const LABEL_EDGE = 8; // clear space between an end label and the svg edge
+// Both are IBM Plex Mono (App.css), 0.6em per glyph; the ⇄ measures the same in Chrome.
+const LABEL_CHAR_PX = 7.2; // 12px station label
+const TAG_CHAR_PX = 6; // 10px switch tag
+const LABEL_GAP = 16; // clear space between neighbouring stations' text
+const LABEL_EDGE = 8; // clear space between an end station's text and the svg edge
 const R = 6; // station dot radius
 const R_HIT = 14; // invisible station click/tap target
 
@@ -42,6 +45,16 @@ function handleActivateKey(e: KeyboardEvent, activate: () => void) {
     e.preventDefault();
     activate();
   }
+}
+
+/** How far a station's label and switch tag reach left and right of its dot. */
+function stationReach(version: Version, tag: string | undefined, isStart: boolean): { left: number; right: number } {
+  const half = (version.length * LABEL_CHAR_PX) / 2;
+  if (tag === undefined) return { left: half, right: half };
+  const tagWidth = tag.length * TAG_CHAR_PX;
+  // The start station's tag is left-aligned at -R (see the render below).
+  if (isStart) return { left: Math.max(half, R), right: Math.max(half, tagWidth - R) };
+  return { left: Math.max(half, tagWidth / 2), right: Math.max(half, tagWidth / 2) };
 }
 
 const RISK_GLYPH: Record<RiskState, string> = { always: '▲', conditional: '◆', clean: '✓' };
@@ -102,11 +115,19 @@ export function UpgradeMap({
 }) {
   const versions = path.versions;
   const n = versions.length;
-  const longestLabel = Math.max(0, ...versions.map((v) => v.length)) * LABEL_CHAR_PX;
-  const gap = Math.max(STATION_GAP, Math.ceil(longestLabel + LABEL_GAP));
-  const marginX = Math.max(MARGIN_X, Math.ceil(longestLabel / 2 + LABEL_EDGE));
-  const stationX = (i: number) => marginX + gap * i;
-  const width = marginX * 2 + gap * Math.max(n - 1, 0);
+  const tags = versions.map((_, i) => {
+    const command = commands[i];
+    return command?.channelSwitch ? `⇄ switch to ${command.channelSwitchTo}` : undefined;
+  });
+  const reach = versions.map((version, i) => stationReach(version, tags[i], i === 0));
+  const gap = Math.max(
+    STATION_GAP,
+    ...reach.slice(1).map((next, i) => Math.ceil((reach[i]?.right ?? 0) + LABEL_GAP + next.left)),
+  );
+  const marginLeft = Math.max(MARGIN_X, Math.ceil((reach[0]?.left ?? 0) + LABEL_EDGE));
+  const marginRight = Math.max(MARGIN_X, Math.ceil((reach[n - 1]?.right ?? 0) + LABEL_EDGE));
+  const stationX = (i: number) => marginLeft + gap * i;
+  const width = marginLeft + gap * Math.max(n - 1, 0) + marginRight;
   const minors = versions.map((v) => parseVersion(v).minor);
   const hasInterchange = commands.some((c) => c.channelSwitch);
 
@@ -231,7 +252,7 @@ export function UpgradeMap({
                     textAnchor={isStart ? 'start' : 'middle'}
                     aria-hidden="true"
                   >
-                    ⇄ switch to {switchTo}
+                    {tags[i]}
                   </text>
                 )}
               </g>
