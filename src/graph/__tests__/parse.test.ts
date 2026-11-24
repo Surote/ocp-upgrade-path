@@ -187,6 +187,7 @@ describe('parseRawGraph — malformed/garbage payload rejection', () => {
         ],
       },
     ],
+    ['a node version outside the X.Y.Z[-prerelease][+build] grammar', { version: 1, nodes: [{ version: '4.22', payload: 'p' }], edges: [], conditionalEdges: [] }],
   ])('rejects %s', (_label, input) => {
     const result = parseRawGraph(input, CTX);
     expect(result.ok).toBe(false);
@@ -220,6 +221,18 @@ describe('trimmed-shape round-trip', () => {
 
   it('parseTrimmedGraph rejects corrupt cached data instead of crashing', () => {
     const result = parseTrimmedGraph({ nodes: [{ version: '1.0.0' }], edges: [], conditionalEdges: [] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('validation');
+  });
+
+  it('parseTrimmedGraph rejects a cached node version outside the version grammar', () => {
+    const result = parseTrimmedGraph({
+      nodes: [{ version: 'not-a-version', payload: 'p', channels: [] }],
+      edges: [],
+      conditionalEdges: [],
+      channelNames: [],
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.kind).toBe('validation');

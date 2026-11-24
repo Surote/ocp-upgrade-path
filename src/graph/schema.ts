@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VERSION_PATTERN } from '../engine/version';
 
 /**
  * Structural validation of the two wire shapes this app ever parses:
@@ -14,10 +15,14 @@ import { z } from 'zod';
  *    unexpected there) and must be re-validated on read, but its shape is not
  *    the wire shape.
  *
- * Both schemas only check *structure*; graph/parse.ts is responsible for the
+ * Both schemas check structure and the version grammar; graph/parse.ts is responsible for the
  * semantic checks (empty-graph detection, edge index bounds) and for minting the
  * branded NodeIndex/Version types from the validated primitives.
  */
+
+// The parser's own grammar, so a graph that loads can always be sorted and
+// grouped by stream.
+const versionSchema = z.string().regex(VERSION_PATTERN, 'Not an X.Y.Z[-prerelease][+build] version.');
 
 const rawMatchingRuleSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('Always') }).strict(),
@@ -35,8 +40,8 @@ const rawRiskSchema = z.object({
 });
 
 const rawConditionalEdgeRefSchema = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
+  from: versionSchema,
+  to: versionSchema,
 });
 
 const rawConditionalEdgeGroupSchema = z.object({
@@ -59,7 +64,7 @@ const rawNodeMetadataSchema = z
   .loose();
 
 const rawNodeSchema = z.object({
-  version: z.string().min(1),
+  version: versionSchema,
   payload: z.string().min(1),
   metadata: rawNodeMetadataSchema.optional(),
 });
@@ -93,12 +98,12 @@ const trimmedRiskSchema = z.object({
 });
 
 const trimmedConditionalEdgeGroupSchema = z.object({
-  edges: z.array(z.object({ from: z.string().min(1), to: z.string().min(1) })),
+  edges: z.array(z.object({ from: versionSchema, to: versionSchema })),
   risks: z.array(trimmedRiskSchema),
 });
 
 const trimmedNodeSchema = z.object({
-  version: z.string().min(1),
+  version: versionSchema,
   payload: z.string().min(1),
   errataUrl: z.string().optional(),
   // Required (not optional): its absence is exactly the signal that a cached

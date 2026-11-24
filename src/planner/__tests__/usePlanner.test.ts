@@ -309,7 +309,7 @@ describe('usePlanner — look-ahead targets (plan.md §6)', () => {
   });
 });
 
-describe('usePlanner — versions carrying semver build metadata', () => {
+describe('usePlanner — the version grammar', () => {
   it('lists a build-metadata version in both dropdowns and plans a path to it instead of crashing', async () => {
     setUrl('?channel=stable-4.22&start=4.22.0&target=4.22.1%2Bbuild.1');
     const graph = rawGraphJson(['4.22.0', '4.22.1+build.1'], [[0, 1]], 'stable-4.22');
@@ -321,6 +321,18 @@ describe('usePlanner — versions carrying semver build metadata', () => {
     expect(result.current.start.groups.map((g) => [g.stream, g.options])).toEqual([['4.22', ['4.22.1+build.1', '4.22.0']]]);
     expect(result.current.target.groups.flatMap((g) => g.options.map((o) => o.version))).toEqual(['4.22.1+build.1']);
     expect(result.current.notices).toEqual([]);
+  });
+
+  it('surfaces a graph with an unparseable version as a channel load error instead of crashing', async () => {
+    setUrl('?channel=stable-4.22');
+    const graph = rawGraphJson(['4.22'], [], 'stable-4.22');
+    const client = makeClient(withSeed(new Map([['stable-4.22|amd64', jsonHandler(graph)]])));
+
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.start.error).toBeDefined());
+    expect(result.current.start.error).toContain('stable-4.22');
+    expect(result.current.start.groups).toEqual([]);
   });
 });
 
