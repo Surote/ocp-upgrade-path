@@ -696,27 +696,38 @@ their shared EUS stream, so 4.14 → 4.22 yields 4.14→4.16, 4.16→4.18, 4.18�
 4.E → 4.E+1 is not a leg. The major boundary (4.22 → 5.0) is never a leg, and no EUS rule is
 assumed for 5.x.
 
-**A leg is available only over eus and stable hops.** Red Hat offers a Control Plane Only
-update "only after updates between all versions involved have been made available in
-`stable` channels", and runs it on `eus-<4.y+2>`, which receives each release when stable
-does. A minor sequence alone is not proof. Each leg therefore checks the `sourceChannel` of
-every hop that runs with workers paused: from the pause point to the first arrival in
-4.E+2. If any came from a fast or candidate
-graph (or has no recorded source), the leg is `unavailable`: the panel names that hop and
-its channel, says a Control Plane Only update isn't available for the leg on this route, and
-gives no pause steps.
+**A leg is available only when `eus-4.(E+2)` publishes its paused hops.** Red Hat offers a
+Control Plane Only update "only after updates between all versions involved have been made
+available in `stable` channels", and its CLI procedure switches the cluster to
+`eus-<4.y+2>` before pausing worker pools. A stable channel publishing a hop does not prove
+the EUS channel does, so each leg is judged against `eus-4.(E+2)`'s own graph. The hops that
+run with workers paused are the ones from the pause point to the first arrival in 4.E+2. If
+any came from a fast or candidate graph (or has no recorded source), the leg is
+`unavailable` without fetching anything. Otherwise the planner loads `eus-4.(E+2)` through
+`GraphClient` after the route renders (one fetch per leg at most, cached like any graph; an
+`eus` anchor's look-ahead has usually loaded it already). Until it arrives, the leg reads
+`checking` and gives no pause steps. If that graph lacks a paused hop, has no releases yet,
+or fails to load, the leg is `unavailable` and the panel says which, with no pause steps.
+The legs are data (`'available' | 'checking' | 'unavailable'`, each with its `eusChannel`),
+built by `controlPlaneOnlyLegs` in design/eus.ts and loaded by
+planner/useControlPlaneOnlyLegs.ts.
 
-Each available leg pauses `mcp/worker` on the last route version in 4.E, right before the
-first hop into 4.E+1, and unpauses on the last 4.E+2 version the route reaches over eus or
-stable hops (a later patch hop inside 4.E+2 from fast or candidate runs as an ordinary
-update after the unpause, so it no longer voids the leg). Then `oc get mcp`
+Each available leg follows Red Hat's CLI sequence. At the last route version in 4.E, right
+before the first hop into 4.E+1: confirm with `oc get mcp` that every pool reports
+`UPDATED=True` and `UPDATING=False`, run `oc adm upgrade channel eus-4.(E+2)`, then pause
+`mcp/worker` (one copy block, in that order). The route's Commands run the same paused hops
+on `eus-4.(E+2)` too: the script switches to it at the pause point, commented as a Control
+Plane Only leg, and switches away only when a later hop needs another channel, so the
+script never contradicts the checkpoint. Workers unpause on the last 4.E+2 version the route
+reaches over hops `eus-4.(E+2)` publishes from eus or stable (a later patch hop inside 4.E+2
+from fast or candidate runs as an ordinary update after the unpause). Then `oc get mcp`
 until every pool the operator paused reports `UPDATED=True` and `UPDATING=False`, before
-the route leaves that stream. The `oc patch` commands are Red Hat's verbatim. The doc link
-uses the leg's destination stream. The UI (`EusAdvisory`) shows one flat list, for example
-"Leg 1: 4.16 → 4.18 (pause workers before 4.17, unpause at 4.18)", labelled as guidance.
-Each checkpoint (pause, unpause, pool check) is its own block with its own copy button:
-they run at different points in the route, so no single copy may hold both the pause and
-the unpause. A route with no complete leg renders nothing.
+the route leaves that stream. The `oc` commands are Red Hat's
+verbatim. The doc link uses the leg's destination stream. The UI (`EusAdvisory`) shows one
+flat list, for example "Leg 1: 4.16 → 4.18 (pause workers before 4.17, unpause at 4.18)",
+labelled as guidance. Each checkpoint (pause, unpause, pool check) is its own block with its
+own copy button: they run at different points in the route, so no single copy may hold both
+the pause and the unpause. A route with no complete leg renders nothing.
 
 **No 60-day limit.** Earlier versions of this tool said to finish within 60 days. Red Hat's
 procedure states no such limit, and the 4.16.42 release notes call the web console's

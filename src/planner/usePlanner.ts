@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StitchedPathResult, StitchError } from '../engine/types';
+import type { ControlPlaneOnlyLeg } from '../design/eus';
 import type { GraphClient } from '../graph/client';
 import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
@@ -25,6 +26,7 @@ import { channelGroupLabel, sortChannels } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
 import { useGraphForSelection } from './useGraphForSelection';
+import { useControlPlaneOnlyLegs } from './useControlPlaneOnlyLegs';
 import { usePathSearch } from './usePathSearch';
 
 const DEFAULT_ARCH: Arch = 'amd64';
@@ -129,6 +131,8 @@ export interface PlannerViewModel {
    * every station.
    */
   readonly channelNames: readonly string[];
+  /** The route's Control Plane Only legs, each `checking` until its EUS graph loads. */
+  readonly controlPlaneOnlyLegs: readonly ControlPlaneOnlyLeg[];
 }
 
 /**
@@ -319,6 +323,8 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     constraints: routeConstraints,
   });
 
+  const controlPlaneOnlyLegs = useControlPlaneOnlyLegs(client, arch, pathResult);
+
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
   // Stops clear with the target; a target change keeps them, and any the
   // new target can't honor is flagged rather than dropped.
@@ -442,5 +448,6 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     notices,
     result: pathResult,
     channelNames: graph?.channelNames ?? [],
+    controlPlaneOnlyLegs,
   };
 }

@@ -13,7 +13,7 @@ interface RawGraph {
 }
 
 const STABLE_420 = loadFixture('stable-4.20.json') as RawGraph;
-const EMPTY = { nodes: [], edges: [], conditionalEdges: [] };
+const EMPTY = { version: 1, nodes: [], edges: [], conditionalEdges: [] };
 
 function withoutEdge(raw: RawGraph, from: string, to: string): RawGraph {
   const at = (v: string) => raw.nodes.findIndex((n) => n.version === v);

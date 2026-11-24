@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { buildHopCommands } from '../design/commands';
+import type { ControlPlaneOnlyLeg } from '../design/eus';
 import type { PathHop, StitchedPathResult, StitchError } from '../engine/types';
 import type { Version } from '../graph/types';
 import { describeStitchError } from '../planner/describeStitchError';
@@ -28,6 +29,7 @@ export function PathResult({
   result,
   channel,
   channelNames,
+  controlPlaneOnlyLegs,
   routeHold,
   pinnedStops,
   riskApplicability,
@@ -36,6 +38,8 @@ export function PathResult({
   readonly result: AsyncResult<StitchedPathResult, StitchError>;
   readonly channel: string | undefined;
   readonly channelNames: readonly string[];
+  /** The primary route's legs (planner/useControlPlaneOnlyLegs.ts); a leg's paused hops run on its EUS channel in the commands. */
+  readonly controlPlaneOnlyLegs: readonly ControlPlaneOnlyLeg[];
   readonly routeHold?: RouteHold;
   readonly pinnedStops: readonly Version[];
   readonly riskApplicability: RiskApplicabilityViewModel;
@@ -90,10 +94,16 @@ export function PathResult({
   }
 
   const { primary, alternates, stitch, stations, riskComparison } = result.value;
-  const commands = buildHopCommands(primary, channel, stations, {
-    channelNames,
-    multiGraph: stitch.multiGraph,
-  });
+  const commands = buildHopCommands(
+    primary,
+    channel,
+    stations,
+    {
+      channelNames,
+      multiGraph: stitch.multiGraph,
+    },
+    controlPlaneOnlyLegs,
+  );
 
   const toggleHop = (index: number) => setSelectedHop((prev) => (prev === index ? null : index));
   const toggleStation = (index: number) => setSelectedStation((prev) => (prev === index ? null : index));
@@ -142,7 +152,7 @@ export function PathResult({
       <CommandScript commands={commands} />
       <RiskSummary riskSummary={primary.riskSummary} applicability={riskApplicability} />
       <AdminAcksPanel path={primary} />
-      <EusAdvisory hops={primary.hops} />
+      <EusAdvisory legs={controlPlaneOnlyLegs} />
       <AlternatesPanel alternates={alternates} channelsUsed={stitch.channelsUsed} />
     </div>
   );
