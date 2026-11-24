@@ -98,7 +98,7 @@ export async function discoverLookahead(
     for (const name of result.value.channelNames) if (!attested.has(name)) attested.set(name, channelsTried.length);
   }
   // A fetched graph can name a stream older than one already fetched (only
-  // 5.1 names 4.23), and routeAcrossSegments visits each segment once.
+  // 5.1 names 4.23), and the route search never returns to an earlier stream.
   found.sort((a, b) => compareStreams(a.stream, b.stream) || b.rank - a.rank);
   const segments = found.map(({ channel, stream, rank, graph }): ChannelSegment => {
     if (rank === 0) return { channel, graph, classFallback: false };
