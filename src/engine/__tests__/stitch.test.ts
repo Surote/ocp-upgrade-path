@@ -608,6 +608,32 @@ describe('node metadata follows hop provenance', () => {
     expect(digest).not.toBe(stable423.nodes.find((n) => n.version === '4.22.0')?.payload);
     expect(command?.upgradeToImage).toBe(`oc adm upgrade --to-image=${digest} --allow-explicit-upgrade`);
   });
+
+  it('takes each arrival\'s digest from its own hop\'s graph when a stop routes through one version twice', async () => {
+    // 5.0.0 and its +b build rank equal, so a stop on the build turns back to 5.0.0 on another channel.
+    const graphs: Record<string, Graph> = {
+      'stable-4.22': rawGraph(['4.22.20'], [], 'anchor', ['stable-4.22', 'stable-5.0', 'fast-5.0']),
+      'stable-5.0': rawGraph(['5.0.0', '5.0.0+b', '5.0.1'], [[0, 1], [1, 0], [0, 2]], 'stable', ['stable-5.0']),
+      'fast-5.0': rawGraph(['4.22.20', '5.0.0'], [[0, 1]], 'fast', ['fast-5.0']),
+    };
+    const loader: GraphLoader = async (channel, arch) => (graphs[channel] ? ok(graphs[channel]) : err({ kind: 'empty', channel, arch }));
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.22',
+      arch: 'amd64',
+      start: v('4.22.20'),
+      target: v('5.0.1'),
+      constraints: { stops: [v('5.0.0+b')], riskPolicy: 'recommended' },
+    });
+
+    if (!result.ok) throw new Error(result.error.kind);
+    const { primary } = result.value;
+    expect(primary.versions).toEqual([v('4.22.20'), v('5.0.0'), v('5.0.0+b'), v('5.0.0'), v('5.0.1')]);
+    expect(primary.hops[0]?.sourceChannel).toBe('fast-5.0');
+    const images = buildHopCommands(primary, 'stable-4.22', result.value.nodeInfo, { channelNames: [], multiGraph: true }).map((c) => c.upgradeToImage);
+    const digestOn = (hop: (typeof primary.hops)[number]) => graphs[hop.sourceChannel as string]?.nodes.find((n) => n.version === hop.to)?.payload;
+    expect(images).toEqual(primary.hops.map((hop) => `oc adm upgrade --to-image=${digestOn(hop)} --allow-explicit-upgrade`));
+  });
 });
 
 describe('response order', () => {
