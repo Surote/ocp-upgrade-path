@@ -18,10 +18,10 @@ export function riskIdOf(risk: Pick<Risk, 'name' | 'url'>): RiskId {
   return `${name}${ID_SEPARATOR}${risk.url}` as RiskId;
 }
 
-/** The advisory a `name~url` value names, respelled canonically; `undefined` when it has no separator. */
+/** The advisory a `name~url` value names, respelled canonically; `undefined` when it has no separator or no URL. */
 export function parseRiskId(value: string): RiskId | undefined {
   const at = value.indexOf(ID_SEPARATOR);
-  if (at < 0) return undefined;
+  if (at < 0 || at === value.length - 1) return undefined;
   const name = value.slice(0, at).replace(/%(25|7E)/gi, (_, hex: string) => (hex === '25' ? '%' : '~'));
   return riskIdOf({ name, url: value.slice(at + 1) });
 }

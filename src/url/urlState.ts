@@ -117,7 +117,7 @@ export function resolveUrlRiskPolicy(raw: string | undefined): ResolvedUrlRiskPo
 
 export interface ResolvedUrlNotApplicable {
   readonly ids: readonly RiskId[];
-  /** Set when a value has no `~`, so names no advisory URL; never matched by name alone. */
+  /** Set when a value has no `~` or nothing after it, so names no advisory URL; never matched by name alone. */
   readonly notice?: string;
 }
 

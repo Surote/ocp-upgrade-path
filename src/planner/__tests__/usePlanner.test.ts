@@ -650,6 +650,16 @@ describe('usePlanner — a linked mark names one advisory by name and URL', () =
     expect(result.current.riskApplicability.notApplicable.size).toBe(0);
     expect(linked()).toEqual([]);
   });
+
+  it('drops a value with an empty advisory URL even when a risk of that name has a blank URL', async () => {
+    const client = makeClient(withSeed(new Map([['stable-4.22|amd64', jsonHandler(anchor('', 'stable-4.22'))]])), 'empty');
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.18', '4.22.20']));
+    expect(result.current.notices.some((n) => n.includes('"ShortcutRisk~"'))).toBe(true);
+    expect(result.current.riskApplicability.notApplicable.size).toBe(0);
+  });
 });
 
 describe('usePlanner — target labels under pinned stops', () => {
