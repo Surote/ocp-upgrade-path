@@ -3,7 +3,7 @@ import { candidateChannelsForStream } from '../design/forwardChannel';
 import type { GraphError } from '../graph/errors';
 import type { Arch, Graph } from '../graph/types';
 import type { ClassFallback, GraphLoader } from './types';
-import { compareStreams, formatStream, type Stream } from './version';
+import { compareStreams, type Stream } from './version';
 
 /**
  * Safety bound only. Discovery normally ends when no fetched graph names a
@@ -52,8 +52,9 @@ export interface LookaheadDiscovery {
  * decides a fallback is unneeded: whether a route needs fast-5.2 depends on
  * which channels reach it, which only the route search (`routeAcrossSegments`)
  * knows, and it ranks posture first, so it uses the preferred channel
- * wherever that reaches. A channel that fails to load is recorded in
- * `failure`, and its stream gets no further channels.
+ * wherever that reaches. A channel that fails to load is skipped and
+ * recorded in `failure`; a fallback used at its stream reports the preferred
+ * channel as `unverified` rather than discovery withholding the stream.
  */
 export async function discoverLookahead(
   loader: GraphLoader,
@@ -67,13 +68,12 @@ export async function discoverLookahead(
   if (!anchor) return { segments: [], channelsTried };
 
   const attested = new Set(anchorGraph.channelNames);
-  const failedStreams = new Set<string>();
   const emptyChannels = new Set<string>();
   const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
   for (let fetches = 0; fetches < MAX_LOOKAHEAD_FETCHES; fetches += 1) {
-    const next = nextChannel(attested, anchor, channelsTried, failedStreams);
+    const next = nextChannel(attested, anchor, channelsTried);
     if (!next) break;
     channelsTried.push(next.channel);
     const result = await loader(next.channel, arch);
@@ -84,9 +84,6 @@ export async function discoverLookahead(
       }
       failure ??= { channel: next.channel, error: result.error };
       failedChannels.add(next.channel);
-      // Stop at this stream rather than try the next class: a transient
-      // error must not silently move the plan onto another class.
-      failedStreams.add(formatStream(next.stream));
       continue;
     }
     found.push({ ...next, graph: result.value });
@@ -120,12 +117,11 @@ function nextChannel(
   attested: ReadonlySet<string>,
   anchor: Stream & { readonly cls: string },
   tried: readonly string[],
-  failedStreams: ReadonlySet<string>,
 ): Candidate | undefined {
   let best: Candidate | undefined;
   for (const name of attested) {
     const parsed = parseChannelName(name);
-    if (!parsed || compareStreams(parsed, anchor) <= 0 || failedStreams.has(formatStream(parsed)) || tried.includes(name)) continue;
+    if (!parsed || compareStreams(parsed, anchor) <= 0 || tried.includes(name)) continue;
     const stream = { major: parsed.major, minor: parsed.minor };
     const rank = candidateChannelsForStream(anchor.cls, stream).indexOf(name);
     if (rank < 0) continue;
