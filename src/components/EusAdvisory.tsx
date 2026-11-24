@@ -1,4 +1,4 @@
-import { buildLegScript, controlPlaneOnlyLegs } from '../design/eus';
+import { type AvailableLeg, buildLegScript, controlPlaneOnlyLegs, type UnavailableLeg } from '../design/eus';
 import { formatStream } from '../engine/version';
 import type { PathHop } from '../engine/types';
 import { CopyButton } from './CopyButton';
@@ -26,29 +26,51 @@ export function EusAdvisory({ hops }: { readonly hops: readonly PathHop[] }) {
         <code>kube-apiserver-to-kubelet-signer</code> CA certificate. Patch any custom worker pools the same way.
       </p>
       <ol className="cpo-leg-list" aria-label="Control Plane Only legs">
-        {legs.map((leg, i) => {
-          const script = buildLegScript(leg);
-          return (
-            <li key={leg.pauseAt}>
-              <h3>
-                Leg {i + 1}: {formatStream(leg.from)} → {formatStream(leg.to)} (pause workers before {formatStream(leg.via)},
-                unpause at {formatStream(leg.to)})
-              </h3>
-              <div className="command-line">
-                <pre className="script-block cpo-leg-command">
-                  <code>{script}</code>
-                </pre>
-                <CopyButton text={script} label={`Copy leg ${i + 1} commands`} />
-              </div>
-              <p className="panel__hint">
-                <a href={leg.docsUrl} target="_blank" rel="noopener noreferrer">
-                  Red Hat docs: Control Plane Only update to {formatStream(leg.to)} ↗
-                </a>
-              </p>
-            </li>
-          );
-        })}
+        {legs.map((leg, i) => (
+          <li key={formatStream(leg.from)}>
+            {leg.kind === 'available' ? <AvailableLegSteps leg={leg} n={i + 1} /> : <UnavailableLegNote leg={leg} n={i + 1} />}
+            <p className="panel__hint">
+              <a href={leg.docsUrl} target="_blank" rel="noopener noreferrer">
+                Red Hat docs: Control Plane Only update to {formatStream(leg.to)} ↗
+              </a>
+            </p>
+          </li>
+        ))}
       </ol>
     </aside>
+  );
+}
+
+function AvailableLegSteps({ leg, n }: { readonly leg: AvailableLeg; readonly n: number }) {
+  const script = buildLegScript(leg);
+  return (
+    <>
+      <h3>
+        Leg {n}: {formatStream(leg.from)} → {formatStream(leg.to)} (pause workers before {formatStream(leg.via)}, unpause at{' '}
+        {formatStream(leg.to)})
+      </h3>
+      <div className="command-line">
+        <pre className="script-block cpo-leg-command">
+          <code>{script}</code>
+        </pre>
+        <CopyButton text={script} label={`Copy leg ${n} commands`} />
+      </div>
+    </>
+  );
+}
+
+function UnavailableLegNote({ leg, n }: { readonly leg: UnavailableLeg; readonly n: number }) {
+  const { from, to, sourceChannel } = leg.blockingHop;
+  return (
+    <>
+      <h3>
+        Leg {n}: {formatStream(leg.from)} → {formatStream(leg.to)} (Control Plane Only update not available on this route)
+      </h3>
+      <p className="panel__hint">
+        Keep worker pools unpaused for this leg: the update from {from} to {to} comes from {sourceChannel ?? 'an unrecorded channel'}, and Red
+        Hat offers a Control Plane Only update only after every update involved is available in a stable channel. Update through{' '}
+        {formatStream(leg.via)} as a standard update, or plan this leg on eus-{formatStream(leg.to)} once its releases reach it.
+      </p>
+    </>
   );
 }

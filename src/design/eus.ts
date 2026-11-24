@@ -1,6 +1,7 @@
 import type { PathHop } from '../engine/types';
 import { formatStream, type Stream, streamOf } from '../engine/version';
 import type { Version } from '../graph/types';
+import { parseChannelName } from './channels';
 
 /**
  * The first minor with an EUS channel. Verified against the live API: `eus-4.1`
@@ -26,42 +27,73 @@ export const PAUSE_WORKERS_COMMAND = `oc patch mcp/worker --type merge --patch '
 export const UNPAUSE_WORKERS_COMMAND = `oc patch mcp/worker --type merge --patch '{"spec":{"paused":false}}'`;
 
 /**
- * One Control Plane Only (formerly EUS-to-EUS) update: 4.E -> 4.E+1 -> 4.E+2
- * with worker pools paused, so workers reboot once for two minors. Red Hat's
- * procedure covers exactly one such span, and a cluster with paused pools is
- * not permitted to update to any further minor, so a longer route is a chain
- * of legs with workers unpaused and caught up between them (plan.md §6).
+ * Red Hat offers a Control Plane Only update "only after updates between all
+ * versions involved have been made available in `stable` channels", and runs
+ * it on `eus-<4.y+2>`, which receives each release when stable does. So a hop
+ * qualifies only when the planner took its edge from an eus or stable graph;
+ * a fast or candidate edge may not be in stable yet.
  */
-export interface ControlPlaneOnlyLeg {
+const CONTROL_PLANE_ONLY_CLASSES: ReadonlySet<string> = new Set(['eus', 'stable']);
+
+function isControlPlaneOnlyHop(hop: PathHop): boolean {
+  const cls = hop.sourceChannel === undefined ? undefined : parseChannelName(hop.sourceChannel)?.cls;
+  return cls !== undefined && CONTROL_PLANE_ONLY_CLASSES.has(cls);
+}
+
+/**
+ * One Control Plane Only (formerly EUS-to-EUS) span of the route: 4.E ->
+ * 4.E+1 -> 4.E+2, which Red Hat lets you take with worker pools paused, so
+ * workers reboot once for two minors. The procedure covers exactly one such
+ * span, and a cluster with paused pools is not permitted to update to any
+ * further minor, so a longer route is a chain of legs with workers unpaused
+ * and caught up between them (plan.md §6).
+ */
+interface LegSpan {
   readonly from: Stream;
   readonly via: Stream;
   readonly to: Stream;
+  readonly docsUrl: string;
+}
+
+/** Every hop from the pause point to the unpause point came from an eus or stable graph. */
+export interface AvailableLeg extends LegSpan {
+  readonly kind: 'available';
   /** Last route version in `from`: pause here, right before the hop into `via`. */
   readonly pauseAt: Version;
   /** First route version in `via`, the first hop taken with workers paused. */
   readonly firstPausedHopTo: Version;
   /** Last route version in `to`: unpause here, and let workers finish before leaving `to`. */
   readonly unpauseAt: Version;
-  readonly docsUrl: string;
 }
+
+/** The span crosses a hop Red Hat does not offer a Control Plane Only update over, so it has no pause steps. */
+export interface UnavailableLeg extends LegSpan {
+  readonly kind: 'unavailable';
+  /** The span's first hop whose edge came from neither an eus nor a stable channel. */
+  readonly blockingHop: PathHop;
+}
+
+export type ControlPlaneOnlyLeg = AvailableLeg | UnavailableLeg;
 
 interface StreamRun {
   readonly stream: Stream;
   readonly first: Version;
   readonly last: Version;
+  /** Index of `last` in the route's versions; hop `i` arrives at version `i + 1`. */
+  readonly lastIndex: number;
 }
 
 function streamRuns(versions: readonly Version[]): StreamRun[] {
   const runs: StreamRun[] = [];
-  for (const version of versions) {
+  versions.forEach((version, index) => {
     const stream = streamOf(version);
     const prev = runs.at(-1);
     if (prev && formatStream(prev.stream) === formatStream(stream)) {
-      runs[runs.length - 1] = { ...prev, last: version };
+      runs[runs.length - 1] = { ...prev, last: version, lastIndex: index };
     } else {
-      runs.push({ stream, first: version, last: version });
+      runs.push({ stream, first: version, last: version, lastIndex: index });
     }
-  }
+  });
   return runs;
 }
 
@@ -95,22 +127,25 @@ export function controlPlaneOnlyLegs(hops: readonly PathHop[]): readonly Control
       i += 1;
       continue;
     }
-    legs.push({
+    const span: LegSpan = {
       from: a.stream,
       via: b.stream,
       to: c.stream,
-      pauseAt: a.last,
-      firstPausedHopTo: b.first,
-      unpauseAt: c.last,
       docsUrl: `https://docs.redhat.com/en/documentation/openshift_container_platform/${formatStream(c.stream)}/html/updating_clusters/performing-a-cluster-update#control-plane-only-update`,
-    });
+    };
+    const blockingHop = hops.slice(a.lastIndex, c.lastIndex).find((hop) => !isControlPlaneOnlyHop(hop));
+    legs.push(
+      blockingHop
+        ? { ...span, kind: 'unavailable', blockingHop }
+        : { ...span, kind: 'available', pauseAt: a.last, firstPausedHopTo: b.first, unpauseAt: c.last },
+    );
     i += 2;
   }
   return legs;
 }
 
 /** The leg's worker-pool commands, each annotated with the point in the hop sequence where it runs. */
-export function buildLegScript(leg: ControlPlaneOnlyLeg): string {
+export function buildLegScript(leg: AvailableLeg): string {
   return [
     `# at ${leg.pauseAt}, before: oc adm upgrade --to ${leg.firstPausedHopTo}`,
     PAUSE_WORKERS_COMMAND,

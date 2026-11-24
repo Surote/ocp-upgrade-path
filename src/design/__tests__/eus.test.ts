@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PathHop } from '../../engine/types';
 import { formatStream, streamOf } from '../../engine/version';
 import type { Version } from '../../graph/types';
-import { buildLegScript, controlPlaneOnlyLegs, isEusMinor, type ControlPlaneOnlyLeg } from '../eus';
+import { type AvailableLeg, buildLegScript, controlPlaneOnlyLegs, isEusMinor, type ControlPlaneOnlyLeg } from '../eus';
 
 /** A route's hops, each taken from a stable channel's graph. */
 function route(...vs: string[]): PathHop[] {
@@ -10,7 +10,17 @@ function route(...vs: string[]): PathHop[] {
 }
 
 function summary(legs: readonly ControlPlaneOnlyLeg[]) {
-  return legs.map((leg) => `${formatStream(leg.from)}->${formatStream(leg.to)} pause@${leg.pauseAt} unpause@${leg.unpauseAt}`);
+  return legs.map(
+    (leg) =>
+      `${formatStream(leg.from)}->${formatStream(leg.to)} ${
+        leg.kind === 'available' ? `pause@${leg.pauseAt} unpause@${leg.unpauseAt}` : `unavailable at ${leg.blockingHop.to}`
+      }`,
+  );
+}
+
+function available(leg: ControlPlaneOnlyLeg | undefined): AvailableLeg {
+  if (leg?.kind !== 'available') throw new Error(`expected an available leg, got ${leg?.kind}`);
+  return leg;
 }
 
 // The live eus-4.18 route for 4.16.33 -> 5.0.1 (plan.md §6).
@@ -85,7 +95,7 @@ describe('controlPlaneOnlyLegs', () => {
     const versions = ['4.14.50', '4.15.40', '4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46', '4.21.42', '4.22.22', '5.0.1'] as Version[];
     const legs = controlPlaneOnlyLegs(route(...versions));
     let previousUnpause = -1;
-    for (const leg of legs) {
+    for (const leg of legs.map(available)) {
       const pause = versions.indexOf(leg.pauseAt);
       const unpause = versions.indexOf(leg.unpauseAt);
       expect(pause).toBeGreaterThanOrEqual(previousUnpause);
@@ -93,6 +103,19 @@ describe('controlPlaneOnlyLegs', () => {
       expect(minorsWhilePaused.size).toBe(3);
       previousUnpause = unpause;
     }
+  });
+
+  it('is unavailable when any hop from the pause point to the unpause point came from a fast or candidate graph', () => {
+    const from = (channel: string | undefined, hops: PathHop[], index: number) =>
+      hops.map((hop, i) => (i === index ? { ...hop, sourceChannel: channel } : hop));
+    const versions = ['4.16.10', '4.16.33', '4.17.59', '4.18.2', '4.18.59', '4.19.4'];
+    // Hops: 0 is inside 4.16 before the pause, 1-3 run with workers paused, 4 leaves 4.18 after the unpause.
+    expect(summary(controlPlaneOnlyLegs(from('candidate-4.18', route(...versions), 0)))).toEqual(['4.16->4.18 pause@4.16.33 unpause@4.18.59']);
+    expect(summary(controlPlaneOnlyLegs(from('fast-4.19', route(...versions), 4)))).toEqual(['4.16->4.18 pause@4.16.33 unpause@4.18.59']);
+    expect(summary(controlPlaneOnlyLegs(from('candidate-4.18', route(...versions), 1)))).toEqual(['4.16->4.18 unavailable at 4.17.59']);
+    expect(summary(controlPlaneOnlyLegs(from('fast-4.18', route(...versions), 3)))).toEqual(['4.16->4.18 unavailable at 4.18.59']);
+    expect(summary(controlPlaneOnlyLegs(from('eus-4.18', route(...versions), 2)))).toEqual(['4.16->4.18 pause@4.16.33 unpause@4.18.59']);
+    expect(summary(controlPlaneOnlyLegs(from(undefined, route(...versions), 2)))).toEqual(['4.16->4.18 unavailable at 4.18.2']);
   });
 
   it("links each leg to the Control Plane Only docs of the leg's destination stream", () => {
@@ -108,8 +131,7 @@ describe('controlPlaneOnlyLegs', () => {
 
 describe('buildLegScript', () => {
   it('places the pause before the first hop into the odd minor and the unpause plus pool check at the even minor', () => {
-    const [leg] = controlPlaneOnlyLegs(LIVE_416_TO_501);
-    expect(buildLegScript(leg as ControlPlaneOnlyLeg)).toBe(
+    expect(buildLegScript(available(controlPlaneOnlyLegs(LIVE_416_TO_501)[0]))).toBe(
       [
         '# at 4.16.33, before: oc adm upgrade --to 4.17.59',
         `oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`,

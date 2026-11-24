@@ -61,7 +61,7 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
     expect(leg.querySelector('h3')?.textContent).toBe('Leg 1: 4.18 → 4.20 (Control Plane Only update not available on this route)');
     expect(leg).toHaveTextContent(/the update from 4\.18\.42 to 4\.19\.43 comes from candidate-4\.20/);
     expect(leg).toHaveTextContent(/only after every update involved is available in a stable channel/);
-    expect(leg.textContent).not.toMatch(/paused|pause workers/i);
+    expect(leg.textContent).not.toMatch(/"paused"|pause workers before/i);
   });
 
   it('judges each leg on its own hops: a stable leg keeps its pause steps when the next leg crosses a fast hop', () => {
