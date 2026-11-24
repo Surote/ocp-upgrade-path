@@ -1,6 +1,6 @@
 import { parseChannelName } from '../design/channels';
 import { FALLBACK_CLASSES } from '../design/forwardChannel';
-import type { GraphNode, Risk, Version } from '../graph/types';
+import type { Graph, GraphNode, Risk, Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
 import { riskClass, RiskIndex } from './risks';
 import type { RiskPolicy, RouteConstraints } from './routeConstraints';
@@ -20,29 +20,29 @@ import type { PathCost, PathHop } from './types';
  * labelled with it: edges are never merged across graphs (stitch.ts).
  */
 
-/** One edge of one segment, minus downgrades, with that segment's risks for it. */
-export interface Arc {
+/** One edge of one graph, minus downgrades, with that graph's risks for it. */
+export interface Edge {
   readonly from: Version;
   readonly to: Version;
-  /** Index into `RoutingModel.segments`. */
-  readonly segment: number;
   readonly risks: readonly Risk[];
   readonly always: number;
   readonly conditional: number;
   readonly toPatch: number;
 }
 
-export interface RoutingGroup {
-  readonly out: ReadonlyMap<Version, readonly Arc[]>;
-  readonly in: ReadonlyMap<Version, readonly Arc[]>;
+interface Adjacency {
+  readonly out: ReadonlyMap<Version, readonly Edge[]>;
+  readonly in: ReadonlyMap<Version, readonly Edge[]>;
 }
 
 export interface RoutingModel {
   readonly segments: readonly ChannelSegment[];
+  /** Per segment. */
+  readonly adjacency: readonly Adjacency[];
   /** Per segment: its index in `FALLBACK_CLASSES` when it is a class fallback, else -1. */
   readonly tiers: readonly number[];
-  readonly groupOf: readonly number[];
-  readonly groups: readonly RoutingGroup[];
+  /** Segment indices per group of consecutive segments of one stream. */
+  readonly groups: readonly (readonly number[])[];
 }
 
 function push<K, T>(map: Map<K, T[]>, key: K, value: T): void {
@@ -51,39 +51,77 @@ function push<K, T>(map: Map<K, T[]>, key: K, value: T): void {
   else map.set(key, [value]);
 }
 
+// Graphs are immutable, and the planner searches the same anchor and
+// look-ahead graphs on every start, target and stop change.
+const adjacencyCache = new WeakMap<Graph, Adjacency>();
+
+function adjacencyOf(graph: Graph): Adjacency {
+  const cached = adjacencyCache.get(graph);
+  if (cached) return cached;
+  const { nodes, edges, conditionalEdges } = graph;
+  const byPrecedence = nodes.map((_, i) => i).sort((a, b) => compareVersions((nodes[a] as GraphNode).version, (nodes[b] as GraphNode).version));
+  const precedence = new Array<number>(nodes.length);
+  byPrecedence.forEach((index, position) => {
+    const previous = byPrecedence[position - 1];
+    const tied = previous !== undefined && compareVersions((nodes[previous] as GraphNode).version, (nodes[index] as GraphNode).version) === 0;
+    precedence[index] = tied ? (precedence[previous] as number) : position;
+  });
+
+  const patches = nodes.map((node) => parseVersion(node.version).patch);
+  const riskIndex = new RiskIndex(conditionalEdges);
+  const out = new Map<Version, Edge[]>();
+  const into = new Map<Version, Edge[]>();
+  for (const [fromIdx, toIdx] of edges) {
+    // An upgrade plan never steps back; a build of the same release is a real hop.
+    if ((precedence[toIdx] as number) < (precedence[fromIdx] as number)) continue;
+    const from = (nodes[fromIdx] as GraphNode).version;
+    const to = (nodes[toIdx] as GraphNode).version;
+    const risks = riskIndex.risksFor(from, to);
+    const always = risks.length === 0 ? 0 : risks.filter((risk) => riskClass(risk) === 'Always').length;
+    const edge: Edge = { from, to, risks, always, conditional: risks.length - always, toPatch: patches[toIdx] as number };
+    push(out, from, edge);
+    push(into, to, edge);
+  }
+  const adjacency = { out, in: into };
+  adjacencyCache.set(graph, adjacency);
+  return adjacency;
+}
+
 export function buildRoutingModel(segments: readonly ChannelSegment[]): RoutingModel {
-  const groups: { out: Map<Version, Arc[]>; in: Map<Version, Arc[]> }[] = [];
-  const groupOf: number[] = [];
+  const groups: number[][] = [];
   let previousStream: string | undefined;
   segments.forEach((segment, index) => {
     const parsed = parseChannelName(segment.channel);
     const stream = parsed && `${parsed.major}.${parsed.minor}`;
-    if (stream === undefined || stream !== previousStream) groups.push({ out: new Map(), in: new Map() });
+    if (stream === undefined || stream !== previousStream) groups.push([]);
     previousStream = stream;
-    groupOf.push(groups.length - 1);
-    const group = groups[groups.length - 1] as (typeof groups)[number];
-
-    const { nodes, edges, conditionalEdges } = segment.graph;
-    const riskIndex = new RiskIndex(conditionalEdges);
-    const patches = new Map<number, number>();
-    for (const [fromIdx, toIdx] of edges) {
-      const from = (nodes[fromIdx] as GraphNode).version;
-      const to = (nodes[toIdx] as GraphNode).version;
-      // An upgrade plan never steps back; a build of the same release is a real hop.
-      if (compareVersions(to, from) < 0) continue;
-      const risks = riskIndex.risksFor(from, to);
-      const always = risks.filter((risk) => riskClass(risk) === 'Always').length;
-      let toPatch = patches.get(toIdx);
-      if (toPatch === undefined) patches.set(toIdx, (toPatch = parseVersion(to).patch));
-      const arc: Arc = { from, to, segment: index, risks, always, conditional: risks.length - always, toPatch };
-      push(group.out, from, arc);
-      push(group.in, to, arc);
-    }
+    (groups[groups.length - 1] as number[]).push(index);
   });
-  const tiers = segments.map((segment) =>
-    segment.classFallback ? FALLBACK_CLASSES.indexOf(parseChannelName(segment.channel)?.cls as string) : -1,
-  );
-  return { segments, tiers, groupOf, groups };
+  return {
+    segments,
+    adjacency: segments.map((segment) => adjacencyOf(segment.graph)),
+    tiers: segments.map((segment) =>
+      segment.classFallback ? FALLBACK_CLASSES.indexOf(parseChannelName(segment.channel)?.cls as string) : -1,
+    ),
+    groups,
+  };
+}
+
+/** Every edge leaving (`out`) or entering (`in`) `version` in `group`, with the segment supplying it. */
+export function forEachEdge(
+  model: RoutingModel,
+  group: readonly number[],
+  direction: keyof Adjacency,
+  version: Version,
+  visit: (edge: Edge, segment: number) => void,
+): void {
+  for (const segment of group) {
+    for (const edge of (model.adjacency[segment] as Adjacency)[direction].get(version) ?? []) visit(edge, segment);
+  }
+}
+
+function touches(model: RoutingModel, group: readonly number[], direction: keyof Adjacency, version: Version): boolean {
+  return group.some((segment) => (model.adjacency[segment] as Adjacency)[direction].has(version));
 }
 
 export interface Route {
@@ -128,7 +166,7 @@ const RANKINGS: Readonly<Record<RiskPolicy, (a: Rank, b: Rank) => number>> = {
     comparePosture(a, b) || a.always - b.always || a.conditional - b.conditional || a.cost.hops - b.cost.hops || a.cost.tieBreak - b.cost.tieBreak,
 };
 
-function step(rank: Rank, arc: Arc, tier: number): Rank {
+function step(rank: Rank, arc: Edge, tier: number): Rank {
   return {
     cost: {
       hops: rank.cost.hops + 1,
@@ -148,7 +186,8 @@ interface Entry {
   /** Set on an entry that starts this group's search from a route found earlier. */
   readonly seed?: Route;
   readonly prev?: Entry;
-  readonly arc?: Arc;
+  readonly edge?: Edge;
+  readonly segment?: number;
 }
 
 /** Binary min-heap; equal keys pop in insertion order, so ties keep the route found first. */
@@ -240,7 +279,7 @@ export function searchRoutes(
     const heap = new Heap<Entry>((a, b) => compare(a.rank, b.rank));
     frontier.forEach((routes, layer) => {
       for (const [version, route] of routes) {
-        if (!group.out.has(version)) continue;
+        if (!touches(model, group, 'out', version)) continue;
         const entry: Entry = { layer, version, rank: route, seed: route };
         (best[layer] as Map<Version, Entry>).set(version, entry);
         heap.push(entry);
@@ -252,15 +291,15 @@ export function searchRoutes(
       const entry = heap.pop() as Entry;
       if ((best[entry.layer] as Map<Version, Entry>).get(entry.version) !== entry) continue;
       settled.push(entry);
-      for (const arc of group.out.get(entry.version) ?? []) {
-        const layer = layerAfter(stops, entry.layer, arc.to);
-        const rank = step(entry.rank, arc, model.tiers[arc.segment] as number);
-        const existing = (best[layer] as Map<Version, Entry>).get(arc.to);
-        if (existing && compare(rank, existing.rank) >= 0) continue;
-        const next: Entry = { layer, version: arc.to, rank, prev: entry, arc };
-        (best[layer] as Map<Version, Entry>).set(arc.to, next);
+      forEachEdge(model, group, 'out', entry.version, (edge, segment) => {
+        const layer = layerAfter(stops, entry.layer, edge.to);
+        const rank = step(entry.rank, edge, model.tiers[segment] as number);
+        const existing = (best[layer] as Map<Version, Entry>).get(edge.to);
+        if (existing && compare(rank, existing.rank) >= 0) return;
+        const next: Entry = { layer, version: edge.to, rank, prev: entry, edge, segment };
+        (best[layer] as Map<Version, Entry>).set(edge.to, next);
         heap.push(next);
-      }
+      });
     }
 
     for (const entry of settled) {
@@ -275,17 +314,13 @@ export function searchRoutes(
 }
 
 function hopsOf(entry: Entry, model: RoutingModel): readonly PathHop[] {
-  const arcs: Arc[] = [];
+  const hops: PathHop[] = [];
   let cursor: Entry | undefined = entry;
-  while (cursor && !cursor.seed) {
-    arcs.push(cursor.arc as Arc);
-    cursor = cursor.prev;
+  for (; cursor && !cursor.seed; cursor = cursor.prev) {
+    const { from, to, risks } = cursor.edge as Edge;
+    hops.push({ from, to, risks, sourceChannel: (model.segments[cursor.segment as number] as ChannelSegment).channel });
   }
-  const seedHops = cursor?.seed?.hops ?? [];
-  return [
-    ...seedHops,
-    ...arcs.reverse().map(({ from, to, risks, segment }) => ({ from, to, risks, sourceChannel: (model.segments[segment] as ChannelSegment).channel })),
-  ];
+  return [...(cursor?.seed?.hops ?? []), ...hops.reverse()];
 }
 
 /**
@@ -313,15 +348,15 @@ export function reachForward(model: RoutingModel, start: Version, stops: readonl
   (layers[0] as Map<Version, number>).set(start, 0);
   model.groups.forEach((group, g) => {
     layers.forEach((reached, layer) => {
-      const queue = [...reached.keys()].filter((version) => group.out.has(version));
+      const queue = [...reached.keys()].filter((version) => touches(model, group, 'out', version));
       for (let version = queue.pop(); version !== undefined; version = queue.pop()) {
-        for (const arc of group.out.get(version) ?? []) {
-          const next = layerAfter(stops, layer, arc.to);
+        forEachEdge(model, group, 'out', version, ({ to }) => {
+          const next = layerAfter(stops, layer, to);
           const target = layers[next] as Map<Version, number>;
-          if (target.has(arc.to)) continue;
-          target.set(arc.to, g);
-          if (next === layer) queue.push(arc.to);
-        }
+          if (target.has(to)) return;
+          target.set(to, g);
+          if (next === layer) queue.push(to);
+        });
       }
     });
   });
@@ -337,21 +372,22 @@ export function reachBackward(model: RoutingModel, target: Version, stops: reado
   const layers: Map<Version, number>[] = Array.from({ length: stops.length + 1 }, () => new Map());
   (layers[stops.length] as Map<Version, number>).set(target, model.groups.length - 1);
   for (let g = model.groups.length - 1; g >= 0; g -= 1) {
-    const group = model.groups[g] as RoutingGroup;
+    const group = model.groups[g] as readonly number[];
     for (let layer = stops.length; layer >= 0; layer -= 1) {
       const reached = layers[layer] as Map<Version, number>;
-      const queue = [...reached.keys()].filter((version) => group.in.has(version));
+      const queue = [...reached.keys()].filter((version) => touches(model, group, 'in', version));
       for (let version = queue.pop(); version !== undefined; version = queue.pop()) {
-        for (const arc of group.in.get(version) ?? []) {
-          // The layers a hop into `version` can leave from and still land in `layer`.
-          for (const from of [layer - 1, layer]) {
-            if (from < 0 || layerAfter(stops, from, version) !== layer) continue;
-            const source = layers[from] as Map<Version, number>;
-            if (source.has(arc.from)) continue;
-            source.set(arc.from, g);
-            if (from === layer) queue.push(arc.from);
+        const to = version;
+        forEachEdge(model, group, 'in', to, ({ from }) => {
+          // The layers a hop into `to` can leave from and still land in `layer`.
+          for (const fromLayer of [layer - 1, layer]) {
+            if (fromLayer < 0 || layerAfter(stops, fromLayer, to) !== layer) continue;
+            const source = layers[fromLayer] as Map<Version, number>;
+            if (source.has(from)) continue;
+            source.set(from, g);
+            if (fromLayer === layer) queue.push(from);
           }
-        }
+        });
       }
     }
   }

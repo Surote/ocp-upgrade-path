@@ -1,6 +1,6 @@
 import type { Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
-import { buildRoutingModel, reachBackward, reachForward, type RoutingModel } from './routeSearch';
+import { buildRoutingModel, forEachEdge, reachBackward, reachForward, type RoutingModel } from './routeSearch';
 import type { Path } from './types';
 import { compareVersions } from './version';
 
@@ -93,14 +93,14 @@ export function buildStopOptions(
  * recommended route ranks by, short of a full search per version.
  */
 function arrivingChannel(model: RoutingModel, forward: ReadonlyMap<Version, number>, version: Version, latest: number): string {
-  let best: { readonly tier: number; readonly group: number; readonly segment: number } | undefined;
+  let best: { readonly tier: number; readonly segment: number } | undefined;
   for (let group = 0; group <= latest; group += 1) {
-    for (const arc of model.groups[group]?.in.get(version) ?? []) {
-      const reachedIn = forward.get(arc.from);
-      if (reachedIn === undefined || reachedIn > group) continue;
-      const tier = model.tiers[arc.segment] as number;
-      if (!best || tier < best.tier) best = { tier, group, segment: arc.segment };
-    }
+    forEachEdge(model, model.groups[group] as readonly number[], 'in', version, ({ from }, segment) => {
+      const reachedIn = forward.get(from);
+      if (reachedIn === undefined || reachedIn > group) return;
+      const tier = model.tiers[segment] as number;
+      if (!best || tier < best.tier) best = { tier, segment };
+    });
   }
   return (model.segments[(best as { segment: number }).segment] as ChannelSegment).channel;
 }
