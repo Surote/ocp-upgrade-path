@@ -10,6 +10,11 @@ import { EusAdvisory } from '../EusAdvisory';
 
 afterEach(cleanup);
 
+/** The panel's legs: the top-level items of its leg list, not each leg's own checkpoint items. */
+function legItems(): HTMLElement[] {
+  return [...screen.getByRole('list', { name: 'Control Plane Only legs' }).children] as HTMLElement[];
+}
+
 /** A route's hops, each taken from a stable channel's graph. */
 function route(...vs: string[]): PathHop[] {
   return vs.slice(1).map((to, i) => ({ from: vs[i] as Version, to: to as Version, risks: [], sourceChannel: 'stable-4.22' }));
@@ -19,7 +24,7 @@ describe('EusAdvisory', () => {
   it('lists one Control Plane Only leg per EUS-to-EUS span of the route, in order', () => {
     render(<EusAdvisory hops={route('4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46', '4.21.42', '4.22.22', '5.0.1')} />);
 
-    const legs = within(screen.getByRole('list', { name: 'Control Plane Only legs' })).getAllByRole('listitem');
+    const legs = legItems();
     expect(legs.map((li) => li.querySelector('h3')?.textContent)).toEqual([
       'Leg 1: 4.16 → 4.18 (pause workers before 4.17, unpause at 4.18)',
       'Leg 2: 4.18 → 4.20 (pause workers before 4.19, unpause at 4.20)',
@@ -57,7 +62,7 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
 
     render(<EusAdvisory hops={primary.hops} />);
 
-    const [leg] = within(screen.getByRole('list', { name: 'Control Plane Only legs' })).getAllByRole('listitem') as [HTMLElement];
+    const [leg] = legItems() as [HTMLElement];
     expect(leg.querySelector('h3')?.textContent).toBe('Leg 1: 4.18 → 4.20 (Control Plane Only update not available on this route)');
     expect(leg).toHaveTextContent(/the update from 4\.18\.42 to 4\.19\.43 comes from candidate-4\.20/);
     expect(leg).toHaveTextContent(/only after every update involved is available in a stable channel/);
@@ -69,7 +74,7 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
     const fastLeg = route('4.18.59', '4.19.55', '4.20.46').map((hop, i) => (i === 1 ? { ...hop, sourceChannel: 'fast-4.20' } : hop));
     render(<EusAdvisory hops={[...stableLeg, ...fastLeg]} />);
 
-    const [first, second] = within(screen.getByRole('list', { name: 'Control Plane Only legs' })).getAllByRole('listitem') as [HTMLElement, HTMLElement];
+    const [first, second] = legItems() as [HTMLElement, HTMLElement];
     expect(first).toHaveTextContent(/"paused":true/);
     expect(second.querySelector('h3')?.textContent).toBe('Leg 2: 4.18 → 4.20 (Control Plane Only update not available on this route)');
     expect(second).toHaveTextContent(/the update from 4\.19\.55 to 4\.20\.46 comes from fast-4\.20/);

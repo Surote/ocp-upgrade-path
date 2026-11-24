@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PathHop } from '../../engine/types';
 import { formatStream, streamOf } from '../../engine/version';
 import type { Version } from '../../graph/types';
-import { type AvailableLeg, buildLegScript, controlPlaneOnlyLegs, isEusMinor, type ControlPlaneOnlyLeg } from '../eus';
+import { type AvailableLeg, controlPlaneOnlyLegs, isEusMinor, legCheckpoints, type ControlPlaneOnlyLeg } from '../eus';
 
 /** A route's hops, each taken from a stable channel's graph. */
 function route(...vs: string[]): PathHop[] {
@@ -129,16 +129,12 @@ describe('controlPlaneOnlyLegs', () => {
   });
 });
 
-describe('buildLegScript', () => {
+describe('legCheckpoints', () => {
   it('places the pause before the first hop into the odd minor and the unpause plus pool check at the even minor', () => {
-    expect(buildLegScript(available(controlPlaneOnlyLegs(LIVE_416_TO_501)[0]))).toBe(
-      [
-        '# at 4.16.33, before: oc adm upgrade --to 4.17.59',
-        `oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`,
-        '# once the cluster reports 4.18.59',
-        `oc patch mcp/worker --type merge --patch '{"spec":{"paused":false}}'`,
-        'oc get mcp  # wait for worker UPDATED=True before leaving 4.18',
-      ].join('\n'),
-    );
+    expect(legCheckpoints(available(controlPlaneOnlyLegs(LIVE_416_TO_501)[0]))).toEqual([
+      { kind: 'pause', when: 'At 4.16.33, before oc adm upgrade --to 4.17.59', command: `oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'` },
+      { kind: 'unpause', when: 'Once the cluster reports 4.18.59', command: `oc patch mcp/worker --type merge --patch '{"spec":{"paused":false}}'` },
+      { kind: 'waitForPools', when: 'Wait for worker UPDATED=True before leaving 4.18', command: 'oc get mcp' },
+    ]);
   });
 });

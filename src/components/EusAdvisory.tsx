@@ -1,4 +1,4 @@
-import { type AvailableLeg, buildLegScript, controlPlaneOnlyLegs, type UnavailableLeg } from '../design/eus';
+import { type AvailableLeg, controlPlaneOnlyLegs, type LegCheckpoint, legCheckpoints, type UnavailableLeg } from '../design/eus';
 import { formatStream } from '../engine/version';
 import type { PathHop } from '../engine/types';
 import { CopyButton } from './CopyButton';
@@ -41,20 +41,32 @@ export function EusAdvisory({ hops }: { readonly hops: readonly PathHop[] }) {
   );
 }
 
+const COPY_LABEL: Record<LegCheckpoint['kind'], string> = {
+  pause: 'pause',
+  unpause: 'unpause',
+  waitForPools: 'pool check',
+};
+
 function AvailableLegSteps({ leg, n }: { readonly leg: AvailableLeg; readonly n: number }) {
-  const script = buildLegScript(leg);
   return (
     <>
       <h3>
         Leg {n}: {formatStream(leg.from)} → {formatStream(leg.to)} (pause workers before {formatStream(leg.via)}, unpause at{' '}
         {formatStream(leg.to)})
       </h3>
-      <div className="command-line">
-        <pre className="script-block cpo-leg-command">
-          <code>{script}</code>
-        </pre>
-        <CopyButton text={script} label={`Copy leg ${n} commands`} />
-      </div>
+      <ol className="cpo-checkpoints">
+        {legCheckpoints(leg).map((checkpoint) => (
+          <li key={checkpoint.kind}>
+            <p className="cpo-checkpoint__when">{checkpoint.when}</p>
+            <div className="command-line">
+              <pre className="script-block cpo-leg-command">
+                <code>{checkpoint.command}</code>
+              </pre>
+              <CopyButton text={checkpoint.command} label={`Copy leg ${n} ${COPY_LABEL[checkpoint.kind]}`} />
+            </div>
+          </li>
+        ))}
+      </ol>
     </>
   );
 }

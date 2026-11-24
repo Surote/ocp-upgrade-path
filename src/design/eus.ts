@@ -144,13 +144,21 @@ export function controlPlaneOnlyLegs(hops: readonly PathHop[]): readonly Control
   return legs;
 }
 
-/** The leg's worker-pool commands, each annotated with the point in the hop sequence where it runs. */
-export function buildLegScript(leg: AvailableLeg): string {
+/**
+ * A point in the leg's hop sequence and the one command to run there. Each
+ * is copied on its own: the points are separated by updates, so a paste
+ * holding two of them would run the second before those updates happen.
+ */
+export interface LegCheckpoint {
+  readonly kind: 'pause' | 'unpause' | 'waitForPools';
+  readonly when: string;
+  readonly command: string;
+}
+
+export function legCheckpoints(leg: AvailableLeg): readonly LegCheckpoint[] {
   return [
-    `# at ${leg.pauseAt}, before: oc adm upgrade --to ${leg.firstPausedHopTo}`,
-    PAUSE_WORKERS_COMMAND,
-    `# once the cluster reports ${leg.unpauseAt}`,
-    UNPAUSE_WORKERS_COMMAND,
-    `oc get mcp  # wait for worker UPDATED=True before leaving ${formatStream(leg.to)}`,
-  ].join('\n');
+    { kind: 'pause', when: `At ${leg.pauseAt}, before oc adm upgrade --to ${leg.firstPausedHopTo}`, command: PAUSE_WORKERS_COMMAND },
+    { kind: 'unpause', when: `Once the cluster reports ${leg.unpauseAt}`, command: UNPAUSE_WORKERS_COMMAND },
+    { kind: 'waitForPools', when: `Wait for worker UPDATED=True before leaving ${formatStream(leg.to)}`, command: 'oc get mcp' },
+  ];
 }
