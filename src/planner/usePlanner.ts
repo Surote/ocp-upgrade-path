@@ -197,19 +197,27 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // start or older gets the notice below and no route alongside it.
   const targetOption = targetOptions.find((o) => o.version === resolvedTarget);
 
-  const stopSegments = useMemo(
-    () => (graph && channel ? [{ channel, graph, classFallback: false as const }, ...lookaheadSegments] : NO_SEGMENTS),
-    [graph, channel, lookaheadSegments],
+  const anchorSegment = useMemo(
+    () => (graph && channel ? { channel, graph, classFallback: false as const } : undefined),
+    [graph, channel],
   );
+  const allSegments = useMemo(
+    () => (anchorSegment ? [anchorSegment, ...lookaheadSegments] : NO_SEGMENTS),
+    [anchorSegment, lookaheadSegments],
+  );
+  // The route search reads look-ahead only for a target outside the anchor
+  // (engine/stitch.ts), so stops on an anchor target are judged on the anchor
+  // alone, without waiting for discovery.
+  const targetInAnchor = graph !== undefined && targetOption !== undefined && resolveVersion(graph, targetOption.version) !== undefined;
   const stopRows = useMemo(
     () =>
       checkStops(stopsRaw, {
-        segments: stopSegments,
+        segments: targetInAnchor && anchorSegment ? [anchorSegment] : allSegments,
         start: resolvedStart,
         target: targetOption?.version,
-        discovered: !lookaheadLoading,
+        discovered: targetInAnchor || !lookaheadLoading,
       }),
-    [stopsRaw, stopSegments, resolvedStart, targetOption, lookaheadLoading],
+    [stopsRaw, targetInAnchor, anchorSegment, allSegments, resolvedStart, targetOption, lookaheadLoading],
   );
   const routeHold: RouteHold | undefined = stopRows.some((r) => r.check.kind === 'invalid')
     ? 'invalidStops'
@@ -226,8 +234,8 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // Labels use every stop that names a release, not just those the current
   // target honors, so each option names the route it gets once chosen.
   const labelConstraints = useMemo<RouteConstraints>(
-    () => ({ stops: stopReleases(stopsRaw, stopSegments), riskPolicy }),
-    [stopsRaw, stopSegments, riskPolicy],
+    () => ({ stops: stopReleases(stopsRaw, allSegments), riskPolicy }),
+    [stopsRaw, allSegments, riskPolicy],
   );
   const shownTargetOptions = useMemo(() => {
     const constrained = labelConstraints.stops.length > 0 || labelConstraints.riskPolicy !== 'recommended';
