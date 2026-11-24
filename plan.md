@@ -714,8 +714,9 @@ planner/useControlPlaneOnlyLegs.ts.
 
 Each available leg follows Red Hat's CLI sequence. At the last route version in 4.E, right
 before the first hop into 4.E+1: confirm with `oc get mcp` that every pool reports
-`UPDATED=True` and `UPDATING=False`, run `oc adm upgrade channel eus-4.(E+2)`, then pause
-`mcp/worker` (one copy block, in that order). The route's Commands run the same paused hops
+`UPDATED=True` and `UPDATING=False`, then run `oc adm upgrade channel eus-4.(E+2) && oc patch
+mcp/worker ...` (one copy block, in Red Hat's order, chained so a failed switch never pauses
+workers on the old channel). The route's Commands run the same paused hops
 on `eus-4.(E+2)` too: the script switches to it at the pause point, commented as a Control
 Plane Only leg, and switches away only when a later hop needs another channel, so the
 script never contradicts the checkpoint. Workers unpause on the last 4.E+2 version the route

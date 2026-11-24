@@ -256,7 +256,8 @@ export function legCheckpoints(leg: AvailableLeg): readonly LegCheckpoint[] {
       when:
         `At ${leg.pauseAt}, before oc adm upgrade --to ${leg.firstPausedHopTo}. First confirm with oc get mcp that every pool reports ` +
         `UPDATED=True and UPDATING=False. Then switch to ${leg.eusChannel} and pause workers: the updates through ${leg.unpauseAt} run on ${leg.eusChannel}.`,
-      commands: [`oc adm upgrade channel ${leg.eusChannel}`, PAUSE_WORKERS_COMMAND],
+      // Chained: on separate lines a failed switch would still pause workers on the old channel.
+      commands: [`oc adm upgrade channel ${leg.eusChannel} && ${PAUSE_WORKERS_COMMAND}`],
     },
     { kind: 'unpause', when: `Once the cluster reports ${leg.unpauseAt}`, commands: [UNPAUSE_WORKERS_COMMAND] },
     {
