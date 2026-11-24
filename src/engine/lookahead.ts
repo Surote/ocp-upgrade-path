@@ -25,7 +25,11 @@ export interface LookaheadDiscovery {
   readonly segments: readonly ChannelSegment[];
   /** Every channel fetched, in fetch order. */
   readonly channelsTried: readonly string[];
-  /** The fetch that ended discovery early, when it failed for a reason other than "channel is empty". */
+  /**
+   * The first fetch that failed for a reason other than "channel is empty".
+   * Discovery carries on past it, since successor streams are siblings (4.23
+   * and 5.0 both follow 4.22), so callers report it only when no route is found.
+   */
   readonly failure?: { readonly channel: string; readonly error: GraphError };
 }
 
@@ -47,6 +51,7 @@ export interface LookaheadDiscovery {
  *
  * At each stream the class is chosen by `candidateChannelsForStream`,
  * restricted to attested names; an empty channel falls through to the next.
+ * A channel that fails to load is recorded in `failure` and its stream skipped.
  */
 export async function discoverLookahead(
   loader: GraphLoader,
@@ -61,6 +66,7 @@ export async function discoverLookahead(
 
   const attested = new Set(anchorGraph.channelNames);
   const visitedStreams = new Set<string>([formatStream(anchor)]);
+  let failure: LookaheadDiscovery['failure'];
 
   for (let step = 0; step < MAX_LOOKAHEAD_STREAMS; step += 1) {
     const stream = lowestNewerStream(attested, anchor, visitedStreams);
@@ -72,7 +78,10 @@ export async function discoverLookahead(
       const result = await loader(channel, arch);
       if (!result.ok) {
         if (result.error.kind === 'empty') continue;
-        return { segments, channelsTried, failure: { channel, error: result.error } };
+        // Skip the stream rather than try the next class: a transient error
+        // must not silently move the plan onto another class.
+        failure ??= { channel, error: result.error };
+        break;
       }
       const classFallback = parseChannelName(channel)?.cls !== anchor.cls;
       segments.push({ channel, graph: result.value, classFallback, requestedClass: classFallback ? anchor.cls : undefined });
@@ -80,7 +89,7 @@ export async function discoverLookahead(
       break;
     }
   }
-  return { segments, channelsTried };
+  return { segments, channelsTried, failure };
 }
 
 function lowestNewerStream(channelNames: ReadonlySet<string>, than: Stream, exclude: ReadonlySet<string>): Stream | undefined {

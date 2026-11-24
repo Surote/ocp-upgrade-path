@@ -1,7 +1,7 @@
 import { formatChannelName, parseChannelName } from '../design/channels';
 import type { Arch, Graph, GraphNode, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
-import { type ChannelSegment, discoverLookahead } from './lookahead';
+import { type ChannelSegment, discoverLookahead, type LookaheadDiscovery } from './lookahead';
 import { findPathsInGraph, shortestPathsFrom } from './pathfinder';
 import { dedupeRisks } from './risks';
 import { compareStreams, type Stream, streamOf } from './version';
@@ -306,12 +306,14 @@ export async function stitchAndFindPath(
   }
 
   let lookahead: readonly ChannelSegment[] = [];
+  let lookaheadFailure: LookaheadDiscovery['failure'];
   if (!targetInAnchor) {
     const discovery = await discoverLookahead(loader, anchorChannel, anchor.graph, arch);
+    lookaheadFailure = discovery.failure;
     if (!discovery.segments.some((segment) => versionsOf(segment.graph).has(target))) {
       return err(
-        discovery.failure
-          ? { kind: 'loadFailed', ...discovery.failure }
+        lookaheadFailure
+          ? { kind: 'loadFailed', ...lookaheadFailure }
           : { kind: 'targetNeverFound', target, channelsTried: discovery.channelsTried },
       );
     }
@@ -321,10 +323,11 @@ export async function stitchAndFindPath(
   const chain = [...backward, anchor, ...lookahead];
   const route = routeAcrossSegments(chain, start).get(target);
   if (!route) {
-    // Start and target are each present but no shared version joins them.
+    // Start and target are each present but no shared version joins them,
+    // unless the channel that failed to load would have.
     // No cross-graph `nearestReachable`: the single-graph path computes one
     // per plan.md §4, and multi-graph stitching does not attempt it.
-    return err({ kind: 'unreachable', start, target });
+    return err(lookaheadFailure ? { kind: 'loadFailed', ...lookaheadFailure } : { kind: 'unreachable', start, target });
   }
 
   const routedChannels = new Set(route.hops.map((h) => h.sourceChannel));

@@ -319,6 +319,9 @@ it directly:
   forward walk): each node's membership lists the
   newer channels it is an upgrade source for (`stable-4.22` nodes name `candidate-4.23`
   and `candidate-5.0`). Discovery fetches only those named channels, lowest stream first.
+  Because successors are siblings, a channel that fails to load is skipped, not fatal:
+  a 503 from `candidate-4.23` must not hide `candidate-5.0`. The failure is reported only
+  when no route reaches the target.
 
 So `stable-4.22`, start 4.22.z, target 5.0.0-rc.x stitches `stable-4.22` → `candidate-5.0`
 and emits `oc adm upgrade channel candidate-5.0` at the last `stable-4.22` station on the

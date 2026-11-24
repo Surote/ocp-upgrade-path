@@ -361,7 +361,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(channelsFetched).toEqual(['eus-4.20', 'eus-4.22']);
   });
 
-  it('a genuine loadFailed during the forward walk (not a mere "channel does not exist") is surfaced immediately', async () => {
+  it('a genuine loadFailed during the forward walk (not a mere "channel does not exist") is surfaced when no fetched channel holds the target', async () => {
     const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR', ['eus-4.20', 'eus-4.22']);
     const loader: GraphLoader = async (channel) => {
       if (channel === 'eus-4.20') return ok(anchor);
