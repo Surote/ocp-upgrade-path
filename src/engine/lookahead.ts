@@ -12,6 +12,12 @@ import { compareStreams, type Stream } from './version';
  */
 const MAX_LOOKAHEAD_FETCHES = 48;
 
+/**
+ * Fetches in flight at once. Each Cincinnati response streams at a few hundred
+ * KB/s, so a wave of a stream's channels finishes far sooner side by side.
+ */
+const LOOKAHEAD_CONCURRENCY = 6;
+
 /** `classFallback` is true when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
 export type ChannelSegment = { readonly channel: string; readonly graph: Graph } & (
   | { readonly classFallback: false }
@@ -72,22 +78,30 @@ export async function discoverLookahead(
   const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
-  for (let fetches = 0; fetches < MAX_LOOKAHEAD_FETCHES; fetches += 1) {
-    const next = nextChannel(attested, anchor, channelsTried);
-    if (!next) break;
-    channelsTried.push(next.channel);
-    const result = await loader(next.channel, arch);
-    if (!result.ok) {
-      if (result.error.kind === 'empty') {
-        emptyChannels.add(next.channel);
-        continue;
+  // Discovery runs in waves: every attested channel not yet tried is fetched
+  // together, then their membership names the next wave. The channels tried
+  // are the same as one at a time, since the attested set only grows; the
+  // order within a wave is fixed, so `channelsTried` and `failure` do not
+  // depend on which fetch finishes first.
+  for (;;) {
+    const wave = untriedChannels(attested, anchor, channelsTried).slice(0, MAX_LOOKAHEAD_FETCHES - channelsTried.length);
+    if (wave.length === 0) break;
+    channelsTried.push(...wave.map((c) => c.channel));
+    const results = await mapConcurrently(wave, LOOKAHEAD_CONCURRENCY, (c) => loader(c.channel, arch));
+    wave.forEach((candidate, i) => {
+      const result = results[i] as Awaited<ReturnType<GraphLoader>>;
+      if (!result.ok) {
+        if (result.error.kind === 'empty') {
+          emptyChannels.add(candidate.channel);
+          return;
+        }
+        failure ??= { channel: candidate.channel, error: result.error };
+        failedChannels.add(candidate.channel);
+        return;
       }
-      failure ??= { channel: next.channel, error: result.error };
-      failedChannels.add(next.channel);
-      continue;
-    }
-    found.push({ ...next, graph: result.value });
-    for (const name of result.value.channelNames) attested.add(name);
+      found.push({ ...candidate, graph: result.value });
+      for (const name of result.value.channelNames) attested.add(name);
+    });
   }
   // A fetched graph can name a stream older than one already fetched (only
   // 5.1 names 4.23), and the route search never returns to an earlier stream.
@@ -112,22 +126,34 @@ interface Found extends Candidate {
   readonly graph: Graph;
 }
 
-/** The next channel to fetch: the most preferred attested channel not yet tried at the lowest newer stream that has one. */
-function nextChannel(
+/** Attested channels not yet tried, lowest stream first, most preferred first within a stream. */
+function untriedChannels(
   attested: ReadonlySet<string>,
   anchor: Stream & { readonly cls: string },
   tried: readonly string[],
-): Candidate | undefined {
-  let best: Candidate | undefined;
+): Candidate[] {
+  const candidates: Candidate[] = [];
   for (const name of attested) {
     const parsed = parseChannelName(name);
     if (!parsed || compareStreams(parsed, anchor) <= 0 || tried.includes(name)) continue;
     const stream = { major: parsed.major, minor: parsed.minor };
     const rank = candidateChannelsForStream(anchor.cls, stream).indexOf(name);
-    if (rank < 0) continue;
-    if (!best || compareStreams(stream, best.stream) < 0 || (compareStreams(stream, best.stream) === 0 && rank < best.rank)) {
-      best = { channel: name, stream, rank };
-    }
+    if (rank >= 0) candidates.push({ channel: name, stream, rank });
   }
-  return best;
+  return candidates.sort((a, b) => compareStreams(a.stream, b.stream) || a.rank - b.rank);
+}
+
+/** `fn` over `items` with at most `limit` calls pending at once; results in input order. */
+async function mapConcurrently<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      results[i] = await fn(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
