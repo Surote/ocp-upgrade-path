@@ -315,7 +315,7 @@ function riskNotes(hop: PausedHop, eusChannel: string): readonly string[] {
   const key = (risk: Risk) => `${riskIdOf(risk)}|${riskClass(risk)}`;
   const onRoute = new Set(hop.onRoute.risks.map(key));
   const onEus = new Set(hop.risks.map(key));
-  const edge = `${hop.from} → ${hop.to}`;
+  const edge = `the update from ${hop.from} to ${hop.to}`;
   return [
     ...hop.risks.filter((risk) => !onRoute.has(key(risk))).map((risk) => `${eusChannel} attaches ${describeRisk(risk)} to ${edge}, which ${routeChannel} does not.`),
     ...hop.onRoute.risks.filter((risk) => !onEus.has(key(risk))).map((risk) => `${routeChannel} attaches ${describeRisk(risk)} to ${edge}, which ${eusChannel} does not.`),
@@ -360,7 +360,7 @@ export function legSteps(leg: AvailableLeg): readonly LegStep[] {
     const { channel, hop } = leg.returnTo;
     steps.push({
       kind: 'returnChannel',
-      when: `Then return to ${channel}, the channel the main route takes its next update (${hop.from} → ${hop.to}) on`,
+      when: `Then return to ${channel}, the channel the main route takes its next update, from ${hop.from} to ${hop.to}, on`,
       commands: [`oc adm upgrade channel ${channel}`],
     });
   }

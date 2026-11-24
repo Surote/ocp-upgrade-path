@@ -109,7 +109,7 @@ describe('Control Plane Only guidance on a stable-4.20 route (4.18.50 -> 4.19.40
     const update = within(leg()).getByText('oc adm upgrade --to 4.20.32').closest('li') as HTMLElement;
     expect(within(update).getByText('EusOnlyRisk')).toBeTruthy();
     expect(update).toHaveTextContent(`oc adm upgrade --to-image=${EUS_PAYLOAD} --allow-explicit-upgrade`);
-    expect(update).toHaveTextContent('eus-4.20 attaches EusOnlyRisk (Always) to 4.19.40 → 4.20.32, which stable-4.20 does not.');
+    expect(update).toHaveTextContent('eus-4.20 attaches EusOnlyRisk (Always) to the update from 4.19.40 to 4.20.32, which stable-4.20 does not.');
     expect(leg()).toHaveTextContent(/replaces the main Commands script's updates from 4\.18\.50 to 4\.20\.32/);
   });
 

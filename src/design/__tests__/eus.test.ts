@@ -270,7 +270,7 @@ describe('legSteps', () => {
   it("returns to the channel the main route's next update runs on", () => {
     expect(steps.at(-1)).toEqual({
       kind: 'returnChannel',
-      when: 'Then return to stable-4.22, the channel the main route takes its next update (4.18.59 → 4.19.55) on',
+      when: 'Then return to stable-4.22, the channel the main route takes its next update, from 4.18.59 to 4.19.55, on',
       commands: ['oc adm upgrade channel stable-4.22'],
     });
   });
@@ -299,8 +299,8 @@ describe('the risks eus-4.(E+2) attaches to a paused update', () => {
 
     expect(update?.hop.risks.map((risk) => risk.name)).toEqual(['Shared', 'EusOnly']);
     expect(update?.riskNotes).toEqual([
-      'eus-4.20 attaches EusOnly (Always) to 4.19.40 → 4.20.32, which stable-4.22 does not.',
-      'stable-4.22 attaches StableOnly (conditional) to 4.19.40 → 4.20.32, which eus-4.20 does not.',
+      'eus-4.20 attaches EusOnly (Always) to the update from 4.19.40 to 4.20.32, which stable-4.22 does not.',
+      'stable-4.22 attaches StableOnly (conditional) to the update from 4.19.40 to 4.20.32, which eus-4.20 does not.',
     ]);
   });
 });

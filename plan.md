@@ -748,7 +748,7 @@ point.
 **A verified leg can attach risks the main route does not.** `eus-4.(E+2)` may publish the
 same edge with a different risk set, for example an `Always` risk the stable channel lacks.
 The leg lists its own risks for each update and names every difference in a note, such as
-"eus-4.20 attaches X (Always) to 4.19.40 → 4.20.32, which stable-4.20 does not." The
+"eus-4.20 attaches X (Always) to the update from 4.19.40 to 4.20.32, which stable-4.20 does not." The
 main route's risk summary, the lower-risk comparison and the avoid-conditional ranking are
 the engine's, computed over the main route's own channels, and an EUS leg never feeds
 into them.
