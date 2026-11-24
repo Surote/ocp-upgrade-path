@@ -121,7 +121,7 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     expect(result.value.alternates).toEqual([]);
   });
 
-  it('"later channel wins": nodeInfo for the overlapping junction node comes from the target-side (later) channel', async () => {
+  it('reads each station\'s node metadata from the graph that supplied the hop arriving at it', async () => {
     const result = await stitchAndFindPath(makeLoader([]), {
       targetChannel: 'stable-4.20',
       arch: 'amd64',
@@ -130,10 +130,10 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     });
     if (!result.ok) throw result.error;
 
-    // 4.19.5 exists in both stable-4.20 (payload tag "A", fetched first / later
-    // channel) and stable-4.19 (tag "B", fetched via walk-back). "A" must win.
-    const junction = result.value.nodeInfo.get(v('4.19.5'));
-    expect(junction?.payload).toContain('sha256:A-');
+    // 4.19.5 is in stable-4.20 (tag "A") and stable-4.19 (tag "B"); the hop arriving at it runs on stable-4.19.
+    expect(result.value.nodeInfo.get(v('4.18.1'))?.payload).toContain('sha256:B-');
+    expect(result.value.nodeInfo.get(v('4.19.5'))?.payload).toContain('sha256:B-');
+    expect(result.value.nodeInfo.get(v('4.20.1'))?.payload).toContain('sha256:A-');
   });
 
   it('never fabricates a transition: two graphs with NO shared/overlapping version cannot be stitched into a path, even if each individually has usable edges', async () => {

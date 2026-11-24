@@ -163,7 +163,7 @@ alternates alongside the primary.)
 **Stitching** is anchor-first. Fetch the selected channel; if the start version
 isn't in it, walk back to the same class one stream older (the highest older stream among
 the current graph's own nodes, see §6 "Major-version boundaries") until it is. Where two graphs disagree
-about an overlapping release, the later channel wins. We never union edges across graphs
+about an overlapping release, each hop uses its own graph's edge, risks and payload. We never union edges across graphs
 — that could synthesise a transition Red Hat has not published in any single channel. A
 banner names which channels were stitched, so the path stays auditable.
 
@@ -173,9 +173,10 @@ ranked by support posture first (§6 "Forward channel preference"): fewest hops 
 `candidate` fallback, then `fast`, then `stable`, and only then hops, risk weight and the
 patch tie-break. A release the anchor's class reaches is never routed through a shorter
 fallback. Within one graph every hop shares a channel, so the posture terms never change a
-single-graph result. Node metadata
-is the one thing that legitimately merges across graphs, under the later-channel-wins
-rule. **Multi-graph stitches return the primary path only**; waypoint alternates are
+single-graph result. Node metadata follows the same provenance: each station's payload
+comes from the graph that supplied the hop arriving at it, so a `--to-image` digest always
+matches the channel that hop runs on, and a graph only the lower-risk route uses never
+supplies one. **Multi-graph stitches return the primary path only**; waypoint alternates are
 single-graph, because the cheap concatenation trick that makes them nearly free stops
 holding once a real channel boundary is crossed. Every worked example in this document
 resolves within one graph, so this affects only the long-range cases (`4.17.x → 4.21.x`).
@@ -640,7 +641,7 @@ input: a container is running regardless, so the proxy became close to free and 
 shared cache and CORS independence with it.
 
 **Q3 · Q10 — Stitch channels; never union them.** Target-channel-first, walking back
-until the start version is covered, later channel winning on conflict. Unioning edges
+until the start version is covered, each hop reading its own graph. Unioning edges
 across graphs could invent a transition that appears in no single published channel.
 
 **Q4 · Q9 — Lexicographic Dijkstra over a cost tuple.** Hops, then risk weight, then

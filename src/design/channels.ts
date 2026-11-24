@@ -35,8 +35,8 @@ export function formatChannelName(channel: ChannelName): string {
  * Resolves a node's `channels` (indices into a channel-name table, per
  * graph/types.ts `GraphNode.channels`) to actual names, bounds-checked.
  *
- * `nodeInfo` on a `StitchedPathResult` merges `GraphNode`s across every
- * fetched graph ("later channel wins" -- engine/stitch.ts), but each graph
+ * `nodeInfo` on a `StitchedPathResult` takes each station from the graph
+ * that supplied the hop arriving at it (engine/stitch.ts), but each graph
  * has its *own* `channelNames` table, and `StitchedPathResult` does not
  * carry one per source graph. Cross-referencing a node's indices against a
  * channel-name table from a *different* graph than the one that produced

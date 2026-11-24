@@ -156,13 +156,10 @@ export interface StitchedPathResult {
   readonly alternates: readonly Path[];
   readonly stitch: StitchInfo & { readonly multiGraph: boolean };
   /**
-   * Canonical node info (payload, errataUrl, channel membership) by version,
-   * across every stitched graph -- "later channel wins on conflict" per
-   * plan.md §4: when the same version appears in more than one fetched graph,
-   * the entry from whichever graph is closer to the target (fetched earlier
-   * in the target-channel-first walk-back) is kept. This is the *only* place
-   * data from different graphs is merged; edges are never unioned (see
-   * engine/stitch.ts).
+   * Node info (payload, errataUrl, channel membership) for each station of
+   * `primary`, read from the graph that supplied the hop arriving at it (the
+   * start from the first hop's graph), so a hop's `--to-image` digest comes
+   * from the channel it runs on (plan.md §4). Other routes' stations are absent.
    */
   readonly nodeInfo: ReadonlyMap<Version, GraphNode>;
 }

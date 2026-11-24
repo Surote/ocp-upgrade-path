@@ -7,7 +7,7 @@ import { NO_CONSTRAINTS, type RouteConstraints } from './routeConstraints';
 import { buildRoutingModel, type Route, type RoutingModel, searchRoutes } from './routeSearch';
 import { dedupeRisks } from './risks';
 import { compareStreams, type Stream, streamOf } from './version';
-import type { GraphLoader, Path, StitchError, StitchedPathResult } from './types';
+import type { GraphLoader, Path, PathHop, StitchError, StitchedPathResult } from './types';
 
 /**
  * Stitching, per plan.md §4 and §6 "Look-ahead targets (bidirectional
@@ -43,13 +43,12 @@ import type { GraphLoader, Path, StitchError, StitchedPathResult } from './types
  * exactly which fetched segment produced it -- the provenance that makes a
  * channel-switch command attributable to the correct hop (design/commands.ts).
  *
- * Node *metadata* (payload, errataUrl, channel membership) is different from
- * edges: the same version can legitimately have slightly different metadata
- * across two channel snapshots, so `nodeInfo` on the result merges metadata
- * across every fetched graph with "later channel wins" -- the channel closer
- * to the target end of the composed chain takes priority on a conflict,
- * exactly the plan's stated rule -- applied only to that read-only lookup
- * table, never to traversal.
+ * Node *metadata* (payload, errataUrl, channel membership) follows the same
+ * provenance: the same version can have different metadata in two channel
+ * snapshots, and a hop's `--to-image` digest must come from the graph the
+ * cluster is on when it takes that hop. So `nodeInfo` holds only the primary
+ * route's stations, each read from the graph that supplied the hop arriving
+ * at it (`routeNodeInfo`).
  */
 
 const MAX_WALK_BACK = 12; // safety bound: no real Cincinnati channel history is this deep
@@ -74,16 +73,20 @@ function predecessorStream(graph: Graph, own: Stream): Stream | undefined {
   return best;
 }
 
-/** "Later channel wins": earlier entries in `priorityOrder` (closer to the target end of the composed chain) take precedence. */
-function buildNodeInfo(priorityOrder: readonly ChannelSegment[]): ReadonlyMap<Version, GraphNode> {
+/**
+ * Each station of `route` with the metadata of the graph that supplied the
+ * hop arriving at it; the start with the first hop's graph (the first
+ * segment's for a zero-hop route).
+ */
+function routeNodeInfo(segments: readonly ChannelSegment[], start: Version, hops: readonly PathHop[]): ReadonlyMap<Version, GraphNode> {
+  const graphs = new Map(segments.map((segment) => [segment.channel, segment.graph]));
   const map = new Map<Version, GraphNode>();
-  for (const segment of priorityOrder) {
-    for (const node of segment.graph.nodes) {
-      if (!map.has(node.version)) {
-        map.set(node.version, node);
-      }
-    }
-  }
+  const add = (version: Version, channel: string | undefined) => {
+    const node = graphs.get(channel as string)?.nodes.find((n) => n.version === version);
+    if (node) map.set(version, node);
+  };
+  add(start, hops[0]?.sourceChannel ?? segments[0]?.channel);
+  for (const hop of hops) add(hop.to, hop.sourceChannel);
   return map;
 }
 
@@ -239,15 +242,12 @@ export async function stitchAndFindPath(
       riskComparison,
       alternates,
       stitch: { channelsUsed: [anchor.channel], classFallbacks: [], multiGraph: false },
-      nodeInfo: buildNodeInfo([anchor]),
+      nodeInfo: routeNodeInfo([anchor], start, route.hops),
     });
   }
 
-  const channelsOf = (r: Route | undefined) => (r ? r.hops.map((h) => h.sourceChannel) : []);
-  const primaryChannels = new Set(channelsOf(route));
+  const primaryChannels = new Set(route.hops.map((h) => h.sourceChannel));
   const usedLookahead = lookahead.filter((segment) => primaryChannels.has(segment.channel));
-  const shownChannels = new Set([...primaryChannels, ...channelsOf(comparison?.route)]);
-  const shownLookahead = lookahead.filter((segment) => shownChannels.has(segment.channel));
   const anchorSideFirst = [...backward].reverse();
 
   return ok({
@@ -265,7 +265,7 @@ export async function stitchAndFindPath(
       ),
       multiGraph: true,
     },
-    nodeInfo: buildNodeInfo([...shownLookahead].reverse().concat(anchor, anchorSideFirst)),
+    nodeInfo: routeNodeInfo([...backward, anchor, ...lookahead], start, route.hops),
   });
 }
 
