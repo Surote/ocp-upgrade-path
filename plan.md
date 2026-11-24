@@ -380,10 +380,12 @@ load, each name must exactly match a conditional risk on them. Any other name is
 with a notice that names it, and is never matched onto a different risk.
 
 On the Nov 2026 `eus-4.18` snapshot, marking `VSphereConfigCloudControllerCrash` leaves the
-route from `4.16.33` to `5.0.1` unchanged and removes "No lower-risk route exists". It does
-change the `avoidConditional` route to `4.22.23`: once the risk no longer counts, the
-route through 4.17.59, 4.18.59, 4.19.55, 4.20.46 and 4.21.42 ties the clean one on risk
-and hops and wins on patch level.
+route from `4.16.33` to `5.0.1` unchanged and removes "No lower-risk route exists".
+
+A mark is the operator's assertion, not proof, so `avoidConditional` ranks waived
+occurrences after hops and before the patch tie-break: between two routes of equal length,
+a genuinely clean one beats one that carries a marked risk. A mark can still let a shorter
+route that carries it win over a longer clean one.
 
 ### Major-version boundaries (4.22 → 5.0)
 

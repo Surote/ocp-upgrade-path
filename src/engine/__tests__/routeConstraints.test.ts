@@ -282,6 +282,25 @@ describe('risks marked not applicable', () => {
     expect(versionsOf(await route(segments, '4.18.0', '4.20.0', marked(avoid(), 'VSphereRisk')))).toEqual(around);
   });
 
+  it('prefers a genuinely clean route over an equal-length one carrying a marked risk', async () => {
+    // 4.19.1 wins the patch tie-break, but its hop carries the marked risk; the mark is the operator's assertion, not proof.
+    const segments = [
+      seg(
+        'stable-4.20',
+        graph(
+          [
+            ['4.18.0', '4.19.0'],
+            ['4.19.0', '4.20.0'],
+            ['4.18.0', '4.19.1'],
+            ['4.19.1', '4.20.0'],
+          ],
+          { risks: [risky('4.18.0', '4.19.1', 'VSphereRisk')] },
+        ),
+      ),
+    ];
+    expect(versionsOf(await route(segments, '4.18.0', '4.20.0', marked(avoid(), 'VSphereRisk')))).toEqual([v('4.18.0'), v('4.19.0'), v('4.20.0')]);
+  });
+
   it('drops the lower-risk route once the risk it dodges is marked, and keeps the recommended route', async () => {
     const segments = shortcut(risky('4.18.0', '4.20.0', 'VSphereRisk'));
     const unmarked = await route(segments, '4.18.0', '4.20.0', stops());

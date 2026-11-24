@@ -138,6 +138,8 @@ export interface Route {
    */
   readonly always: number;
   readonly conditional: number;
+  /** Occurrences of risks marked not applicable: a tie-break only, since a mark is the operator's assertion, not proof. */
+  readonly waived: number;
   /** Each hop's `sourceChannel` names the segment whose own edge it walks. */
   readonly hops: readonly PathHop[];
 }
@@ -166,7 +168,7 @@ const RANKINGS: Readonly<Record<RiskPolicy, (a: Rank, b: Rank) => number>> = {
   recommended: (a, b) =>
     comparePosture(a, b) || a.cost.hops - b.cost.hops || a.cost.riskWeight - b.cost.riskWeight || a.cost.tieBreak - b.cost.tieBreak,
   avoidConditional: (a, b) =>
-    comparePosture(a, b) || a.always - b.always || a.conditional - b.conditional || a.cost.hops - b.cost.hops || a.cost.tieBreak - b.cost.tieBreak,
+    comparePosture(a, b) || a.always - b.always || a.conditional - b.conditional || a.cost.hops - b.cost.hops || a.waived - b.waived || a.cost.tieBreak - b.cost.tieBreak,
 };
 
 function step(rank: Rank, arc: Edge, tier: number, notApplicable: ReadonlySet<RiskName>): Rank {
@@ -180,6 +182,7 @@ function step(rank: Rank, arc: Edge, tier: number, notApplicable: ReadonlySet<Ri
     fallbackHops: tier < 0 ? rank.fallbackHops : rank.fallbackHops.map((n, i) => (i === tier ? n + 1 : n)),
     always: rank.always + arc.always,
     conditional: rank.conditional + arc.conditional - waived,
+    waived: rank.waived + waived,
   };
 }
 
@@ -275,6 +278,7 @@ export function searchRoutes(
     fallbackHops: NO_FALLBACK_HOPS,
     always: 0,
     conditional: 0,
+    waived: 0,
     hops: [],
   });
 
