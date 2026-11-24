@@ -183,6 +183,18 @@ describe('route stops', () => {
     expect(urlParam('avoid')).toBe('conditional');
   });
 
+  it('asks for a target, rather than checking forever, when the target is cleared with stops pinned', async () => {
+    await renderAt(`${BASE}&stops=4.19.41`);
+
+    fireEvent.change(screen.getByLabelText('Target version'), { target: { value: '' } });
+
+    expect(await screen.findByText(/target version to find an upgrade path/)).toBeInTheDocument();
+    expect(screen.queryByText(/Checking the pinned stops/)).not.toBeInTheDocument();
+    expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(screen.getByLabelText('Stop 1')).toHaveValue('4.19.41');
+    expect(within(screen.getByLabelText('Stop 1')).getByRole('option', { name: '4.19.41' })).toBeInTheDocument();
+  });
+
   it('flags an unparseable restored stop inline and withholds the route and commands until it is removed', async () => {
     window.history.pushState({}, '', `${BASE}&stops=banana`);
     render(<App graphClient={makeClient()} />);
