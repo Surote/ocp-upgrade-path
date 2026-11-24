@@ -13,18 +13,24 @@ const CAP = 48;
 /** The channels a walk that fetches one channel at a time takes, with no cap. */
 async function serialWalk(loader: GraphLoader, anchorGraph: Graph): Promise<string[]> {
   const anchor = parseChannelName('stable-4.5') as NonNullable<ReturnType<typeof parseChannelName>>;
+  const ranks = new Map<string, number>();
   const rank = (name: string) => {
-    const parsed = parseChannelName(name);
-    return parsed && compareStreams(parsed, anchor) > 0 ? candidateChannelsForStream('stable', { major: parsed.major, minor: parsed.minor }).indexOf(name) : -1;
+    let known = ranks.get(name);
+    if (known === undefined) {
+      const parsed = parseChannelName(name);
+      known = parsed && compareStreams(parsed, anchor) > 0 ? candidateChannelsForStream('stable', { major: parsed.major, minor: parsed.minor }).indexOf(name) : -1;
+      ranks.set(name, known);
+    }
+    return known;
   };
+  const precedes = (a: string, b: string) => compareStreams(parseChannelName(a)!, parseChannelName(b)!) || rank(a) - rank(b);
   const attested = new Set(anchorGraph.channelNames);
-  const tried: string[] = [];
+  const tried = new Set<string>();
   for (;;) {
-    const next = [...attested]
-      .filter((name) => rank(name) >= 0 && !tried.includes(name))
-      .sort((a, b) => compareStreams(parseChannelName(a)!, parseChannelName(b)!) || rank(a) - rank(b))[0];
-    if (!next) return tried;
-    tried.push(next);
+    let next: string | undefined;
+    for (const name of attested) if (rank(name) >= 0 && !tried.has(name) && (next === undefined || precedes(name, next) < 0)) next = name;
+    if (!next) return [...tried];
+    tried.add(next);
     const result = await loader(next, 'amd64');
     if (result.ok) for (const name of result.value.channelNames) attested.add(name);
   }
@@ -42,6 +48,38 @@ function delayed(loader: GraphLoader, delayFor: (channel: string) => number, cal
     await new Promise((resolve) => setTimeout(resolve, delayFor(channel)));
     return loader(channel, arch);
   };
+}
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Runs a discovery whose loader calls answer only when the test answers them:
+ * once the discovery has done all it can, `pick` chooses which waiting call
+ * answers next. Calls still waiting after the discovery returns answer too,
+ * so `fetched` holds every call it ever makes.
+ */
+async function scheduled(graphs: Readonly<Record<string, Graph | GraphError>>, anchor: Graph, pick: (waiting: number) => number) {
+  const inner = loaderFor(graphs);
+  const waiting: (() => void)[] = [];
+  const fetched: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const loader: GraphLoader = (channel, arch) => {
+    fetched.push(channel);
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    return new Promise((resolve) =>
+      waiting.push(() => {
+        inFlight -= 1;
+        resolve(inner(channel, arch));
+      }),
+    );
+  };
+  let discovery: Awaited<ReturnType<typeof discoverLookahead>> | undefined;
+  void discoverLookahead(loader, 'stable-4.5', anchor, 'amd64').then((d) => (discovery = d));
+  for (await settle(); waiting.length > 0; await settle()) waiting.splice(pick(waiting.length), 1)[0]?.();
+  if (!discovery) throw new Error('discovery waits on no loader call');
+  return { discovery, fetched, maxInFlight };
 }
 
 describe('look-ahead discovery does not depend on response timing', () => {
@@ -63,9 +101,8 @@ describe('look-ahead discovery does not depend on response timing', () => {
 
       const runs = [];
       for (const schedule of [0, 1, 2]) {
-        const fetched: string[] = [];
-        const jitter = prng(trial * 3 + schedule + 1);
-        const discovery = await discoverLookahead(delayed(loaderFor(graphs), () => jitter() * 4, fetched), 'stable-4.5', anchor, 'amd64');
+        const order = prng(trial * 3 + schedule + 1);
+        const { discovery, fetched } = await scheduled(graphs, anchor, (n) => Math.floor(order() * n));
         expect(fetched.length).toBeLessThanOrEqual(CAP);
         runs.push({ tried: discovery.channelsTried, segments: discovery.segments.map((s) => s.channel), fetched: [...fetched].sort() });
       }
@@ -75,7 +112,7 @@ describe('look-ahead discovery does not depend on response timing', () => {
       else capBound += 1;
     }
     expect(capBound).toBeGreaterThan(0);
-  }, 60000);
+  });
 
   it('keeps the channels a slow first channel reveals ahead of 46 fetched ones, as when it answers fast', async () => {
     // The anchor names 47 channels. stable-4.6, taken first, names fast-4.6 and candidate-4.6, which come before every other.
