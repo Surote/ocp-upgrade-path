@@ -1,8 +1,13 @@
 import { riskClass } from '../engine/risks';
 import type { Path } from '../engine/types';
 
+/**
+ * Reads every hop, not `riskSummary`: the summary keeps one occurrence per
+ * risk, and the same risk can be `Always` on one channel's edge and
+ * conditional on the next.
+ */
 export function hasConditionalRisk(path: Path): boolean {
-  return path.riskSummary.some((risk) => riskClass(risk) !== 'Always');
+  return path.hops.some((hop) => hop.risks.some((risk) => riskClass(risk) !== 'Always'));
 }
 
 /**
