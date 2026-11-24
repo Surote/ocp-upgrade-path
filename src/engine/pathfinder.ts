@@ -1,4 +1,4 @@
-import type { Graph, NodeIndex, Version } from '../graph/types';
+import type { Graph, GraphNode, NodeIndex, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { dedupeRisks, RiskIndex, riskWeight } from './risks';
 import { compareStreams, compareVersions, formatStream, parseVersion, type Stream, streamOf } from './version';
@@ -53,12 +53,18 @@ function combineCost(a: CostTuple, b: CostTuple): CostTuple {
  * node's position in `graph.nodes`, per graph/types.ts -- so these arrays are
  * plain index-addressed lookups, not a re-mint of the brand from anything
  * outside the graph's own established index space).
+ *
+ * Edges that lower SemVer precedence are dropped: an upgrade plan never steps
+ * back, and a multi-graph route could otherwise join two channels through
+ * one (4.20.10 -> 4.20.5). Equal precedence stays, since a build of the same
+ * release (`+build.1`) is a real hop.
  */
 function buildAdjacency(graph: Graph): { forward: NodeIndex[][]; reverse: NodeIndex[][] } {
   const n = graph.nodes.length;
   const forward: NodeIndex[][] = Array.from({ length: n }, () => []);
   const reverse: NodeIndex[][] = Array.from({ length: n }, () => []);
   for (const [from, to] of graph.edges) {
+    if (compareVersions((graph.nodes[to] as GraphNode).version, (graph.nodes[from] as GraphNode).version) < 0) continue;
     (forward[from] as NodeIndex[]).push(to);
     (reverse[to] as NodeIndex[]).push(from);
   }
