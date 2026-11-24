@@ -21,14 +21,14 @@ const MARGIN_X = 40;
 const LABEL_CHAR_PX = 7.2; // 12px station label
 const TAG_CHAR_PX = 6; // 10px switch tag
 const LABEL_GAP = 16; // clear space between neighbouring stations' text
-const LABEL_EDGE = 8; // clear space between an end station's text and the svg edge
+const LABEL_EDGE = 6; // clear space between an end station's text and the svg edge
 const R = 6; // station dot radius
 const R_HIT = 14; // invisible station click/tap target
 
 const ROW_Y = 32;
 const CAPTION_Y = ROW_Y - 20; // "start"/"target"
 const LABEL_Y = ROW_Y + 26; // version number
-const TAG_Y = LABEL_Y + 14; // "switch to <channel>" note, interchange stations only
+const TAG_Y = LABEL_Y + 14; // "⇄ <channel>" switch note, interchange stations only
 const MAP_HEIGHT = TAG_Y + 6;
 
 type RiskState = 'always' | 'conditional' | 'clean';
@@ -48,13 +48,8 @@ function handleActivateKey(e: KeyboardEvent, activate: () => void) {
 }
 
 /** How far a station's label and switch tag reach left and right of its dot. */
-function stationReach(version: Version, tag: string | undefined, isStart: boolean): { left: number; right: number } {
-  const half = (version.length * LABEL_CHAR_PX) / 2;
-  if (tag === undefined) return { left: half, right: half };
-  const tagWidth = tag.length * TAG_CHAR_PX;
-  // The start station's tag is left-aligned at -R (see the render below).
-  if (isStart) return { left: Math.max(half, R), right: Math.max(half, tagWidth - R) };
-  return { left: Math.max(half, tagWidth / 2), right: Math.max(half, tagWidth / 2) };
+function stationReach(version: Version, tag: string | undefined): number {
+  return Math.max(version.length * LABEL_CHAR_PX, (tag?.length ?? 0) * TAG_CHAR_PX) / 2;
 }
 
 const RISK_GLYPH: Record<RiskState, string> = { always: '▲', conditional: '◆', clean: '✓' };
@@ -82,7 +77,7 @@ const RISK_WORD: Record<RiskState, string> = { always: 'always risk', conditiona
  * given hop needs a switch -- one source of truth (design/commands.ts).
  *
  * The interchange marker is made self-explanatory at the station itself
- * (an inline "⇄ switch to <channel>" tag naming the real destination
+ * (an inline "⇄ <channel>" tag naming the real destination
  * channel, plus an aria-label saying the same in words) rather than relying
  * on a legend entry the user has to go find -- and the legend only lists
  * the interchange symbol at all when at least one ring is actually on
@@ -117,15 +112,12 @@ export function UpgradeMap({
   const n = versions.length;
   const tags = versions.map((_, i) => {
     const command = commands[i];
-    return command?.channelSwitch ? `⇄ switch to ${command.channelSwitchTo}` : undefined;
+    return command?.channelSwitch ? `⇄ ${command.channelSwitchTo}` : undefined;
   });
-  const reach = versions.map((version, i) => stationReach(version, tags[i], i === 0));
-  const gap = Math.max(
-    STATION_GAP,
-    ...reach.slice(1).map((next, i) => Math.ceil((reach[i]?.right ?? 0) + LABEL_GAP + next.left)),
-  );
-  const marginLeft = Math.max(MARGIN_X, Math.ceil((reach[0]?.left ?? 0) + LABEL_EDGE));
-  const marginRight = Math.max(MARGIN_X, Math.ceil((reach[n - 1]?.right ?? 0) + LABEL_EDGE));
+  const reach = versions.map((version, i) => stationReach(version, tags[i]));
+  const gap = Math.max(STATION_GAP, ...reach.slice(1).map((next, i) => Math.ceil((reach[i] ?? 0) + LABEL_GAP + next)));
+  const marginLeft = Math.max(MARGIN_X, Math.ceil((reach[0] ?? 0) + LABEL_EDGE));
+  const marginRight = Math.max(MARGIN_X, Math.ceil((reach[n - 1] ?? 0) + LABEL_EDGE));
   const stationX = (i: number) => marginLeft + gap * i;
   const width = marginLeft + gap * Math.max(n - 1, 0) + marginRight;
   const minors = versions.map((v) => parseVersion(v).minor);
@@ -242,16 +234,8 @@ export function UpgradeMap({
                   {version}
                 </text>
 
-                {/* Left-aligned on the first station: centred, the tag would
-                    run past the SVG's left edge and be clipped. */}
                 {isInterchange && (
-                  <text
-                    className="interchange-tag"
-                    x={isStart ? -R : 0}
-                    y={TAG_Y - ROW_Y}
-                    textAnchor={isStart ? 'start' : 'middle'}
-                    aria-hidden="true"
-                  >
+                  <text className="interchange-tag" y={TAG_Y - ROW_Y} textAnchor="middle" aria-hidden="true">
                     {tags[i]}
                   </text>
                 )}

@@ -76,7 +76,7 @@ describe('UpgradeMap — interchange ring placement (plan.md §6 "Where the swit
     }
 
     // The inline tag text renders once, on the correct station only.
-    expect(screen.getByText('⇄ switch to eus-4.22')).toBeInTheDocument();
+    expect(screen.getByText('⇄ eus-4.22')).toBeInTheDocument();
   });
 
   it('emits no interchange ring at all when no command carries a channelSwitch (the stable-4.20 regression)', () => {
@@ -108,7 +108,7 @@ describe('UpgradeMap — interchange ring placement (plan.md §6 "Where the swit
       />,
     );
 
-    expect(screen.queryByText(/⇄ switch to/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^⇄ (?!ring)/)).not.toBeInTheDocument();
     expect(screen.queryByText('⇄ ring = channel switch required')).not.toBeInTheDocument();
     for (const version of ['4.18.2', '4.18.50', '4.19.40', '4.20.32']) {
       const station = screen.getByRole('button', { name: new RegExp(`^Station ${version.replace(/\./g, '\\.')},`) });
