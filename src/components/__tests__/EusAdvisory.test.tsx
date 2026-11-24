@@ -1,5 +1,5 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loaderFor } from '../../engine/__tests__/routeFixtures';
 import { stitchAndFindPath } from '../../engine/stitch';
 import type { PathHop } from '../../engine/types';
@@ -74,5 +74,26 @@ describe('a leg that crosses a hop from a fast or candidate channel', () => {
     expect(second.querySelector('h3')?.textContent).toBe('Leg 2: 4.18 → 4.20 (Control Plane Only update not available on this route)');
     expect(second).toHaveTextContent(/the update from 4\.19\.55 to 4\.20\.46 comes from fast-4\.20/);
     expect(second.textContent).not.toMatch(/"paused"/);
+  });
+});
+
+describe('copying a leg\'s commands', () => {
+  it('never puts the pause and the unpause in one copy, since pasting both would unpause before any update', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    try {
+      render(<EusAdvisory hops={route('4.16.33', '4.17.59', '4.18.59', '4.19.55', '4.20.46')} />);
+
+      const buttons = screen.getAllByRole('button', { name: /^Copy/ });
+      for (const button of buttons) fireEvent.click(button);
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(buttons.length));
+
+      const copied = writeText.mock.calls.map(([text]: unknown[]) => String(text));
+      expect(copied.filter((text) => text.includes('"paused":true'))).toHaveLength(2);
+      expect(copied.filter((text) => text.includes('"paused":false'))).toHaveLength(2);
+      expect(copied.filter((text) => text.includes('"paused":true') && text.includes('"paused":false'))).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
