@@ -1,5 +1,6 @@
 import type { Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
+import { NO_MARKS, type RiskId } from './risks';
 import { buildRoutingModel, forEachEdge, reachBackward, reachForward, type RoutingModel } from './routeSearch';
 import type { Path } from './types';
 import { compareVersions } from './version';
@@ -17,20 +18,28 @@ export type RiskPolicy = 'recommended' | 'avoidConditional';
 /**
  * Operator-pinned constraints on one route search. `stops` are versions the
  * route must pass through, in order, strictly between start and target.
+ *
+ * `notApplicable` holds conditional advisories the operator checked against their
+ * cluster and found not to match. Their conditional occurrences stop counting
+ * toward `Route.conditional`, so the `avoidConditional` ranking and the risk
+ * comparison ignore them; an `Always` occurrence of the same advisory still
+ * counts. The recommended ranking reads the published risk weight and never
+ * changes with a mark, and every hop still carries every risk.
  */
 export interface RouteConstraints {
   readonly stops: readonly Version[];
   readonly riskPolicy: RiskPolicy;
+  readonly notApplicable: ReadonlySet<RiskId>;
 }
 
-export const NO_CONSTRAINTS: RouteConstraints = { stops: [], riskPolicy: 'recommended' };
+export const NO_CONSTRAINTS: RouteConstraints = { stops: [], riskPolicy: 'recommended', notApplicable: NO_MARKS };
 
 /**
  * The lower-risk counterpart to the recommended route, computed with
  * `avoidConditional` under the same stops. `route` is undefined when no
  * route with fewer risk occurrences exists. `conditionalFree` is true when
  * `route` (or the recommended route itself, if it is already the lowest)
- * carries no conditional risk on any hop.
+ * carries no conditional risk on any hop, besides those marked not applicable.
  */
 export interface RiskComparison {
   readonly route: Path | undefined;

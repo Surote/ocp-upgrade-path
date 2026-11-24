@@ -4,15 +4,23 @@ import type { GraphClient } from '../graph/client';
 import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
-import { parseUrlState, resolveUrlArch, resolveUrlRiskPolicy, syncUrlState } from '../url/urlState';
+import {
+  droppedMarksNotice,
+  parseUrlState,
+  resolveUrlArch,
+  resolveUrlNotApplicable,
+  resolveUrlRiskPolicy,
+  syncUrlState,
+} from '../url/urlState';
 import type { RiskPolicy, RouteConstraints, StopOption } from '../engine/routeConstraints';
-import { checkStops } from './stopFields';
+import { checkStops, stopReleases } from './stopFields';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
+import { conditionalRisks, type RiskId } from '../engine/risks';
 import { useLookahead } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
-import { buildStartOptions, buildTargetOptions, type TargetOption, versionStream } from './targetOptions';
+import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
 import { useGraphForSelection } from './useGraphForSelection';
 import { usePathSearch } from './usePathSearch';
@@ -78,6 +86,15 @@ export interface RouteConstraintsViewModel {
   readonly onRiskPolicyChange: (policy: RiskPolicy) => void;
 }
 
+/**
+ * The conditional risks the operator marked as not applying to their
+ * cluster, shared by every risk card that offers the mark.
+ */
+export interface RiskApplicabilityViewModel {
+  readonly notApplicable: ReadonlySet<RiskId>;
+  readonly onChange: (id: RiskId, notApplicable: boolean) => void;
+}
+
 /** Why no route is searched although start and target are set. */
 export type RouteHold = 'checkingStops' | 'invalidStops';
 
@@ -92,6 +109,7 @@ export interface PlannerViewModel {
   readonly start: StartFieldViewModel;
   readonly target: TargetFieldViewModel;
   readonly constraints: RouteConstraintsViewModel;
+  readonly riskApplicability: RiskApplicabilityViewModel;
   /** The stops the route search was asked to honor, for marking on the map. */
   readonly pinnedStops: readonly Version[];
   readonly routeHold?: RouteHold;
@@ -133,6 +151,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const initialUrl = useMemo(() => parseUrlState(window.location.search), []);
   const initialArch = useMemo(() => resolveUrlArch(initialUrl.arch, DEFAULT_ARCH), [initialUrl.arch]);
   const initialRiskPolicy = useMemo(() => resolveUrlRiskPolicy(initialUrl.avoid), [initialUrl.avoid]);
+  const initialMarks = useMemo(() => resolveUrlNotApplicable(initialUrl.notApplicable), [initialUrl.notApplicable]);
 
   const [channel, setChannelState] = useState<string | undefined>(initialUrl.channel);
   const [arch, setArchState] = useState<Arch>(initialArch.arch);
@@ -140,6 +159,10 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const [targetRaw, setTargetRaw] = useState(initialUrl.target ?? '');
   const [stopsRaw, setStopsRaw] = useState<readonly string[]>(initialUrl.stops ?? []);
   const [riskPolicy, setRiskPolicy] = useState<RiskPolicy>(initialRiskPolicy.riskPolicy);
+  // The link's marks wait here until a loaded channel vouches for each one.
+  const [linkedMarks, setLinkedMarks] = useState(initialMarks.ids.length > 0 ? initialMarks.ids : undefined);
+  const [notApplicable, setNotApplicable] = useState<ReadonlySet<RiskId>>(() => new Set());
+  const [marksNotice, setMarksNotice] = useState<string>();
 
   const channelCatalog = useChannelCatalog(client);
   const graphState = useGraphForSelection(client, channel, arch);
@@ -187,6 +210,30 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     return undefined;
   }, [graph, targetRaw, lookaheadSegments]);
 
+  const markable = useMemo(
+    () => conditionalRisks(graph ? [graph, ...lookaheadSegments.map((s) => s.graph)] : []),
+    [graph, lookaheadSegments],
+  );
+  // A linked mark applies as soon as a loaded graph carries its advisory, so a
+  // slow look-ahead never holds one on an anchor route; only dropping an
+  // unmatched one waits for every graph.
+  if (linkedMarks && graph) {
+    const ids = linkedMarks.filter((id) => markable.has(id));
+    const unmatched = linkedMarks.filter((id) => !markable.has(id));
+    const settled = !lookaheadLoading;
+    if (ids.length > 0) setNotApplicable((prev) => new Set([...prev, ...ids]));
+    if (settled) setMarksNotice(droppedMarksNotice(unmatched));
+    if (ids.length > 0 || settled) setLinkedMarks(settled || unmatched.length === 0 ? undefined : unmatched);
+  }
+  const markNotApplicable = useCallback((id: RiskId, marked: boolean) => {
+    setNotApplicable((prev) => {
+      const next = new Set(prev);
+      if (marked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
   const startOptions = useMemo(() => (graph ? buildStartOptions(graph) : []), [graph]);
   const targetOptions = useMemo(
     () => (graph && resolvedStart ? buildTargetOptions(graph, resolvedStart, lookaheadSegments) : []),
@@ -197,19 +244,27 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // start or older gets the notice below and no route alongside it.
   const targetOption = targetOptions.find((o) => o.version === resolvedTarget);
 
-  const stopSegments = useMemo(
-    () => (graph && channel ? [{ channel, graph, classFallback: false as const }, ...lookaheadSegments] : NO_SEGMENTS),
-    [graph, channel, lookaheadSegments],
+  const anchorSegment = useMemo(
+    () => (graph && channel ? { channel, graph, classFallback: false as const } : undefined),
+    [graph, channel],
   );
+  const allSegments = useMemo(
+    () => (anchorSegment ? [anchorSegment, ...lookaheadSegments] : NO_SEGMENTS),
+    [anchorSegment, lookaheadSegments],
+  );
+  // The route search reads look-ahead only for a target outside the anchor
+  // (engine/stitch.ts), so stops on an anchor target are judged on the anchor
+  // alone, without waiting for discovery.
+  const targetInAnchor = graph !== undefined && targetOption !== undefined && resolveVersion(graph, targetOption.version) !== undefined;
   const stopRows = useMemo(
     () =>
       checkStops(stopsRaw, {
-        segments: stopSegments,
+        segments: targetInAnchor && anchorSegment ? [anchorSegment] : allSegments,
         start: resolvedStart,
         target: targetOption?.version,
-        discovered: !lookaheadLoading,
+        discovered: targetInAnchor || !lookaheadLoading,
       }),
-    [stopsRaw, stopSegments, resolvedStart, targetOption, lookaheadLoading],
+    [stopsRaw, targetInAnchor, anchorSegment, allSegments, resolvedStart, targetOption, lookaheadLoading],
   );
   const routeHold: RouteHold | undefined = stopRows.some((r) => r.check.kind === 'invalid')
     ? 'invalidStops'
@@ -220,13 +275,25 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     () => stopRows.flatMap((r) => (r.check.kind === 'valid' ? [r.check.version] : [])),
     [stopRows],
   );
-  const routeConstraints = useMemo<RouteConstraints>(() => ({ stops: pinnedStops, riskPolicy }), [pinnedStops, riskPolicy]);
+  const routeConstraints = useMemo<RouteConstraints>(
+    () => ({ stops: pinnedStops, riskPolicy, notApplicable }),
+    [pinnedStops, riskPolicy, notApplicable],
+  );
   // Selection and stop checks read `targetOptions`; only the labels follow the
   // constraints, since the stops are themselves checked against the target.
+  // Labels use every stop that names a release, not just those the current
+  // target honors, so each option names the route it gets once chosen.
+  const labelConstraints = useMemo<RouteConstraints>(
+    () => ({ stops: stopReleases(stopsRaw, allSegments), riskPolicy, notApplicable }),
+    [stopsRaw, allSegments, riskPolicy, notApplicable],
+  );
   const shownTargetOptions = useMemo(() => {
-    const constrained = routeConstraints.stops.length > 0 || routeConstraints.riskPolicy !== 'recommended';
-    return graph && resolvedStart && constrained ? buildTargetOptions(graph, resolvedStart, lookaheadSegments, routeConstraints) : targetOptions;
-  }, [graph, resolvedStart, lookaheadSegments, routeConstraints, targetOptions]);
+    const constrained = labelConstraints.stops.length > 0 || labelConstraints.riskPolicy !== 'recommended';
+    return graph && resolvedStart && constrained ? buildTargetOptions(graph, resolvedStart, lookaheadSegments, labelConstraints) : targetOptions;
+  }, [graph, resolvedStart, lookaheadSegments, labelConstraints, targetOptions]);
+
+  const offered = <T extends { readonly version: Version }>(options: readonly T[], selected: string): readonly T[] =>
+    channel && resolvedStart ? offeredOptions(options, { channel, start: resolvedStart, selected }) : options;
 
   const pathResult = usePathSearch(client, {
     channel,
@@ -267,6 +334,8 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     const list: string[] = [];
     if (initialArch.notice) list.push(initialArch.notice);
     if (initialRiskPolicy.notice) list.push(initialRiskPolicy.notice);
+    if (initialMarks.notice) list.push(initialMarks.notice);
+    if (marksNotice) list.push(marksNotice);
     if (graph && startRaw && !resolvedStart) {
       list.push(`Start version "${startRaw}" from the link was not found in channel "${channel}" -- please reselect.`);
     }
@@ -289,6 +358,8 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   }, [
     initialArch.notice,
     initialRiskPolicy.notice,
+    initialMarks.notice,
+    marksNotice,
     graph,
     startRaw,
     resolvedStart,
@@ -301,8 +372,9 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   // --- Permalink sync: replaceState only, never a new history entry (Q21) ---
   useEffect(() => {
-    syncUrlState({ channel, arch, start: startRaw, target: targetRaw, stops: stopsRaw, riskPolicy });
-  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy]);
+    const marks = [...new Set([...(linkedMarks ?? []), ...notApplicable])];
+    syncUrlState({ channel, arch, start: startRaw, target: targetRaw, stops: stopsRaw, riskPolicy, notApplicable: marks });
+  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy, linkedMarks, notApplicable]);
 
   return {
     channel: {
@@ -328,7 +400,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     },
     target: {
       value: targetRaw,
-      groups: groupByStream(shownTargetOptions, (o) => versionStream(o.version)),
+      groups: groupByStream(offered(shownTargetOptions, targetRaw), (o) => versionStream(o.version)),
       lookaheadLoading,
       disabled: !resolvedStart,
       onChange: setTarget,
@@ -336,7 +408,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     constraints: {
       stops: stopRows.map((row, i) => ({
         value: row.raw,
-        groups: groupByStream(row.options, (o) => versionStream(o.version)),
+        groups: groupByStream(offered(row.options, row.raw), (o) => versionStream(o.version)),
         error: row.check.kind === 'invalid' ? row.check.message : undefined,
         onChange: (version: string) => setStop(i, version),
         onRemove: () => removeStop(i),
@@ -346,6 +418,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
       riskPolicy,
       onRiskPolicyChange: setRiskPolicy,
     },
+    riskApplicability: { notApplicable, onChange: markNotApplicable },
     pinnedStops,
     routeHold,
     freshness:

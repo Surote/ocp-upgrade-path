@@ -103,7 +103,7 @@ describe('App', () => {
     await waitFor(() => expect(within(targetSelect).getByRole('option', { name: /5\.0\.2/ })).toBeInTheDocument());
 
     expect(renderedGroups(targetSelect)).toEqual([
-      ['5.0', ['5.0.2 · via fast-5.0 (class change)', '5.0.0 · via fast-5.0 (class change)', '5.0.0-rc.8 · via fast-5.0 (class change) (not reachable)']],
+      ['5.0', ['5.0.2 · via fast-5.0 (class change)', '5.0.0 · via fast-5.0 (class change)']],
       ['4.22', ['4.22.11 (not reachable)', '4.22.10', '4.22.3']],
     ]);
     expect(renderedGroups(screen.getByLabelText('Start version'))).toEqual([
@@ -148,5 +148,31 @@ describe('App', () => {
     expect(screen.queryByRole('heading', { name: /^Hop 1 of 2/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /^Station / })).not.toBeInTheDocument();
     expect(screen.getByText(/Select a station or hop on the map/)).toBeInTheDocument();
+  });
+});
+
+describe('Refresh', () => {
+  it('withdraws the route while the refetch is in flight and offers no second Refresh to abort it', async () => {
+    const demo = rawGraphJson(['4.18.2', '4.19.40', '4.20.32'], [[0, 1], [1, 2]], 'demo-4.21');
+    const held: (() => void)[] = [];
+    let hold = false;
+    const fetchImpl = fakeFetch(async (url) => {
+      const isDemo = new URL(url).searchParams.get('channel') === 'demo-4.21';
+      if (isDemo && hold) await new Promise<void>((resolve) => held.push(resolve));
+      return fakeJsonResponse(isDemo ? demo : { version: 1, nodes: [], edges: [], conditionalEdges: [] });
+    });
+    window.history.pushState({}, '', '/?channel=demo-4.21&arch=amd64&start=4.18.2&target=4.20.32');
+    render(<App graphClient={new GraphClient({ storage: new FakeStorage(), fetchImpl })} />);
+    await screen.findByRole('list', { name: 'Upgrade path stops' });
+
+    hold = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Upgrade path stops' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
+    expect(screen.getByText('Loading versions…')).toBeInTheDocument();
+
+    hold = false;
+    for (const resolve of held) resolve();
+    expect(await screen.findByRole('list', { name: 'Upgrade path stops' })).toHaveTextContent('4.19.40');
   });
 });

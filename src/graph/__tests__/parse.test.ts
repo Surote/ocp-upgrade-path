@@ -295,6 +295,22 @@ describe('trimmed-shape round-trip', () => {
     expect(reparsed.value).toEqual(parsed.value);
   });
 
+  it('reads a cached graph stored in Cincinnati response order as the same graph a fresh parse yields', () => {
+    const parsed = parseRawGraph(loadFixture('stable-4.21.json'), { channel: 'stable-4.21', arch: 'amd64' });
+    if (!parsed.ok) throw parsed.error;
+    const stored = toStorable(parsed.value);
+    const last = stored.nodes.length - 1;
+    const reversed = {
+      ...stored,
+      nodes: [...stored.nodes].reverse(),
+      edges: [...stored.edges].reverse().map(([from, to]) => [last - from, last - to]),
+    };
+
+    const reparsed = parseTrimmedGraph(JSON.parse(JSON.stringify(reversed)) as unknown);
+
+    expect(reparsed.ok && reparsed.value).toEqual(parsed.value);
+  });
+
   it('parseTrimmedGraph rejects corrupt cached data instead of crashing', () => {
     const result = parseTrimmedGraph({ nodes: [{ version: '1.0.0' }], edges: [], conditionalEdges: [] });
     expect(result.ok).toBe(false);

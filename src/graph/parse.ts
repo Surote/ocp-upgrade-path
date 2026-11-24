@@ -130,21 +130,11 @@ export function parseRawGraph(
     }
   }
 
-  // Cincinnati lists nodes in a different order on every response, and route
-  // ties break by list order, so the same permalink could plan another route
-  // after a refetch. Nodes and edges are put in one canonical order here.
-  const order = raw.nodes.map((_, i) => i).sort((a, b) => byString(raw.nodes[a]?.version, raw.nodes[b]?.version));
-  const position = new Array<number>(nodeCount);
-  order.forEach((original, i) => {
-    position[original] = i;
-  });
-  const sortedRaw = order.map((i) => raw.nodes[i] as (typeof raw.nodes)[number]);
-
   const { channelNames, perNodeChannels } = internChannels(
-    sortedRaw.map((n) => n.metadata?.[CHANNELS_METADATA_KEY]),
+    raw.nodes.map((n) => n.metadata?.[CHANNELS_METADATA_KEY]),
   );
 
-  const nodes: GraphNode[] = sortedRaw.map((n, i) => ({
+  const nodes: GraphNode[] = raw.nodes.map((n, i) => ({
     version: mintVersion(n.version),
     payload: n.payload,
     errataUrl: n.metadata?.url,
@@ -152,7 +142,7 @@ export function parseRawGraph(
   }));
 
   const edges: Array<readonly [NodeIndex, NodeIndex]> = raw.edges.map(
-    ([from, to]) => [mintNodeIndex(position[from] as number), mintNodeIndex(position[to] as number)] as const,
+    ([from, to]) => [mintNodeIndex(from), mintNodeIndex(to)] as const,
   );
 
   const conditionalEdges: ConditionalEdgeGroup[] = raw.conditionalEdges.map(mapConditionalEdgeGroup);
@@ -181,8 +171,32 @@ export function parseRawGraph(
     }
   }
 
-  edges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  return ok({ nodes, edges, conditionalEdges, channelNames });
+  return ok(canonicalize({ nodes, edges, conditionalEdges, channelNames }));
+}
+
+/**
+ * Cincinnati lists nodes in a different order on every response, and route
+ * ties break by list order, so the same permalink could plan another route
+ * after a refetch or a cache read. Both parsers end here, so every graph has
+ * one order: nodes by version string, channel names sorted, edges by index.
+ */
+function canonicalize(graph: Graph): Graph {
+  const order = graph.nodes.map((_, i) => i).sort((a, b) => byString(graph.nodes[a]?.version, graph.nodes[b]?.version));
+  const position = new Array<number>(order.length);
+  order.forEach((original, i) => {
+    position[original] = i;
+  });
+  const channelNames = [...graph.channelNames].sort(byString);
+  const channelId = new Map(channelNames.map((name, i) => [name, i] as const));
+
+  const nodes = order.map((i) => {
+    const node = graph.nodes[i] as GraphNode;
+    return { ...node, channels: node.channels.map((c) => channelId.get(graph.channelNames[c] as string) as number) };
+  });
+  const edges = graph.edges
+    .map(([from, to]) => [mintNodeIndex(position[from] as number), mintNodeIndex(position[to] as number)] as const)
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  return { ...graph, nodes, edges, channelNames };
 }
 
 function byString(a: string | undefined, b: string | undefined): number {
@@ -270,5 +284,5 @@ export function parseTrimmedGraph(input: unknown): Result<Graph, GraphError> {
     })),
   }));
 
-  return ok({ nodes, edges, conditionalEdges, channelNames: raw.channelNames });
+  return ok(canonicalize({ nodes, edges, conditionalEdges, channelNames: raw.channelNames }));
 }

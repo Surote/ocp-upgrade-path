@@ -1,5 +1,6 @@
 import type { HopCommand } from '../design/commands';
 import type { PathHop } from '../engine/types';
+import type { RiskApplicabilityViewModel } from '../planner/usePlanner';
 import { CopyButton } from './CopyButton';
 import { RiskCardList } from './RiskCardList';
 
@@ -14,11 +15,13 @@ export function HopDetail({
   command,
   index,
   total,
+  applicability,
 }: {
   readonly hop: PathHop;
   readonly command: HopCommand | undefined;
   readonly index: number;
   readonly total: number;
+  readonly applicability: RiskApplicabilityViewModel;
 }) {
   return (
     <section className="panel" aria-labelledby="hop-detail-heading">
@@ -58,7 +61,7 @@ export function HopDetail({
       )}
 
       <h3>Risks entering {hop.to}</h3>
-      <RiskCardList risks={hop.risks} cleanLabel="No known risks on this hop." />
+      <RiskCardList risks={hop.risks} cleanLabel="No known risks on this hop." applicability={applicability} />
     </section>
   );
 }

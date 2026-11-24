@@ -2,7 +2,8 @@ import type { ChannelSegment } from '../engine/lookahead';
 import { shortestPathsFrom } from '../engine/pathfinder';
 import { NO_CONSTRAINTS, type RouteConstraints } from '../engine/routeConstraints';
 import { routeAcrossSegments } from '../engine/stitch';
-import { compareVersions, formatStream, streamOf } from '../engine/version';
+import { parseChannelName } from '../design/channels';
+import { compareVersions, formatStream, parseVersion, streamOf } from '../engine/version';
 import type { Graph, Version } from '../graph/types';
 
 /** Newest-first version list for the start dropdown (plan.md §6 / Q7 -- "sorted with compareVersions, newest first"). */
@@ -68,6 +69,27 @@ export function buildTargetOptions(
   }
 
   return [...options.values()].sort((a, b) => compareVersions(b.version, a.version));
+}
+
+/**
+ * Prereleases are offered as targets and stops only from a candidate channel
+ * or a prerelease start. Discovery fetches every attested channel, so a
+ * stable or eus anchor would otherwise list dozens of ec and rc builds that
+ * only candidate channels reach. This narrows what is offered, not routing:
+ * a route may still pass through a prerelease. The selected version stays
+ * listed, so a permalink to a prerelease restores with its option shown.
+ */
+export function offeredOptions<T extends { readonly version: Version }>(
+  options: readonly T[],
+  context: { readonly channel: string; readonly start: Version; readonly selected: string },
+): readonly T[] {
+  const { channel, start, selected } = context;
+  if (parseChannelName(channel)?.cls === 'candidate' || isPrerelease(start)) return options;
+  return options.filter((o) => !isPrerelease(o.version) || o.version === selected);
+}
+
+function isPrerelease(version: Version): boolean {
+  return parseVersion(version).prerelease.length > 0;
 }
 
 export function versionStream(version: Version): string {

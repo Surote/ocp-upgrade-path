@@ -4,7 +4,7 @@ import type { ChannelSegment } from '../lookahead';
 import { buildStopOptions, type RouteConstraints } from '../routeConstraints';
 import { stitchAndFindPath } from '../stitch';
 import type { GraphLoader } from '../types';
-import { graph, loaderFor, type RiskSpec, v } from './routeFixtures';
+import { fixtureRiskId, graph, loaderFor, type RiskSpec, v } from './routeFixtures';
 
 function versionsOf(result: Awaited<ReturnType<typeof stitchAndFindPath>>): readonly Version[] {
   if (!result.ok) throw new Error(`no route: ${JSON.stringify(result.error)}`);
@@ -34,8 +34,12 @@ function seg(channel: string, g: Graph, requestedClass?: string): ChannelSegment
     : { channel, graph: g, classFallback: false };
 }
 
-const stops = (...versions: string[]): RouteConstraints => ({ stops: versions.map(v), riskPolicy: 'recommended' });
-const avoid = (...versions: string[]): RouteConstraints => ({ stops: versions.map(v), riskPolicy: 'avoidConditional' });
+const stops = (...versions: string[]): RouteConstraints => ({ stops: versions.map(v), riskPolicy: 'recommended', notApplicable: new Set() });
+const avoid = (...versions: string[]): RouteConstraints => ({ stops: versions.map(v), riskPolicy: 'avoidConditional', notApplicable: new Set() });
+const marked = (constraints: RouteConstraints, ...names: string[]): RouteConstraints => ({
+  ...constraints,
+  notApplicable: new Set(names.map(fixtureRiskId)),
+});
 
 describe('stops', () => {
   const single = [
@@ -62,11 +66,11 @@ describe('stops', () => {
     ]);
   });
 
-  it('offers only alternates that pass every stop', async () => {
+  it('offers no alternate that skips a stop', async () => {
     const result = await route(single, '4.18.0', '4.20.0', stops('4.19.10'));
     if (!result.ok) throw new Error(result.error.kind);
     expect(result.value.primary.versions).toContain(v('4.19.10'));
-    for (const alternate of result.value.alternates) expect(alternate.versions).toContain(v('4.19.10'));
+    expect(result.value.alternates).toEqual({ kind: 'notComputed', reason: 'constrained' });
   });
 
   it('names the first stop that cannot be honored', async () => {
@@ -207,7 +211,7 @@ describe('risk policy', () => {
     const params = { targetChannel: 'stable-4.22', arch: 'amd64', start: v('4.22.20'), target: v('5.0.3') } as const;
 
     for (const riskPolicy of ['recommended', 'avoidConditional'] as const) {
-      const result = await stitchAndFindPath(loader, { ...params, constraints: { stops: [], riskPolicy } });
+      const result = await stitchAndFindPath(loader, { ...params, constraints: { stops: [], riskPolicy, notApplicable: new Set() } });
       if (!result.ok) throw new Error(result.error.kind);
       expect(result.value.primary.hops.map((h) => [h.to, h.sourceChannel])).toEqual([
         [v('5.0.0'), 'fast-5.0'],
@@ -244,6 +248,76 @@ describe('risk policy', () => {
     expect(result.value.primary.versions).toContain(v('4.18.5'));
     expect(result.value.riskComparison?.route).toBeUndefined();
     expect(result.value.riskComparison?.conditionalFree).toBe(false);
+  });
+});
+
+describe('risks marked not applicable', () => {
+  const risky = (from: string, to: string, name: string, always = false): RiskSpec => ({ from, to, name, always });
+  // One risky hop straight to 4.20.0, or two clean hops through 4.19.0.
+  const shortcut = (...risks: RiskSpec[]) => [
+    seg(
+      'stable-4.20',
+      graph(
+        [
+          ['4.18.0', '4.19.0'],
+          ['4.19.0', '4.20.0'],
+        ],
+        { risks },
+      ),
+    ),
+  ];
+  const direct = [v('4.18.0'), v('4.20.0')];
+  const around = [v('4.18.0'), v('4.19.0'), v('4.20.0')];
+
+  it('avoidConditional stops avoiding a conditional risk the operator marked', async () => {
+    const segments = shortcut(risky('4.18.0', '4.20.0', 'VSphereRisk'));
+    expect(versionsOf(await route(segments, '4.18.0', '4.20.0', avoid()))).toEqual(around);
+    expect(versionsOf(await route(segments, '4.18.0', '4.20.0', marked(avoid(), 'VSphereRisk')))).toEqual(direct);
+  });
+
+  it('still counts an Always occurrence of a marked name', async () => {
+    // Marking VSphereRisk waives its conditional occurrences only; its Always one on the shortcut still outranks Other.
+    const segments = shortcut(risky('4.18.0', '4.20.0', 'VSphereRisk', true), risky('4.18.0', '4.19.0', 'Other'), risky('4.19.0', '4.20.0', 'VSphereRisk'));
+    expect(versionsOf(await route(segments, '4.18.0', '4.20.0', marked(avoid(), 'VSphereRisk')))).toEqual(around);
+  });
+
+  it('prefers a genuinely clean route over an equal-length one carrying a marked risk', async () => {
+    // 4.19.1 wins the patch tie-break, but its hop carries the marked risk; the mark is the operator's assertion, not proof.
+    const segments = [
+      seg(
+        'stable-4.20',
+        graph(
+          [
+            ['4.18.0', '4.19.0'],
+            ['4.19.0', '4.20.0'],
+            ['4.18.0', '4.19.1'],
+            ['4.19.1', '4.20.0'],
+          ],
+          { risks: [risky('4.18.0', '4.19.1', 'VSphereRisk')] },
+        ),
+      ),
+    ];
+    expect(versionsOf(await route(segments, '4.18.0', '4.20.0', marked(avoid(), 'VSphereRisk')))).toEqual([v('4.18.0'), v('4.19.0'), v('4.20.0')]);
+  });
+
+  it('drops the lower-risk route once the risk it dodges is marked, and keeps the recommended route', async () => {
+    const segments = shortcut(risky('4.18.0', '4.20.0', 'VSphereRisk'));
+    const unmarked = await route(segments, '4.18.0', '4.20.0', stops());
+    const marking = await route(segments, '4.18.0', '4.20.0', marked(stops(), 'VSphereRisk'));
+    if (!unmarked.ok || !marking.ok) throw new Error('no route');
+    expect(unmarked.value.riskComparison).toEqual({ route: expect.objectContaining({ versions: around }), conditionalFree: true });
+    expect(marking.value.primary.versions).toEqual(direct);
+    expect(marking.value.primary.riskSummary.map((r) => r.name)).toEqual(['VSphereRisk']);
+    expect(marking.value.riskComparison).toEqual({ route: undefined, conditionalFree: true });
+  });
+
+  it('offers a lower-risk route once the risks it carries are marked', async () => {
+    const segments = shortcut(risky('4.18.0', '4.20.0', 'Other'), risky('4.18.0', '4.19.0', 'VSphereRisk'), risky('4.19.0', '4.20.0', 'VSphereRisk'));
+    const unmarked = await route(segments, '4.18.0', '4.20.0', stops());
+    const marking = await route(segments, '4.18.0', '4.20.0', marked(stops(), 'VSphereRisk'));
+    if (!unmarked.ok || !marking.ok) throw new Error('no route');
+    expect(unmarked.value.riskComparison).toEqual({ route: undefined, conditionalFree: false });
+    expect(marking.value.riskComparison).toEqual({ route: expect.objectContaining({ versions: around }), conditionalFree: true });
   });
 });
 

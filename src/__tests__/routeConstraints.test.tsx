@@ -156,7 +156,7 @@ describe('route stops', () => {
     await waitFor(() =>
       expect(stitchAndFindPath).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ constraints: { stops: ['4.19.41', '4.19.40'], riskPolicy: 'recommended' } }),
+        expect.objectContaining({ constraints: { stops: ['4.19.41', '4.19.40'], riskPolicy: 'recommended', notApplicable: new Set() } }),
       ),
     );
 
@@ -177,10 +177,18 @@ describe('route stops', () => {
     expect(screen.getByLabelText('Avoid conditional risks')).toBeChecked();
     expect(stitchAndFindPath).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ constraints: { stops: ['4.19.41'], riskPolicy: 'avoidConditional' } }),
+      expect.objectContaining({ constraints: { stops: ['4.19.41'], riskPolicy: 'avoidConditional', notApplicable: new Set() } }),
     );
     expect(urlParam('stops')).toBe('4.19.41');
     expect(urlParam('avoid')).toBe('conditional');
+  });
+
+  it('says alternates are not computed under a pinned stop or Avoid conditional risks, rather than that none exist', async () => {
+    await renderAt(`${BASE}&avoid=conditional`);
+
+    const panel = screen.getByRole('region', { name: 'Alternate routes' });
+    expect(panel).toHaveTextContent(/not computed/i);
+    expect(panel).not.toHaveTextContent(/only viable/);
   });
 
   it('asks for a target, rather than checking forever, when the target is cleared with stops pinned', async () => {

@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseUrlState, resolveUrlArch, resolveUrlRiskPolicy, serializeUrlState, syncUrlState } from '../urlState';
+import { riskIdOf } from '../../engine/risks';
+import type { Risk } from '../../graph/types';
+import {
+  droppedMarksNotice,
+  parseUrlState,
+  resolveUrlArch,
+  resolveUrlNotApplicable,
+  resolveUrlRiskPolicy,
+  serializeUrlState,
+  syncUrlState,
+} from '../urlState';
 
 describe('parseUrlState', () => {
   it('parses all four params', () => {
@@ -151,5 +161,53 @@ describe('stops and avoid', () => {
     const resolved = resolveUrlRiskPolicy('everything');
     expect(resolved.riskPolicy).toBe('recommended');
     expect(resolved.notice).toMatch(/everything/);
+  });
+});
+
+describe('risks marked not applicable', () => {
+  const advisory = (name: string, n = 1): Risk => ({
+    name,
+    url: `https://issues.redhat.com/browse/OCPBUGS-${n}`,
+    message: name,
+    matchingRules: [{ type: 'PromQL', promql: 'up' }],
+  });
+  const vsphere = advisory('VSphereConfigCloudControllerCrash');
+  const aws = advisory('AWSOldBootImages', 2);
+
+  const readBack = (qs: string) => resolveUrlNotApplicable(parseUrlState(qs).notApplicable);
+
+  it('writes each mark as name~url, one na= each, readable, and reads it back', () => {
+    const qs = serializeUrlState({ channel: 'eus-4.18', notApplicable: [riskIdOf(vsphere), riskIdOf(aws)] });
+    expect(qs).toBe(
+      'channel=eus-4.18&na=AWSOldBootImages~https://issues.redhat.com/browse/OCPBUGS-2&na=VSphereConfigCloudControllerCrash~https://issues.redhat.com/browse/OCPBUGS-1',
+    );
+    expect(new URLSearchParams(qs).getAll('na')).toContain('VSphereConfigCloudControllerCrash~https://issues.redhat.com/browse/OCPBUGS-1');
+    expect(readBack(qs)).toEqual({ ids: [riskIdOf(aws), riskIdOf(vsphere)] });
+  });
+
+  it('round-trips a name holding ~, %, a comma and spaces, and a URL holding ~', () => {
+    const odd: Risk = { ...advisory(' A~B %7E, C~ '), url: 'https://example.com/~user/a~b?x=%7E' };
+    const qs = serializeUrlState({ notApplicable: [riskIdOf(odd), riskIdOf(vsphere)] });
+    expect(readBack(qs)).toEqual({ ids: [riskIdOf(odd), riskIdOf(vsphere)] });
+    expect(riskIdOf(odd)).not.toBe(riskIdOf({ ...odd, name: ' A~B %7E, C', url: ' ~https://example.com/~user/a~b?x=%7E' }));
+  });
+
+  it('drops a value with no ~ separator, with a notice naming it, rather than matching it by name', () => {
+    const resolved = resolveUrlNotApplicable(['VSphereConfigCloudControllerCrash', `AWSOldBootImages~${aws.url}`]);
+    expect(resolved.ids).toEqual([riskIdOf(aws)]);
+    expect(resolved.notice).toContain('"VSphereConfigCloudControllerCrash"');
+  });
+
+  it('omits na when nothing is marked', () => {
+    expect(serializeUrlState({ channel: 'eus-4.18', notApplicable: [] })).toBe('channel=eus-4.18');
+    expect(parseUrlState('?na=').notApplicable).toBeUndefined();
+    expect(resolveUrlNotApplicable(undefined)).toEqual({ ids: [] });
+  });
+
+  it('names each dropped mark in the notice', () => {
+    expect(droppedMarksNotice([riskIdOf(vsphere), riskIdOf(aws)])).toContain(
+      `"VSphereConfigCloudControllerCrash~${vsphere.url}", "AWSOldBootImages~${aws.url}"`,
+    );
+    expect(droppedMarksNotice([])).toBeUndefined();
   });
 });

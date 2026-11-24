@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GraphClient } from '../../graph/client';
 import { fakeFetch, fakeJsonResponse } from '../../test-utils/fakeFetch';
@@ -73,6 +73,8 @@ function setUrl(search: string): void {
 }
 
 afterEach(() => {
+  // A hook left mounted keeps syncing its own selection into the shared URL the next test reads.
+  cleanup();
   window.history.pushState({}, '', 'http://localhost:3000/');
 });
 
@@ -398,7 +400,7 @@ describe('usePlanner — every reachable target routes (dropdown and stitcher ag
     );
 
     expect(options.filter((o) => o.reachable).map((o) => o.version)).toEqual(
-      expect.arrayContaining(['5.1.0-ec.1', '5.0.2', '5.0.1', '5.0.0', '4.23.0-ec.1', '4.22.23', '4.22.20']),
+      expect.arrayContaining(['5.0.2', '5.0.1', '5.0.0', '4.22.23', '4.22.20']),
     );
     expect(actual).toEqual(expected);
   });
@@ -524,6 +526,142 @@ describe('usePlanner — a stream not yet published outside candidate', () => {
   });
 });
 
+describe('usePlanner — stops on a target in the selected channel', () => {
+  it('routes a permalink through its stops without waiting for an unrelated look-ahead fetch', async () => {
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(rawGraphJson(['4.22.15', '4.22.18', '4.22.20'], [[0, 1], [1, 2], [0, 2]], 'stable-4.22,fast-5.0'))],
+          ['fast-5.0|amd64', () => new Promise<Response>(() => {})],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&stops=4.22.18');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+    expect(result.current.target.lookaheadLoading).toBe(true);
+    const routed = result.current.result.status === 'success' ? result.current.result.value.primary : undefined;
+    expect(routed?.versions).toEqual(['4.22.15', '4.22.18', '4.22.20']);
+  });
+});
+
+describe('usePlanner — a linked mark on a route in the selected channel', () => {
+  it('applies the mark without waiting for an unrelated look-ahead fetch', async () => {
+    const shortcut = {
+      ...(rawGraphJson(['4.22.15', '4.22.18', '4.22.20'], [[0, 1], [1, 2]], 'stable-4.22,fast-5.0') as object),
+      conditionalEdges: [
+        {
+          edges: [{ from: '4.22.15', to: '4.22.20' }],
+          risks: [{ url: 'https://issues.example/R', name: 'ShortcutRisk', message: 'r', matchingRules: [{ type: 'PromQL', promql: { promql: 'up' } }] }],
+        },
+      ],
+    };
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(shortcut)],
+          ['fast-5.0|amd64', () => new Promise<Response>(() => {})],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~https://issues.example/R');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => {
+      const routed = result.current.result.status === 'success' ? result.current.result.value.primary : undefined;
+      expect(routed?.versions).toEqual(['4.22.15', '4.22.20']);
+    });
+    expect(result.current.target.lookaheadLoading).toBe(true);
+    expect(new URLSearchParams(window.location.search).getAll('na')).toEqual(['ShortcutRisk~https://issues.example/R']);
+  });
+});
+
+describe('usePlanner — a linked mark names one advisory by name and URL', () => {
+  const shortcutRisk = (url: string) => ({ url, name: 'ShortcutRisk', message: 'r', matchingRules: [{ type: 'PromQL', promql: { promql: 'up' } }] });
+  /** 4.22.15 -> 4.22.20 directly carries ShortcutRisk at `url`, or cleanly through 4.22.18. */
+  const anchor = (url: string, channelsCsv: string) => ({
+    ...(rawGraphJson(['4.22.15', '4.22.18', '4.22.20'], [[0, 1], [1, 2]], channelsCsv) as object),
+    conditionalEdges: [{ edges: [{ from: '4.22.15', to: '4.22.20' }], risks: [shortcutRisk(url)] }],
+  });
+  const routed = (result: { current: ReturnType<typeof usePlanner> }) =>
+    result.current.result.status === 'success' ? result.current.result.value.primary.versions : undefined;
+  const linked = () => new URLSearchParams(window.location.search).getAll('na');
+
+  it('keeps a mark matched in the anchor on that advisory alone once look-ahead loads a same-name advisory at another URL', async () => {
+    // 4.22.20 -> 5.0.1 directly carries a second ShortcutRisk at another URL, or cleanly through 5.0.0.
+    const ahead = {
+      ...(rawGraphJson(['4.22.20', '5.0.0', '5.0.1'], [[0, 1], [1, 2]], 'stable-5.0') as object),
+      conditionalEdges: [{ edges: [{ from: '4.22.20', to: '5.0.1' }], risks: [shortcutRisk('https://issues.example/OTHER')] }],
+    };
+    let releaseAhead: () => void = () => {};
+    const aheadLoaded = new Promise<void>((resolve) => (releaseAhead = resolve));
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(anchor('https://issues.example/R', 'stable-4.22,stable-5.0'))],
+          ['stable-5.0|amd64', () => aheadLoaded.then(() => fakeJsonResponse(ahead))],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~https://issues.example/R');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.20']));
+    expect(result.current.target.lookaheadLoading).toBe(true);
+
+    releaseAhead();
+    await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+    act(() => result.current.target.onChange('5.0.1'));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.20', '5.0.0', '5.0.1']));
+    expect(result.current.riskApplicability.notApplicable.size).toBe(1);
+    expect(result.current.notices).toEqual([]);
+    expect(linked()).toEqual(['ShortcutRisk~https://issues.example/R']);
+  });
+
+  it('drops a mark whose URL no loaded advisory carries, with a notice, and never waives the same name at another URL', async () => {
+    const client = makeClient(
+      withSeed(new Map([['stable-4.22|amd64', jsonHandler(anchor('https://issues.example/NEW', 'stable-4.22'))]])),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~https://issues.example/OLD');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.notices.some((n) => n.includes('"ShortcutRisk~https://issues.example/OLD"'))).toBe(true));
+    expect(routed(result)).toEqual(['4.22.15', '4.22.18', '4.22.20']);
+    expect(result.current.riskApplicability.notApplicable.size).toBe(0);
+    expect(linked()).toEqual([]);
+  });
+
+  it('drops a value with no advisory URL, with a notice, and never matches it by name', async () => {
+    const client = makeClient(
+      withSeed(new Map([['stable-4.22|amd64', jsonHandler(anchor('https://issues.example/R', 'stable-4.22'))]])),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.18', '4.22.20']));
+    expect(result.current.notices.some((n) => n.includes('"ShortcutRisk"'))).toBe(true);
+    expect(result.current.riskApplicability.notApplicable.size).toBe(0);
+    expect(linked()).toEqual([]);
+  });
+
+  it('drops a value with an empty advisory URL even when a risk of that name has a blank URL', async () => {
+    const client = makeClient(withSeed(new Map([['stable-4.22|amd64', jsonHandler(anchor('', 'stable-4.22'))]])), 'empty');
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.18', '4.22.20']));
+    expect(result.current.notices.some((n) => n.includes('"ShortcutRisk~"'))).toBe(true);
+    expect(result.current.riskApplicability.notApplicable.size).toBe(0);
+  });
+});
+
 describe('usePlanner — target labels under pinned stops', () => {
   it('names the channel the route through the pinned stops ends on', async () => {
     // Shaped like live Cincinnati once stable-5.0 published 5.0.0 and 5.0.1:
@@ -547,5 +685,94 @@ describe('usePlanner — target labels under pinned stops', () => {
     expect(routed?.hops.at(-1)?.sourceChannel).toBe('stable-5.0');
     const option = result.current.target.groups.flatMap((g) => g.options).find((o) => o.version === '5.0.1');
     expect(option?.via?.channel).toBe('stable-5.0');
+  });
+
+  it('labels another target by its route through a stop the current target cannot honor, and routes it that way once chosen', async () => {
+    // 5.0.0 is only on fast-5.0 and leads to 5.0.2, never 5.0.1; straight to 5.0.2 stays on stable-5.0.
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(rawGraphJson(['4.22.15', '4.22.20'], [[0, 1]], 'stable-4.22,stable-5.0,fast-5.0'))],
+          ['stable-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.1', '5.0.2'], [[0, 1], [0, 2]], 'stable-5.0'))],
+          ['fast-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0', '5.0.2'], [[0, 1], [1, 2]], 'fast-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.1&stops=5.0.0');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.routeHold).toBe('invalidStops'));
+    const option = result.current.target.groups.flatMap((g) => g.options).find((o) => o.version === '5.0.2');
+    expect(option?.via).toEqual({ channel: 'fast-5.0', classFallback: true });
+
+    act(() => result.current.target.onChange('5.0.2'));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+    const routed = result.current.result.status === 'success' ? result.current.result.value.primary : undefined;
+    expect(routed?.versions).toEqual(['4.22.15', '4.22.20', '5.0.0', '5.0.2']);
+    expect(routed?.hops.at(-1)?.sourceChannel).toBe(option?.via?.channel);
+  });
+});
+
+describe('usePlanner — prerelease targets and stops', () => {
+  // 5.0.0-rc.1 is reachable only through candidate-5.0; 5.0.0 also through stable-5.0.
+  function prereleaseClient() {
+    const anchor = (channel: string) =>
+      jsonHandler(rawGraphJson(['4.22.0-rc.1', '4.22.15', '4.22.20'], [[0, 1], [1, 2]], `${channel},candidate-5.0,stable-5.0`));
+    return makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', anchor('stable-4.22')],
+          ['candidate-4.22|amd64', anchor('candidate-4.22')],
+          ['candidate-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0-rc.1', '5.0.0'], [[0, 1], [1, 2], [0, 2]], 'candidate-5.0'))],
+          ['stable-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0'], [[0, 1]], 'stable-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+  }
+  const versions = (groups: readonly { readonly options: readonly ({ readonly version: string })[] }[]) => groups.flatMap((g) => g.options.map((o) => o.version));
+
+  it('offers no prerelease target or stop from a non-candidate channel and a GA start', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.0');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(versions(result.current.target.groups)).toEqual(['5.0.0', '4.22.20']);
+    act(() => result.current.constraints.onAddStop());
+    expect(versions(result.current.constraints.stops[0]?.groups ?? [])).toEqual(['4.22.20']);
+  });
+
+  it('offers prerelease targets and stops from a candidate channel', async () => {
+    setUrl('?channel=candidate-4.22&arch=amd64&start=4.22.15&target=5.0.0');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(versions(result.current.target.groups)).toEqual(['5.0.0', '5.0.0-rc.1', '4.22.20']);
+    act(() => result.current.constraints.onAddStop());
+    expect(versions(result.current.constraints.stops[0]?.groups ?? [])).toContain('5.0.0-rc.1');
+  });
+
+  it('offers prerelease targets from a prerelease start', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.0-rc.1');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(versions(result.current.target.groups)).toEqual(['5.0.0', '5.0.0-rc.1', '4.22.20', '4.22.15']));
+  });
+
+  it('restores a permalink to a prerelease stop on a non-candidate channel, showing it', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.0&stops=5.0.0-rc.1');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(result.current.pinnedStops).toEqual(['5.0.0-rc.1']);
+    expect(versions(result.current.constraints.stops[0]?.groups ?? [])).toContain('5.0.0-rc.1');
+  });
+
+  it('restores a permalink to a prerelease target on a non-candidate channel, showing it', async () => {
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.0-rc.1');
+    const { result } = renderHook(() => usePlanner(prereleaseClient()));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+
+    expect(versions(result.current.target.groups)).toEqual(['5.0.0', '5.0.0-rc.1', '4.22.20']);
   });
 });

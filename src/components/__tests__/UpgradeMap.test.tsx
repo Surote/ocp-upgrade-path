@@ -41,7 +41,7 @@ const COMMANDS: readonly HopCommand[] = [
   { from: v('4.21.28'), to: v('4.22.9'), upgradeTo: 'oc adm upgrade --to 4.22.9' },
 ];
 
-const EMPTY_NODE_INFO = new Map<Version, GraphNode>();
+const NO_STATIONS: readonly GraphNode[] = [];
 
 function noop() {
   /* not exercised by these assertions */
@@ -54,7 +54,7 @@ describe('UpgradeMap — interchange ring placement (plan.md §6 "Where the swit
     render(
       <UpgradeMap
         path={PATH}
-        nodeInfo={EMPTY_NODE_INFO}
+        stations={NO_STATIONS}
         commands={COMMANDS}
         selectedHopIndex={null}
         selectedStationIndex={null}
@@ -99,7 +99,7 @@ describe('UpgradeMap — interchange ring placement (plan.md §6 "Where the swit
     render(
       <UpgradeMap
         path={path}
-        nodeInfo={EMPTY_NODE_INFO}
+        stations={NO_STATIONS}
         commands={commands}
         selectedHopIndex={null}
         selectedStationIndex={null}
@@ -158,7 +158,7 @@ describe('UpgradeMap — labels and switch tags fit the fixed-size map', () => {
     render(
       <UpgradeMap
         path={pathThrough(versions)}
-        nodeInfo={EMPTY_NODE_INFO}
+        stations={NO_STATIONS}
         commands={commands}
         selectedHopIndex={null}
         selectedStationIndex={null}
@@ -200,7 +200,7 @@ describe('UpgradeMap — pinned stops', () => {
     return render(
       <UpgradeMap
         path={PATH}
-        nodeInfo={EMPTY_NODE_INFO}
+        stations={NO_STATIONS}
         commands={COMMANDS}
         pinnedStops={pinnedStops}
         selectedHopIndex={null}

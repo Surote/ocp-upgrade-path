@@ -29,14 +29,14 @@ export interface HopCommand {
    */
   readonly channelSwitchTo?: string;
   readonly upgradeTo: string;
-  /** Digest form for disconnected clusters, on a secondary line (plan.md §6) -- absent only if this hop's target node has no known payload (shouldn't happen for a validated graph node, but `GraphNode.payload` isn't optional so this is effectively always present when `nodeInfo` has the node at all). */
+  /** Digest form for disconnected clusters, on a secondary line (plan.md §6) -- absent only when `stations` has no node for this hop's destination, which a stitcher result always has. */
   readonly upgradeToImage?: string;
 }
 
 export interface ChannelContext {
   /**
    * The `channelNames` table belonging to the *currently selected* channel's
-   * own fetched graph. Only trustworthy against `nodeInfo` entries that came
+   * own fetched graph. Only trustworthy against `stations` entries that came
    * from that same graph -- see `channelNamesForNode`'s doc in
    * design/channels.ts. Only consulted as the membership-fallback path in
    * `buildHopCommands` (below) -- real `Path`s from the stitcher carry
@@ -48,7 +48,7 @@ export interface ChannelContext {
    * assembled across more than one fetched graph. Guards only the
    * membership-fallback path: when a hop has no `sourceChannel` (a hand-built
    * `Path`, not a real stitcher result) and the result is multi-graph,
-   * `nodeInfo` entries can come from a graph other than the one
+   * `stations` entries can come from a graph other than the one
    * `channelNames` was read from, so membership can't be safely resolved
    * (mismatched source tables) -- see `buildHopCommands`'s doc.
    */
@@ -98,7 +98,7 @@ function pickSwitchChannel(memberChannels: readonly string[], preferredClass: st
  *     `sourceChannel` (there is only one fetched graph), so this check can
  *     never fire -- matching the verified invariant (plan.md §6: 546 nodes
  *     across 5 fixtures, zero non-members of their own source channel).
- *  2. **Membership fallback** (`channelNames`/`nodeInfo`, the original
+ *  2. **Membership fallback** (`channelNames`/`stations`, the original
  *     mechanism) -- used only when `hop.sourceChannel` is absent, which in
  *     practice means a hand-built `Path` that didn't go through the
  *     stitcher (e.g. a test fixture). Resolves the destination's recorded
@@ -106,7 +106,7 @@ function pickSwitchChannel(memberChannels: readonly string[], preferredClass: st
  *     only when the current channel isn't among them, preferring a
  *     same-class real member (`pickSwitchChannel` below) over any other.
  *     Skipped entirely when `channelContext.multiGraph` is true, since a
- *     multi-graph `nodeInfo` can mix entries from more than one source
+ *     multi-graph `stations` can mix entries from more than one source
  *     graph and `channelNames` only matches one of them (design/channels.ts).
  *
  * The cluster's current channel is tracked hop by hop: it starts as
@@ -117,14 +117,15 @@ function pickSwitchChannel(memberChannels: readonly string[], preferredClass: st
 export function buildHopCommands(
   path: Path,
   selectedChannel: string | undefined,
-  nodeInfo: ReadonlyMap<Version, GraphNode>,
+  /** `StitchedPathResult.stations`: one node per entry of `path.versions`. */
+  stations: readonly GraphNode[],
   channelContext: ChannelContext,
 ): readonly HopCommand[] {
   const { channelNames, multiGraph } = channelContext;
   let currentChannel = selectedChannel;
 
-  return path.hops.map((hop) => {
-    const toNode = nodeInfo.get(hop.to);
+  return path.hops.map((hop, i) => {
+    const toNode = stations[i + 1];
     let channelSwitchTo: string | undefined;
 
     if (currentChannel && hop.sourceChannel) {

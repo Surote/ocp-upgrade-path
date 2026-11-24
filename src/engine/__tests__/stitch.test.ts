@@ -69,8 +69,8 @@ describe('stitchAndFindPath — single-graph fast path', () => {
         // never walks forward (deliberate test update, not a regression).
         expect(result.value.stitch).toEqual({ channelsUsed: ['stable-4.20'], classFallbacks: [], multiGraph: false });
         expect(result.value.primary.versions).toEqual([v('4.18.0'), v('4.19.20'), v('4.20.0')]); // higher-patch waypoint wins
-        expect(result.value.alternates).toHaveLength(1); // the 4.19.10 waypoint
-        expect(result.value.nodeInfo.get(v('4.18.0'))?.payload).toContain('stable420');
+        expect(result.value.alternates.kind === 'computed' && result.value.alternates.paths).toHaveLength(1); // the 4.19.10 waypoint
+        expect(result.value.stations.find((n) => n.version === '4.18.0')?.payload).toContain('stable420');
         // Per-hop provenance (plan.md §6): every hop of a single-graph path
         // carries the same `sourceChannel` -- there is only one fetched
         // graph -- which is exactly why a single-graph query can never need
@@ -118,7 +118,7 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     expect(result.value.primary.versions).toEqual([v('4.18.1'), v('4.19.5'), v('4.20.1')]);
     expect(result.value.primary.cost.hops).toBe(2);
     // Documented scope decision: multi-graph stitches return primary only.
-    expect(result.value.alternates).toEqual([]);
+    expect(result.value.alternates).toEqual({ kind: 'notComputed', reason: 'multiGraph' });
   });
 
   it('reads each station\'s node metadata from the graph that supplied the hop arriving at it', async () => {
@@ -131,9 +131,9 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     if (!result.ok) throw result.error;
 
     // 4.19.5 is in stable-4.20 (tag "A") and stable-4.19 (tag "B"); the hop arriving at it runs on stable-4.19.
-    expect(result.value.nodeInfo.get(v('4.18.1'))?.payload).toContain('sha256:B-');
-    expect(result.value.nodeInfo.get(v('4.19.5'))?.payload).toContain('sha256:B-');
-    expect(result.value.nodeInfo.get(v('4.20.1'))?.payload).toContain('sha256:A-');
+    expect(result.value.stations.find((n) => n.version === '4.18.1')?.payload).toContain('sha256:B-');
+    expect(result.value.stations.find((n) => n.version === '4.19.5')?.payload).toContain('sha256:B-');
+    expect(result.value.stations.find((n) => n.version === '4.20.1')?.payload).toContain('sha256:A-');
   });
 
   it('never fabricates a transition: two graphs with NO shared/overlapping version cannot be stitched into a path, even if each individually has usable edges', async () => {
@@ -572,7 +572,8 @@ describe('single-graph alternates', () => {
     const result = await stitchAndFindPath(loader, { targetChannel: 'candidate-4.20', arch: 'amd64', start: v('4.18.14'), target: v('4.20.0-ec.2') });
 
     if (!result.ok) throw new Error(result.error.kind);
-    const shown = [result.value.primary, ...result.value.alternates].map((p) => p.versions.join(' > '));
+    const { alternates } = result.value;
+    const shown = [result.value.primary, ...(alternates.kind === 'computed' ? alternates.paths : [])].map((p) => p.versions.join(' > '));
     expect(new Set(shown).size).toBe(shown.length);
     expect(shown.some((route) => route.includes('4.19.0-rc.2'))).toBe(true);
     expect(shown.some((route) => route.includes('4.19.0-rc.3'))).toBe(true);
@@ -603,10 +604,36 @@ describe('node metadata follows hop provenance', () => {
     if (!result.ok) throw new Error(result.error.kind);
     expect(result.value.primary.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.22']);
     expect(result.value.riskComparison?.route?.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.21', 'stable-4.23']);
-    const [command] = buildHopCommands(result.value.primary, 'stable-4.20', result.value.nodeInfo, { channelNames: [], multiGraph: true });
+    const [command] = buildHopCommands(result.value.primary, 'stable-4.20', result.value.stations, { channelNames: [], multiGraph: true });
     const digest = stable422.nodes.find((n) => n.version === '4.22.0')?.payload as string;
     expect(digest).not.toBe(stable423.nodes.find((n) => n.version === '4.22.0')?.payload);
     expect(command?.upgradeToImage).toBe(`oc adm upgrade --to-image=${digest} --allow-explicit-upgrade`);
+  });
+
+  it('takes each arrival\'s digest from its own hop\'s graph when a stop routes through one version twice', async () => {
+    // 5.0.0 and its +b build rank equal, so a stop on the build turns back to 5.0.0 on another channel.
+    const graphs: Record<string, Graph> = {
+      'stable-4.22': rawGraph(['4.22.20'], [], 'anchor', ['stable-4.22', 'stable-5.0', 'fast-5.0']),
+      'stable-5.0': rawGraph(['5.0.0', '5.0.0+b', '5.0.1'], [[0, 1], [1, 0], [0, 2]], 'stable', ['stable-5.0']),
+      'fast-5.0': rawGraph(['4.22.20', '5.0.0'], [[0, 1]], 'fast', ['fast-5.0']),
+    };
+    const loader: GraphLoader = async (channel, arch) => (graphs[channel] ? ok(graphs[channel]) : err({ kind: 'empty', channel, arch }));
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.22',
+      arch: 'amd64',
+      start: v('4.22.20'),
+      target: v('5.0.1'),
+      constraints: { stops: [v('5.0.0+b')], riskPolicy: 'recommended', notApplicable: new Set() },
+    });
+
+    if (!result.ok) throw new Error(result.error.kind);
+    const { primary } = result.value;
+    expect(primary.versions).toEqual([v('4.22.20'), v('5.0.0'), v('5.0.0+b'), v('5.0.0'), v('5.0.1')]);
+    expect(primary.hops[0]?.sourceChannel).toBe('fast-5.0');
+    const images = buildHopCommands(primary, 'stable-4.22', result.value.stations, { channelNames: [], multiGraph: true }).map((c) => c.upgradeToImage);
+    const digestOn = (hop: (typeof primary.hops)[number]) => graphs[hop.sourceChannel as string]?.nodes.find((n) => n.version === hop.to)?.payload;
+    expect(images).toEqual(primary.hops.map((hop) => `oc adm upgrade --to-image=${digestOn(hop)} --allow-explicit-upgrade`));
   });
 });
 

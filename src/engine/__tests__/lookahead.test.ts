@@ -63,6 +63,22 @@ describe('look-ahead discovery keeps every channel a route may need', () => {
     if (!result.ok) throw new Error(result.error.kind);
     expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'fast-5.0', requestedClass: 'stable', requestedStatus: 'unverified' }]);
   });
+
+  it('still fetches a preferred channel named after another channel of its stream failed to load', async () => {
+    // Only stable-5.0 names stable-4.23, and candidate-4.23 is tried first.
+    const loader = loaderFor({
+      'stable-4.22': graph([], { nodes: ['4.22.20'], channels: ['stable-4.22', 'candidate-4.23', 'stable-5.0'] }),
+      'candidate-4.23': { kind: 'network', message: 'Service Unavailable', status: 503 },
+      'stable-5.0': graph([['4.22.20', '5.0.0']], { channels: ['stable-5.0', 'stable-4.23'] }),
+      'stable-4.23': graph([['4.22.20', '4.23.1']], { channels: ['stable-4.23'] }),
+    });
+
+    const result = await stitchAndFindPath(loader, { targetChannel: 'stable-4.22', arch: 'amd64', start: v('4.22.20'), target: v('4.23.1') });
+
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.primary.hops.map((h) => [h.to, h.sourceChannel])).toEqual([[v('4.23.1'), 'stable-4.23']]);
+    expect(result.value.stitch.classFallbacks).toEqual([]);
+  });
 });
 
 describe('route search across channels of one stream', () => {

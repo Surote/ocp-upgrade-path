@@ -2,10 +2,18 @@ import type { GraphError } from '../../graph/errors';
 import { parseRawGraph } from '../../graph/parse';
 import type { Graph, Version } from '../../graph/types';
 import { err, ok } from '../../lib/result';
+import { riskIdOf, type RiskId } from '../risks';
 import type { GraphLoader } from '../types';
 
 export function v(s: string): Version {
   return s as Version;
+}
+
+const riskUrl = (name: string) => `https://issues.example/${name}`;
+
+/** The advisory a `RiskSpec` named `name` parses to, as a mark names it. */
+export function fixtureRiskId(name: string): RiskId {
+  return riskIdOf({ name, url: riskUrl(name) });
 }
 
 export interface RiskSpec {
@@ -40,7 +48,7 @@ export function graph(
       edges: [{ from: r.from, to: r.to }],
       risks: [
         {
-          url: `https://issues.example/${r.name}`,
+          url: riskUrl(r.name),
           name: r.name,
           message: r.name,
           matchingRules: [r.always ? { type: 'Always' } : { type: 'PromQL', promql: { promql: 'up' } }],

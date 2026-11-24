@@ -1,4 +1,5 @@
 import type { Risk } from '../graph/types';
+import type { RiskApplicabilityViewModel } from '../planner/usePlanner';
 import { RiskCardList } from './RiskCardList';
 
 /**
@@ -7,12 +8,18 @@ import { RiskCardList } from './RiskCardList';
  * engine (`Path.riskSummary`, built by `dedupeRisks` in engine/risks.ts) --
  * this component only presents it.
  */
-export function RiskSummary({ riskSummary }: { readonly riskSummary: readonly Risk[] }) {
+export function RiskSummary({
+  riskSummary,
+  applicability,
+}: {
+  readonly riskSummary: readonly Risk[];
+  readonly applicability: RiskApplicabilityViewModel;
+}) {
   return (
     <section className="panel" aria-labelledby="risk-summary-heading">
       <h2 id="risk-summary-heading">Risk summary</h2>
       <p className="panel__hint">Every distinct risk on this path, deduplicated across hops. One risk can recur on many hops.</p>
-      <RiskCardList risks={riskSummary} cleanLabel="No risks anywhere on this path." />
+      <RiskCardList risks={riskSummary} cleanLabel="No risks anywhere on this path." applicability={applicability} />
     </section>
   );
 }

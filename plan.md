@@ -177,7 +177,8 @@ fallback. Within one graph every hop shares a channel, so the posture terms neve
 single-graph result. Node metadata follows the same provenance: each station's payload
 comes from the graph that supplied the hop arriving at it, so a `--to-image` digest always
 matches the channel that hop runs on, and a graph only the lower-risk route uses never
-supplies one. **Multi-graph stitches return the primary path only**; waypoint alternates are
+supplies one. Metadata is kept per visit, not per version: a stop can route through one
+version twice, arriving on two channels with two digests. **Multi-graph stitches return the primary path only**; waypoint alternates are
 single-graph, because the cheap concatenation trick that makes them nearly free stops
 holding once a real channel boundary is crossed. Every worked example in this document
 resolves within one graph, so this affects only the long-range cases (`4.17.x → 4.21.x`).
@@ -295,8 +296,9 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > so did one named before it (stable-5.0 naming stable-5.2 before fast-5.1 names the
 > fast-5.2 that alone holds the target). Which channel a route needs is the route search's
 > question. On the Nov 2026 snapshot this costs 19 fetches from `eus-4.18` (was 8) and 5
-> from `stable-4.22` (was 4), and the dropdown gains the prereleases only `candidate`
-> channels reach, marked as a class change. Both also read reachability from
+> from `stable-4.22` (was 4), and target and stop options offer prereleases only from a `candidate`
+> anchor or a prerelease start (411 targets fell to 334 from `eus-4.18` 4.16.33); routes may
+> still pass through one. Both also read reachability from
 > `routeAcrossSegments` (engine/routeSearch.ts), a layered shortest-path DP over the anchor
 > plus every look-ahead segment. Its frontier carries across segments, so a segment can
 > contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
@@ -357,6 +359,47 @@ On that snapshot no route to 5.0.1 is free of conditional risk.
 `VSphereConfigCloudControllerCrash` sits on every route's 4.19→4.20, 4.20→4.21 or
 4.21→4.22 crossing. Stops move where it lands, and `riskComparison` reports that no
 conditional-free route exists.
+
+### Risks marked not applicable
+
+A conditional risk fires only on clusters its PromQL matches, and only the
+cluster-version operator evaluates that rule on the real cluster. An operator who has
+checked a rule against their cluster can mark the risk "Doesn't apply to my cluster" on
+its card, in the risk summary or the hop detail. `RouteConstraints.notApplicable` holds
+the marked advisories (`RiskId`, branded), each the name and URL together, the identity
+the risk summary dedupes by: two advisories can share a name, and checking one card must
+not waive the other. The link carries one `na=` per mark, always the name and URL joined
+by `~` (`na=VSphereConfigCloudControllerCrash~https://issues.redhat.com/browse/OCPBUGS-12345`).
+A `%` or `~` inside the name is written `%25` or `%7E`, so the first `~` splits the value,
+the URL is kept verbatim, and a name holding a comma or spaces survives. The URL is never
+left out, even for a name no other advisory shares today: which names are shared changes as
+look-ahead graphs load and as Red Hat publishes, and a bare name could later waive a
+different advisory.
+
+**A mark waives conditional occurrences only, and only from counting.** A marked risk's
+conditional occurrences leave `Route.conditional`, so the `avoidConditional` ranking,
+`riskComparison` and its `conditionalFree` ignore them. An `Always` occurrence of the same
+advisory still counts, and `Always` cards offer no mark. The `recommended` ranking reads the
+published risk weight and never changes with a mark. Every hop and the risk summary still
+show the risk. A marked card is de-emphasized and says the claim is the operator's.
+Route facts keep it in the count: "7 hops · 1 distinct risk (1 marked not applicable) · no
+other conditional risks".
+
+**A link's marks are checked before they apply.** Each value must match the name and URL
+of a conditional advisory on the loaded graphs exactly. It applies as soon as a graph
+carrying that advisory loads, so a slow look-ahead fetch never holds a mark on a route inside
+the anchor, and an exact match cannot become ambiguous when more graphs load. Once the
+anchor and look-ahead graphs have all loaded, any value still unmatched is dropped with a
+notice that names it, and is never matched onto a same-name advisory at another URL. A
+value without `~` names no URL, and is dropped with a notice straight away.
+
+On the Nov 2026 `eus-4.18` snapshot, marking `VSphereConfigCloudControllerCrash` leaves the
+route from `4.16.33` to `5.0.1` unchanged and removes "No lower-risk route exists".
+
+A mark is the operator's assertion, not proof, so `avoidConditional` ranks waived
+occurrences after hops and before the patch tie-break: between two routes of equal length,
+a genuinely clean one beats one that carries a marked risk. A mark can still let a shorter
+route that carries it win over a longer clean one.
 
 ### Major-version boundaries (4.22 → 5.0)
 
@@ -423,8 +466,8 @@ dimmed" *in the graph*. They render instead as a subordinate panel of lane-colou
 below the map. Branching lane geometry for paths of differing lengths is real layout work
 and was traded away; the alternates still use the same lane-colour language.
 
-**Channel-membership badges are suppressed on multi-graph stitches.** `nodeInfo` merges
-`GraphNode`s across source graphs, but carries no per-source `channelNames` table — so a
+**Channel-membership badges are suppressed on multi-graph stitches.** `stations` mixes
+`GraphNode`s from several source graphs, but carries no per-source `channelNames` table — so a
 node's `channels` indices cannot be safely resolved against the *selected* channel's table
 once more than one graph was fetched. The station panel says so rather than risking a
 mislabelled channel. Fixing this means carrying the name table per source graph through

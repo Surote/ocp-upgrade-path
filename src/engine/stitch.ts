@@ -7,7 +7,7 @@ import { NO_CONSTRAINTS, type RouteConstraints } from './routeConstraints';
 import { buildRoutingModel, type Route, type RoutingModel, searchRoutes } from './routeSearch';
 import { dedupeRisks } from './risks';
 import { compareStreams, type Stream, streamOf } from './version';
-import type { GraphLoader, Path, PathHop, StitchError, StitchedPathResult } from './types';
+import type { Alternates, GraphLoader, Path, PathHop, StitchError, StitchedPathResult } from './types';
 
 /**
  * Stitching, per plan.md §4 and §6 "Look-ahead targets (bidirectional
@@ -46,9 +46,9 @@ import type { GraphLoader, Path, PathHop, StitchError, StitchedPathResult } from
  * Node *metadata* (payload, errataUrl, channel membership) follows the same
  * provenance: the same version can have different metadata in two channel
  * snapshots, and a hop's `--to-image` digest must come from the graph the
- * cluster is on when it takes that hop. So `nodeInfo` holds only the primary
+ * cluster is on when it takes that hop. So `stations` holds only the primary
  * route's stations, each read from the graph that supplied the hop arriving
- * at it (`routeNodeInfo`).
+ * at it (`routeStations`).
  */
 
 const MAX_WALK_BACK = 12; // safety bound: no real Cincinnati channel history is this deep
@@ -74,20 +74,16 @@ function predecessorStream(graph: Graph, own: Stream): Stream | undefined {
 }
 
 /**
- * Each station `hops` reaches, with the metadata of the graph that supplied
- * the hop arriving at it; the start with the first hop's graph (the first
- * segment's for a zero-hop route).
+ * The start and each station `hops` reaches, in order, with the metadata of
+ * the graph that supplied the hop arriving at it; the start with the first
+ * hop's graph (the first segment's for a zero-hop route). A hop's graph
+ * holds both its ends, so every lookup finds its node.
  */
-function routeNodeInfo(segments: readonly ChannelSegment[], start: Version, hops: readonly PathHop[]): ReadonlyMap<Version, GraphNode> {
+function routeStations(segments: readonly ChannelSegment[], start: Version, hops: readonly PathHop[]): readonly GraphNode[] {
   const graphs = new Map(segments.map((segment) => [segment.channel, segment.graph]));
-  const map = new Map<Version, GraphNode>();
-  const add = (version: Version, channel: string | undefined) => {
-    const node = graphs.get(channel as string)?.nodes.find((n) => n.version === version);
-    if (node) map.set(version, node);
-  };
-  add(start, hops[0]?.sourceChannel ?? segments[0]?.channel);
-  for (const hop of hops) add(hop.to, hop.sourceChannel);
-  return map;
+  const nodeOn = (version: Version, channel: string | undefined) =>
+    graphs.get(channel as string)?.nodes.find((n) => n.version === version) as GraphNode;
+  return [nodeOn(start, hops[0]?.sourceChannel ?? segments[0]?.channel), ...hops.map((hop) => nodeOn(hop.to, hop.sourceChannel))];
 }
 
 interface AnchorAndBackward {
@@ -230,19 +226,19 @@ export async function stitchAndFindPath(
 
   if (singleGraph) {
     const primary = toPath(route);
-    // Waypoint alternates ignore stops and rank by the recommended order, so
-    // they are offered only when neither applies.
     const unconstrained = constraints.stops.length === 0 && constraints.riskPolicy === 'recommended';
-    const single = unconstrained ? findPathsInGraph(anchor.graph, start, target, primary.versions) : undefined;
-    const alternates = single?.ok
-      ? single.value.alternates.map((p) => ({ ...p, hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })) }))
-      : [];
+    let alternates: Alternates = { kind: 'notComputed', reason: 'constrained' };
+    if (unconstrained) {
+      const single = findPathsInGraph(anchor.graph, start, target, primary.versions);
+      const paths = single.ok ? single.value.alternates : [];
+      alternates = { kind: 'computed', paths: paths.map((p) => ({ ...p, hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })) })) };
+    }
     return ok({
       primary,
       riskComparison,
       alternates,
       stitch: { channelsUsed: [anchor.channel], classFallbacks: [], multiGraph: false },
-      nodeInfo: routeNodeInfo([anchor], start, route.hops),
+      stations: routeStations([anchor], start, route.hops),
     });
   }
 
@@ -257,7 +253,7 @@ export async function stitchAndFindPath(
     // mean repeating the layered DP once per candidate waypoint per segment,
     // and the trick that makes single-graph alternates cheap doesn't hold
     // across a channel boundary.
-    alternates: [],
+    alternates: { kind: 'notComputed', reason: 'multiGraph' },
     stitch: {
       channelsUsed: [anchor.channel, ...anchorSideFirst.map((s) => s.channel), ...usedLookahead.map((s) => s.channel)],
       classFallbacks: usedLookahead.flatMap((segment) =>
@@ -265,7 +261,7 @@ export async function stitchAndFindPath(
       ),
       multiGraph: true,
     },
-    nodeInfo: routeNodeInfo([...backward, anchor, ...lookahead], start, route.hops),
+    stations: routeStations([...backward, anchor, ...lookahead], start, route.hops),
   });
 }
 

@@ -140,28 +140,32 @@ export interface StitchInfo {
   readonly classFallbacks: readonly ClassFallback[];
 }
 
+/**
+ * Waypoint alternates, computed only for an unconstrained single-graph route:
+ * a multi-graph stitch returns the primary only (engine/stitch.ts's module
+ * doc says why), and waypoint alternates ignore stops and rank by the
+ * recommended order. `notComputed` keeps "none exist" distinct from "not looked for".
+ */
+export type Alternates =
+  | { readonly kind: 'computed'; readonly paths: readonly Path[] }
+  | { readonly kind: 'notComputed'; readonly reason: 'multiGraph' | 'constrained' };
+
 export interface StitchedPathResult {
   /** The route under the request's `RiskPolicy`, honoring every stop. */
   readonly primary: Path;
   /** Present only under the `recommended` policy: the lower-risk counterpart (engine/routeConstraints.ts). */
   readonly riskComparison?: import('./routeConstraints').RiskComparison;
-  /**
-   * Waypoint alternates. Only populated when the whole path was found within
-   * a single fetched graph (the common case, including every case the
-   * verified example and the plan's own worked examples cover) -- see
-   * engine/stitch.ts's module doc for why a genuine multi-graph stitch
-   * returns the primary only. Never a silent gap: `stitch.multiGraph` says
-   * whether this run actually crossed graphs.
-   */
-  readonly alternates: readonly Path[];
+  readonly alternates: Alternates;
   readonly stitch: StitchInfo & { readonly multiGraph: boolean };
   /**
    * Node info (payload, errataUrl, channel membership) for each station of
-   * `primary`, read from the graph that supplied the hop arriving at it (the
-   * start from the first hop's graph), so a hop's `--to-image` digest comes
-   * from the channel it runs on (plan.md §4). Other routes' stations are absent.
+   * `primary`, in order (`stations[i]` is `primary.versions[i]`), read from
+   * the graph that supplied the hop arriving at it (the start from the first
+   * hop's graph), so a hop's `--to-image` digest comes from the channel it
+   * runs on (plan.md §4). Kept per visit, not per version: a stop can route
+   * through one version twice, arriving on two channels.
    */
-  readonly nodeInfo: ReadonlyMap<Version, GraphNode>;
+  readonly stations: readonly GraphNode[];
 }
 
 export type StitchError =

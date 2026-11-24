@@ -117,6 +117,14 @@ describe('dedupeRisks', () => {
     expect(deduped.map((r) => r.name)).toEqual(['A1', 'P1']); // Always sorts first, per plan.md §5
   });
 
+  it('classes a risk by its most severe occurrence, Always over conditional', () => {
+    const deduped = dedupeRisks([[promqlRisk('R'), promqlRisk('P1')], [alwaysRisk('R')]]);
+    expect(deduped.map((r) => [r.name, riskClass(r)])).toEqual([
+      ['R', 'Always'],
+      ['P1', 'PromQL'],
+    ]);
+  });
+
   it('returns an empty summary for a path with no risks anywhere', () => {
     expect(dedupeRisks([[], []])).toEqual([]);
   });
