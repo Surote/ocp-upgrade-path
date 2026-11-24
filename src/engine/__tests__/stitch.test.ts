@@ -204,19 +204,10 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(sourceChannels).toEqual(['eus-4.20', 'eus-4.20', 'eus-4.22', 'eus-4.22']);
   });
 
-  // plan.md §6 "Where the switch is attributed matters": several *consecutive*
-  // stations can all be genuine members of the destination channel before
-  // the layered DP's own boundary. The DP here is only able to route the
-  // final two hops (4.20.9 -> 4.21.0 -> 4.22.0) through the forward
-  // channel -- it has no edges starting from the earlier shared stations
-  // 4.20.0 or 4.20.5 -- so a naive "last station before the crossing hop"
-  // attribution (i.e. just moving the switch one station earlier than the
-  // old off-by-one bug, without a real earliest-member scan) would still
-  // land on 4.20.9 and get this wrong. The correct answer is 4.20.0: the
-  // earliest station on the path that is *itself* a member of `eus-4.22`,
-  // per the real fetched membership data, regardless of which segment's
-  // edges the DP happened to use to actually traverse the intervening hops.
-  it('attributes the switch to the earliest of several consecutive shared stations, not the DP\'s own (later, cost/edge-driven) boundary', async () => {
+  // plan.md §6 "Where the switch is attributed matters": the cluster stays on
+  // its channel while that channel publishes the next hop, even when the
+  // destination channel also lists (and publishes) the stations in between.
+  it('switches channel only at the hop the current channel does not publish', async () => {
     // eus-4.20: a straight chain through the whole range, including three
     // 4.20.x releases that are *also* members of eus-4.22 below.
     const anchor = rawGraph(
@@ -257,9 +248,8 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
       v('4.22.0'),
     ]);
 
-    // The switch moves back to 4.20.0, the earliest station from which eus-4.22 publishes every remaining hop.
     const sourceChannels = result.value.primary.hops.map((h) => h.sourceChannel);
-    expect(sourceChannels).toEqual(['eus-4.20', 'eus-4.20', 'eus-4.22', 'eus-4.22', 'eus-4.22', 'eus-4.22']);
+    expect(sourceChannels).toEqual(['eus-4.20', 'eus-4.20', 'eus-4.20', 'eus-4.20', 'eus-4.22', 'eus-4.22']);
   });
 
   it('falls back to stable at a minor where the anchor\'s own class has no channel (EUS odd minors), and records the fallback', async () => {

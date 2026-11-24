@@ -206,66 +206,6 @@ export function routeAcrossSegments(segments: readonly ChannelSegment[], start: 
   return routes;
 }
 
-function publishedEdges(graph: Graph): ReadonlySet<string> {
-  return new Set(graph.edges.map(([from, to]) => edgeKey(graph.nodes[from]?.version, graph.nodes[to]?.version)));
-}
-
-function edgeKey(from: Version | undefined, to: Version | undefined): string {
-  return `${from} ${to}`;
-}
-
-/**
- * Re-attributes hops so each channel switch happens as early as it safely
- * can -- plan.md §6 "Where the switch is attributed matters": the
- * `oc adm upgrade channel` command runs while the cluster is standing on a
- * release, so it belongs to the earliest point the destination channel can
- * take over, not wherever `routeAcrossSegments` happened to land its
- * boundary.
- *
- * Each crossing between two consecutive `sourceChannel` values is handled on
- * its own (plan.md §6: "apply the same rule independently to each
- * crossing"). The switch moves back over the previous run's hops only while
- * the destination's own graph publishes every hop moved onto it: once the
- * cluster is on channel X, each `oc adm upgrade --to` must be an edge X
- * publishes. Membership alone is not enough -- a channel can list both
- * releases of a hop and still not publish the edge between them.
- *
- * A crossing *into* a class-fallback segment keeps the route's boundary:
- * switching early there moves the cluster off its own class (e.g. onto
- * `candidate`) sooner than the path needs to.
- *
- * Purely a relabelling pass: it never changes which versions are visited or
- * the path's cost.
- */
-function reattributeSwitches(hops: readonly PathHop[], segments: readonly ChannelSegment[]): readonly PathHop[] {
-  if (segments.length <= 1 || hops.length === 0) return hops;
-
-  const segIndexByChannel = new Map(segments.map((s, idx) => [s.channel, idx] as const));
-  const routeSeg = hops.map((h) => (h.sourceChannel ? (segIndexByChannel.get(h.sourceChannel) ?? 0) : 0));
-  const effectiveSeg = [...routeSeg];
-  const edgesBySeg = new Map<number, ReadonlySet<string>>();
-  let runStart = 0;
-
-  for (let i = 1; i < hops.length; i += 1) {
-    const dest = routeSeg[i] as number;
-    if (dest === routeSeg[i - 1]) continue;
-    const destSegment = segments[dest] as ChannelSegment;
-    if (!destSegment.classFallback) {
-      let edges = edgesBySeg.get(dest);
-      if (!edges) {
-        edges = publishedEdges(destSegment.graph);
-        edgesBySeg.set(dest, edges);
-      }
-      let earliest = i;
-      while (earliest > runStart && edges.has(edgeKey(hops[earliest - 1]?.from, hops[earliest - 1]?.to))) earliest -= 1;
-      for (let k = earliest; k < i; k += 1) effectiveSeg[k] = dest;
-    }
-    runStart = i;
-  }
-
-  return hops.map((h, i) => ({ ...h, sourceChannel: segments[effectiveSeg[i] as number]?.channel ?? h.sourceChannel }));
-}
-
 /** An anchor graph the caller already loaded, and the look-ahead it discovered from that same graph. */
 export interface AnchorSnapshot {
   readonly graph: Graph;
@@ -351,7 +291,7 @@ export async function stitchAndFindPath(
   const usedLookahead = lookahead.filter((segment) => routedChannels.has(segment.channel));
   const anchorSideFirst = [...backward].reverse();
   const versions = [start, ...route.hops.map((h) => h.to)];
-  const hops = reattributeSwitches(route.hops, chain);
+  const { hops } = route;
 
   return ok({
     primary: { versions, hops, cost: route.cost, riskSummary: dedupeRisks(hops.map((h) => h.risks)) },

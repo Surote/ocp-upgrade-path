@@ -420,55 +420,46 @@ indexing `Graph.channelNames`):
 > channel the cluster is currently on**. Switch to a channel that version actually belongs
 > to — never to a name assembled from a class and a minor.
 
-**Where the switch is attributed matters.** The command runs while the cluster is standing
-on a release, so the switch belongs to **the earliest station on the path from which the
-destination channel publishes every remaining hop it takes over** — not to the destination
-of the hop that leaves the old channel. Membership alone is not enough: once the cluster is on
-channel X, each `oc adm upgrade --to` must be an edge X publishes, and a channel can list
-both releases of a hop without publishing the edge between them.
+**Where the switch is attributed matters.** Each hop runs on the channel whose graph
+supplied its edge, and the switch belongs to **the station where that channel changes**:
+the release the cluster stands on before the first hop the new channel supplies, not the
+destination of that hop. Once the cluster is on channel X, each `oc adm upgrade --to` takes
+X's edge with the risks X attaches to it. Another channel can list both releases of a hop,
+or even publish the same edge, and still attach different risks (an `Always` risk where X
+has none), so a hop is never moved onto a channel other than the one that supplied it.
 
 Worked example, `eus-4.20` → `4.22.9`:
 
-| Station | member of `eus-4.22` |
+| Station | next hop supplied by |
 |---|---|
-| 4.18.2 | no |
-| 4.18.51 | no |
-| 4.19.41 | no |
-| **4.20.33** | **yes ← switch here** |
-| 4.21.28 | yes |
-| 4.22.9 | yes |
+| 4.18.2 | `eus-4.20` |
+| 4.18.51 | `eus-4.20` |
+| 4.19.41 | `eus-4.20` |
+| **4.20.33** | **`eus-4.22` ← switch here** |
+| 4.21.28 | `eus-4.22` |
+| 4.22.9 | (target) |
 
-The cluster reaches 4.20.33 on `eus-4.20`, and 4.20.33 is also in `eus-4.22`, so that is the
-first point the switch is possible — and therefore where the map's interchange marker and
-the `oc adm upgrade channel` line belong. Marking 4.21.28 is wrong: by then the switch has
-already had to happen.
+The cluster reaches 4.20.33 on `eus-4.20`, and the next hop (4.20.33 → 4.21.28) is
+`eus-4.22`'s edge, so the switch runs while standing on 4.20.33. That is where the map's
+interchange marker and the `oc adm upgrade channel` line belong. Marking 4.21.28 is wrong:
+by then the switch has already had to happen.
 
-The exception is a switch *into* a class fallback (`eus` → `stable`, `stable` →
-`candidate`). Switching there as early as possible would move the cluster off its own
-class for longer than the path needs, so that switch stays at the last station the path
-spends on the earlier channel.
+Where several channels could supply the same hops, the route search (§4) decides which one
+does. On a tie it keeps the route it already has, so the cluster stays on its current
+channel, or on its own class, until a hop needs the next one.
 
 A channel name must never be constructed; it must only ever be read from real membership
 data or from the set of channels the stitcher actually fetched.
 
-> **Implemented.** `stitchPrimaryAcrossSegments`'s layered DP (engine/stitch.ts) picks its
-> segment boundary for path *cost* (fewest hops, then risk, then patch level) or plain edge
-> availability, not for early attribution -- so on a path where several *consecutive*
-> stations all belong to the destination channel, the DP's own boundary can legitimately
-> land later than the earliest one (see `stitch.test.ts`'s "several consecutive shared
-> stations" case, where an equal-cost tie keeps the anchor's route up to the *last* of three
-> shared 4.20.x stations). `reattributeSwitches` (engine/stitch.ts) runs immediately
-> after the DP and relabels `PathHop.sourceChannel` back to the earliest station from which
-> the channel about to be used publishes every hop moved onto it, checked against that
-> fetched segment's own edges (never a constructed name) -- a pure relabelling
-> pass that never changes which versions or edges are on the path. It's applied per
-> crossing independently, so a path through three-or-more channels gets each boundary
-> corrected on its own. `design/commands.ts` was already comparing consecutive hops'
-> `sourceChannel` correctly; the remaining bug was that `UpgradeMap` and `HopDetail` both
-> anchored the switch on the *arriving* station (`hop.to`) of the hop carrying
-> `channelSwitch`, one station later than where the switch actually happens -- both now key
-> off `hop.from` instead, so the ring, the inline tag, and the hop-detail copy all name the
-> same station the command sequence already implied.
+> **History.** An earlier `reattributeSwitches` pass moved each switch back to the earliest
+> station the destination channel could take over, relabelling hops after the route search.
+> It failed three ways, each patched in turn: it moved the cluster onto `candidate` early
+> (fixed by exempting class fallbacks), it moved hops onto a channel that listed both
+> releases but did not publish the edge (fixed by checking edges), and it moved hops onto a
+> channel that published the edge with an `Always` risk while still showing the original
+> channel's empty risk list. All three came from one premise, that a hop can run on any
+> channel that has the edge. The pass was deleted. `UpgradeMap` and `HopDetail` anchor the
+> switch on the hop's `from`, the station the cluster stands on when it runs.
 
 **Consequence: within a single-graph query, a channel switch can never be required.**
 Verified across all five pinned fixtures — 546 nodes total, **zero** that are not members
