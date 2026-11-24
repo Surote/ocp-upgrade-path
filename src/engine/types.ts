@@ -140,7 +140,10 @@ export interface StitchInfo {
 }
 
 export interface StitchedPathResult {
+  /** The route under the request's `RiskPolicy`, honoring every stop. */
   readonly primary: Path;
+  /** Present only under the `recommended` policy: the lower-risk counterpart (engine/routeConstraints.ts). */
+  readonly riskComparison?: import('./routeConstraints').RiskComparison;
   /**
    * Waypoint alternates. Only populated when the whole path was found within
    * a single fetched graph (the common case, including every case the
@@ -164,6 +167,7 @@ export interface StitchedPathResult {
 }
 
 export type StitchError =
+  | Readonly<{ kind: 'stopUnreachable'; index: number; stop: Version }>
   | Readonly<{ kind: 'invalidChannel'; channel: string }>
   | Readonly<{ kind: 'loadFailed'; channel: string; error: GraphError }>
   | Readonly<{ kind: 'startNeverFound'; start: Version; channelsTried: readonly string[] }>

@@ -12,6 +12,8 @@ import type { StitchError } from '../engine/types';
  */
 export function describeStitchError(error: StitchError): string {
   switch (error.kind) {
+    case 'stopUnreachable':
+      return `Stop ${error.index + 1} (${error.stop}) can't be reached on a route that honors the other stops and the target. Pick another stop or remove it.`;
     case 'invalidChannel':
       return `"${error.channel}" is not a recognised channel name (expected "<class>-<major>.<minor>", e.g. "stable-4.22").`;
     case 'loadFailed':
