@@ -524,6 +524,27 @@ describe('usePlanner — a stream not yet published outside candidate', () => {
   });
 });
 
+describe('usePlanner — stops on a target in the selected channel', () => {
+  it('routes a permalink through its stops without waiting for an unrelated look-ahead fetch', async () => {
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(rawGraphJson(['4.22.15', '4.22.18', '4.22.20'], [[0, 1], [1, 2], [0, 2]], 'stable-4.22,fast-5.0'))],
+          ['fast-5.0|amd64', () => new Promise<Response>(() => {})],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&stops=4.22.18');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+    expect(result.current.target.lookaheadLoading).toBe(true);
+    const routed = result.current.result.status === 'success' ? result.current.result.value.primary : undefined;
+    expect(routed?.versions).toEqual(['4.22.15', '4.22.18', '4.22.20']);
+  });
+});
+
 describe('usePlanner — target labels under pinned stops', () => {
   it('names the channel the route through the pinned stops ends on', async () => {
     // Shaped like live Cincinnati once stable-5.0 published 5.0.0 and 5.0.1:
