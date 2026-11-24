@@ -309,6 +309,21 @@ describe('usePlanner — look-ahead targets (plan.md §6)', () => {
   });
 });
 
+describe('usePlanner — versions carrying semver build metadata', () => {
+  it('lists a build-metadata version in both dropdowns and plans a path to it instead of crashing', async () => {
+    setUrl('?channel=stable-4.22&start=4.22.0&target=4.22.1%2Bbuild.1');
+    const graph = rawGraphJson(['4.22.0', '4.22.1+build.1'], [[0, 1]], 'stable-4.22');
+    const client = makeClient(withSeed(new Map([['stable-4.22|amd64', jsonHandler(graph)]])));
+
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+    expect(result.current.start.groups.map((g) => [g.stream, g.options])).toEqual([['4.22', ['4.22.1+build.1', '4.22.0']]]);
+    expect(result.current.target.groups.flatMap((g) => g.options.map((o) => o.version))).toEqual(['4.22.1+build.1']);
+    expect(result.current.notices).toEqual([]);
+  });
+});
+
 describe('usePlanner — a stream not yet published outside candidate', () => {
   it('explains an empty stable-5.0 and points at candidate-5.0 instead of failing opaquely', async () => {
     setUrl('?channel=stable-5.0&arch=amd64');

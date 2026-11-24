@@ -58,6 +58,15 @@ describe('compareVersions — prerelease ordering (semver §11)', () => {
   });
 });
 
+describe('compareVersions — build metadata (semver §10)', () => {
+  it('ignores build metadata for precedence', () => {
+    expect(compareVersions(v('4.22.1+build.1'), v('4.22.1'))).toBe(0);
+    expect(compareVersions(v('4.22.1+build.1'), v('4.22.0'))).toBeGreaterThan(0);
+    expect(compareVersions(v('4.22.1-rc.1+build.5'), v('4.22.1-rc.2'))).toBeLessThan(0);
+    expect(compareVersions(v('4.22.1-rc.1+build.5'), v('4.22.1'))).toBeLessThan(0);
+  });
+});
+
 describe('compareVersions — against the real prerelease sets in the fixtures', () => {
   it('sorts every prerelease version pulled from candidate-4.20.json into strictly increasing order per minor', () => {
     const raw = loadFixture('candidate-4.20.json') as { nodes: { version: string }[] };

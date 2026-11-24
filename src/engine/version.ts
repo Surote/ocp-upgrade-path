@@ -18,11 +18,13 @@ export interface ParsedVersion {
   readonly prerelease: readonly string[];
 }
 
-const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/;
+// Build metadata (`+...`) is matched but discarded: semver §10 says it never
+// affects precedence.
+const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.+)?$/;
 
 /**
  * Parses a Cincinnati version string into its components. Throws on a string
- * that doesn't match `X.Y.Z[-prerelease]` -- every version that reaches this
+ * that doesn't match `X.Y.Z[-prerelease][+build]` -- every version that reaches this
  * function has already passed through `graph/parse.ts`'s validation boundary
  * (`z.string().min(1)`), so an unparseable version here means Cincinnati sent
  * something outside its documented format, which is a genuinely exceptional
