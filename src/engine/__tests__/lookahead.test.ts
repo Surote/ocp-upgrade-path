@@ -158,6 +158,31 @@ describe('look-ahead discovery fetches concurrently', () => {
   });
 });
 
+describe('look-ahead discovery does not wait on one slow channel', () => {
+  it('fetches a channel as soon as any loaded graph names it, while an earlier stream is still loading', async () => {
+    // candidate-4.22 names stable-4.22 (slow); fast-5.0 names stable-5.0.
+    const events: string[] = [];
+    const inner = loaderFor({
+      'candidate-4.22': graph([['4.21.1', '4.22.1']], { channels: ['candidate-4.22', 'stable-4.22'] }),
+      'stable-4.22': graph([['4.21.1', '4.22.2']], { channels: ['stable-4.22'] }),
+      'fast-5.0': graph([['4.22.2', '5.0.1']], { channels: ['fast-5.0', 'stable-5.0'] }),
+      'stable-5.0': graph([['5.0.1', '5.0.2']], { channels: ['stable-5.0'] }),
+    });
+    const loader: GraphLoader = async (channel, arch) => {
+      events.push(`start ${channel}`);
+      await new Promise((resolve) => setTimeout(resolve, channel === 'stable-4.22' ? 50 : 1));
+      events.push(`end ${channel}`);
+      return inner(channel, arch);
+    };
+    const anchor = graph([], { nodes: ['4.21.1'], channels: ['stable-4.21', 'candidate-4.22', 'fast-5.0'] });
+
+    const discovery = await discoverLookahead(loader, 'stable-4.21', anchor, 'amd64');
+
+    expect(events.indexOf('start stable-5.0')).toBeLessThan(events.indexOf('end stable-4.22'));
+    expect(discovery.channelsTried).toEqual(['candidate-4.22', 'stable-4.22', 'fast-5.0', 'stable-5.0']);
+  });
+});
+
 describe('look-ahead discovery near the fetch cap', () => {
   it('spends the last fetches on the channels a one-at-a-time walk would, even when a fetched graph reorders them', async () => {
     // The anchor names 46 empty or near-empty channels, leaving two of the 48 fetches.
@@ -165,15 +190,20 @@ describe('look-ahead discovery near the fetch cap', () => {
     // an earlier stream, so a one-at-a-time walk fetches it before fast-4.22.
     const filler = Array.from({ length: 15 }, (_, i) => ['stable', 'fast', 'candidate'].map((cls) => `${cls}-4.${i + 6}`)).flat();
     const anchor = graph([], { nodes: ['4.5.0'], channels: ['stable-4.5', ...filler, 'stable-4.21'] });
-    const loader = loaderFor({
-      'stable-4.21': graph([['4.20.1', '4.21.1']], { channels: ['stable-4.21', 'stable-4.22', 'fast-4.22'] }),
-      'stable-4.22': graph([['4.21.1', '4.22.1']], { channels: ['stable-4.22', 'candidate-4.21'] }),
-      'fast-4.22': graph([['4.21.1', '4.22.2']], { channels: ['fast-4.22'] }),
-      'candidate-4.21': graph([['4.20.1', '4.21.2']], { channels: ['candidate-4.21'] }),
-    });
+    const fetched: string[] = [];
+    const loader = loaderFor(
+      {
+        'stable-4.21': graph([['4.20.1', '4.21.1']], { channels: ['stable-4.21', 'stable-4.22', 'fast-4.22'] }),
+        'stable-4.22': graph([['4.21.1', '4.22.1']], { channels: ['stable-4.22', 'candidate-4.21'] }),
+        'fast-4.22': graph([['4.21.1', '4.22.2']], { channels: ['fast-4.22'] }),
+        'candidate-4.21': graph([['4.20.1', '4.21.2']], { channels: ['candidate-4.21'] }),
+      },
+      fetched,
+    );
 
     const discovery = await discoverLookahead(loader, 'stable-4.5', anchor, 'amd64');
 
+    expect(fetched).toHaveLength(48);
     expect(discovery.channelsTried).toHaveLength(48);
     expect(discovery.channelsTried.slice(-2)).toEqual(['stable-4.22', 'candidate-4.21']);
     expect(discovery.segments.map((s) => s.channel)).toEqual(['candidate-4.21', 'stable-4.21', 'stable-4.22']);
