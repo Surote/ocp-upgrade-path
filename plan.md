@@ -160,7 +160,7 @@ value here. Instead: the best path per *distinct intermediate-minor waypoint*, c
 only "capped at three" without saying three of what; the implementation returns two
 alternates alongside the primary.)
 
-**Stitching** is target-channel-first. Fetch the target's channel; if the start version
+**Stitching** is anchor-first. Fetch the selected channel; if the start version
 isn't in it, walk back to the same class one stream older (the highest older stream among
 the current graph's own nodes, see §6 "Major-version boundaries") until it is. Where two graphs disagree
 about an overlapping release, the later channel wins. We never union edges across graphs
@@ -269,15 +269,29 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > **Implemented.** `PathHop.sourceChannel` (engine/types.ts) now carries this on every hop
 > the stitcher returns, single- or multi-graph alike. `stitchAndFindPath`
 > (engine/stitch.ts) is bidirectional: it fetches the anchor once, then walks backward to
-> cover `start` and/or forward to cover `target` as needed, in the same fetch. Forward
-> walking starts at the *target's own stream* (not one past the anchor), so a channel
-> that already reaches back far enough — `eus-4.22` sharing the 4.20.x band with
-> `eus-4.20` — joins directly with no unnecessary intermediate channel, exactly matching
-> the table above. A class fallback (`StitchInfo.classFallbacks`) is surfaced in both the
-> target dropdown (`TargetSelect`, "drops to <class>") and the result banner
-> (`StitchBanner`) when it's used. See the forward-walk tests in
+> cover `start` and/or forward to cover `target` as needed, in the same fetch. A class
+> fallback (`StitchInfo.classFallbacks`) is surfaced in both the target dropdown
+> (`TargetSelect`, "class change") and the result banner (`StitchBanner`) when the route
+> walks a fallback channel. See the forward-walk tests in
 > `engine/__tests__/stitch.test.ts` for the exact algorithm, including the
 > multi-stream-with-fallback case.
+>
+> **One forward walk, one route search.** The target dropdown and the stitcher once chose
+> forward channels by two different walks, and the dropdown offered targets the stitcher
+> could not route. The stitcher started at the target's stream and took the first
+> non-empty class, so an unconnected `stable-5.0` (5.0.z only, no 4.22 sources) beat the
+> `fast-5.0` the dropdown used. It never walked forward for a release in the anchor's own
+> stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
+> three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
+> `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
+> stream is named (safety cap 12 streams). Both also read reachability from
+> `routeAcrossSegments` (engine/stitch.ts), a layered shortest-path DP over the anchor
+> plus every look-ahead segment. Its frontier carries across segments, so a segment can
+> contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
+> though `stable-4.21` sits between them in the list. An option marked reachable is
+> therefore routable by construction, and its `via` names the channel its route ends on.
+> A version in the anchor is still routed on the anchor's own edges only, with full
+> alternates.
 
 ### Major-version boundaries (4.22 → 5.0)
 
@@ -297,11 +311,12 @@ the live API on 2026-11-01:
 `5.-1`, and "the stream after 4.22" is both 4.23 and 5.0. Two facts in every graph answer
 it directly:
 
-- *Walking toward older streams* (the stitcher's backward walk, and its forward walk
-  stepping down from the target): a channel's nodes include its upgrade sources, so the
+- *Walking toward older streams* (the stitcher's backward walk): a channel's nodes
+  include its upgrade sources, so the
   previous stream is the highest stream among its own nodes below its own
   (`candidate-5.0` → 4.22).
-- *Walking toward newer streams* (look-ahead discovery): each node's membership lists the
+- *Walking toward newer streams* (look-ahead discovery, which is also the stitcher's
+  forward walk): each node's membership lists the
   newer channels it is an upgrade source for (`stable-4.22` nodes name `candidate-4.23`
   and `candidate-5.0`). Discovery fetches only those named channels, lowest stream first.
 
