@@ -548,4 +548,30 @@ describe('usePlanner — target labels under pinned stops', () => {
     const option = result.current.target.groups.flatMap((g) => g.options).find((o) => o.version === '5.0.1');
     expect(option?.via?.channel).toBe('stable-5.0');
   });
+
+  it('labels another target by its route through a stop the current target cannot honor, and routes it that way once chosen', async () => {
+    // 5.0.0 is only on fast-5.0 and leads to 5.0.2, never 5.0.1; straight to 5.0.2 stays on stable-5.0.
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(rawGraphJson(['4.22.15', '4.22.20'], [[0, 1]], 'stable-4.22,stable-5.0,fast-5.0'))],
+          ['stable-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.1', '5.0.2'], [[0, 1], [0, 2]], 'stable-5.0'))],
+          ['fast-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0', '5.0.2'], [[0, 1], [1, 2]], 'fast-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.1&stops=5.0.0');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.routeHold).toBe('invalidStops'));
+    const option = result.current.target.groups.flatMap((g) => g.options).find((o) => o.version === '5.0.2');
+    expect(option?.via).toEqual({ channel: 'fast-5.0', classFallback: true });
+
+    act(() => result.current.target.onChange('5.0.2'));
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+    const routed = result.current.result.status === 'success' ? result.current.result.value.primary : undefined;
+    expect(routed?.versions).toEqual(['4.22.15', '4.22.20', '5.0.0', '5.0.2']);
+    expect(routed?.hops.at(-1)?.sourceChannel).toBe(option?.via?.channel);
+  });
 });
