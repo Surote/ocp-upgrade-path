@@ -25,3 +25,16 @@ export function routeFacts(path: Path): string {
   }
   return facts.join(' · ');
 }
+
+/**
+ * The channels `path`'s hops are taken on, in route order, one entry per run,
+ * so a return to an earlier channel shows. `from`, the channel the cluster
+ * starts on, leads when given, matching the switches the commands emit.
+ */
+export function channelSequence(path: Path, from?: string): readonly string[] {
+  const channels: string[] = from ? [from] : [];
+  for (const hop of path.hops) {
+    if (hop.sourceChannel && hop.sourceChannel !== channels.at(-1)) channels.push(hop.sourceChannel);
+  }
+  return channels;
+}

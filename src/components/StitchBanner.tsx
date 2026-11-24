@@ -8,9 +8,10 @@ const FALLBACK_REASON: Record<ClassFallback['requestedStatus'], (requestedClass:
 };
 
 /**
- * Names which channels were stitched together, whenever more than one was
- * used, so the path stays auditable (plan.md §4/§6). Never shown for a
- * single-channel result.
+ * Names the channels the route moves through, in route order with each
+ * return shown (`channelSequence`), whenever there is more than one, so the
+ * path stays auditable against the map and commands (plan.md §4/§6). Never
+ * shown for a single-channel result.
  *
  * `classFallbacks` (plan.md §6 "Forward channel preference") names every
  * channel in that list that substitutes a different class for the anchor's
@@ -22,17 +23,17 @@ const FALLBACK_REASON: Record<ClassFallback['requestedStatus'], (requestedClass:
  * notice by comparing channel-name prefixes themselves.
  */
 export function StitchBanner({
-  channelsUsed,
+  channels,
   classFallbacks,
 }: {
-  readonly channelsUsed: readonly string[];
+  readonly channels: readonly string[];
   readonly classFallbacks: readonly ClassFallback[];
 }) {
-  if (channelsUsed.length <= 1) return null;
+  if (channels.length <= 1) return null;
   return (
     <div className="stitch-banner">
       <p>
-        <strong>Assembled across channels:</strong> {channelsUsed.join(' → ')}
+        <strong>Assembled across channels:</strong> {channels.join(' → ')}
       </p>
       {classFallbacks.map((fb) => (
         <p key={fb.channel} className="stitch-banner__fallback" role="alert">

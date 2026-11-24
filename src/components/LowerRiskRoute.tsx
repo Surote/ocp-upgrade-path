@@ -1,15 +1,6 @@
 import type { RiskComparison } from '../engine/routeConstraints';
 import type { Path } from '../engine/types';
-import { hasConditionalRisk, routeFacts } from './routeFacts';
-
-/** The channels the route's hops are taken on, in order, each named once per run. */
-function channelSequence(path: Path): readonly string[] {
-  const channels: string[] = [];
-  for (const hop of path.hops) {
-    if (hop.sourceChannel && hop.sourceChannel !== channels.at(-1)) channels.push(hop.sourceChannel);
-  }
-  return channels;
-}
+import { channelSequence, hasConditionalRisk, routeFacts } from './routeFacts';
 
 /**
  * Offers the `avoidConditional` counterpart to the recommended route when

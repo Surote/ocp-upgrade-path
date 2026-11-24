@@ -13,6 +13,7 @@ import { HopDetail } from './HopDetail';
 import { LowerRiskRoute } from './LowerRiskRoute';
 import { NodeDetail } from './NodeDetail';
 import { RiskSummary } from './RiskSummary';
+import { channelSequence } from './routeFacts';
 import { RouteSummary } from './RouteSummary';
 import { StitchBanner } from './StitchBanner';
 import { UpgradeMap } from './UpgradeMap';
@@ -99,7 +100,7 @@ export function PathResult({
 
   return (
     <div aria-live="polite">
-      <StitchBanner channelsUsed={stitch.channelsUsed} classFallbacks={stitch.classFallbacks} />
+      <StitchBanner channels={channelSequence(primary, channel)} classFallbacks={stitch.classFallbacks} />
       <RouteSummary path={primary} />
       <LowerRiskRoute primary={primary} comparison={riskComparison} onUse={onUseLowerRisk} />
 

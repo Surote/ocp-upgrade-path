@@ -127,7 +127,7 @@ export interface ClassFallback {
   readonly requestedStatus: 'unpublished' | 'unverified' | 'noRoute';
 }
 
-/** Which channels the stitcher actually used, in fetch order -- for the audit banner, per plan.md §4/§6. */
+/** Which channels the stitcher used, each once in fetch order. The banner's route-order sequence comes from hop provenance (components/routeFacts.ts `channelSequence`). */
 export interface StitchInfo {
   readonly channelsUsed: readonly string[];
   /**
