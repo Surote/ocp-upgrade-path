@@ -153,4 +153,19 @@ describe('look-ahead discovery does not depend on response timing', () => {
     expect(slowLast.discovery.channelsTried).toEqual(['stable-4.6', ...revealed, ...slow]);
     expect(slowLast.discovery.channelsTried).toEqual(inOrder.discovery.channelsTried);
   });
+
+  it('requests the channel the walk waits on before prefetches a later graph pushed back', async () => {
+    const slow = ['stable-4.20', 'stable-4.21', 'stable-4.22', 'stable-4.23', 'stable-4.24'];
+    const pushedBack = ['stable-4.12', 'stable-4.13', 'stable-4.14', 'stable-4.15', 'stable-4.16'];
+    const ahead = ['candidate-4.6', 'stable-4.7', 'stable-4.8', 'stable-4.9', 'stable-4.10', 'stable-4.11'];
+    const graphs: Record<string, Graph> = Object.fromEntries([...slow, ...pushedBack, ...ahead].map((name) => [name, graph([], { nodes: ['4.6.1'], channels: [name] })]));
+    graphs['stable-4.6'] = graph([], { nodes: ['4.6.1'], channels: ['stable-4.6', 'fast-4.6', ...pushedBack] });
+    graphs['fast-4.6'] = graph([], { nodes: ['4.6.2'], channels: ['fast-4.6', ...ahead] });
+    const anchor = graph([], { nodes: ['4.5.0'], channels: ['stable-4.5', 'stable-4.6', ...slow] });
+
+    const { fetched, maxInFlight } = await scheduled(graphs, anchor, (waiting) => Math.max(0, waiting.findIndex((channel) => !slow.includes(channel))));
+
+    expect(fetched).toEqual(['stable-4.6', ...slow, 'fast-4.6', ...ahead, ...pushedBack]);
+    expect(maxInFlight).toBeLessThanOrEqual(MAX_IN_FLIGHT);
+  });
 });
