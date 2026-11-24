@@ -44,15 +44,29 @@ function withAlwaysRiskOnArrival(raw: RawGraph): RawGraph {
   };
 }
 
-/** `eus-4.20` answers with `eus`, or never answers when `eus` is 'pending'. */
-function openRoute(eus: RawGraph | typeof EMPTY | 'pending') {
+const EUS_ONLY_CONDITIONAL = {
+  url: 'https://issues.redhat.com/browse/OCPBUGS-2',
+  name: 'EusOnlyConditional',
+  message: 'Only eus-4.20 says so, and only on some clusters.',
+  matchingRules: [{ type: 'PromQL', promql: { promql: 'eus_only' } }],
+};
+const EUS_ONLY_NA = 'EusOnlyConditional~https://issues.redhat.com/browse/OCPBUGS-2';
+
+/** `raw` with 4.19.40 -> 4.20.32 published only under a conditional risk stable-4.20 does not attach. */
+function withConditionalRiskOnArrival(raw: RawGraph): RawGraph {
+  const bare = withoutEdge(raw, '4.19.40', '4.20.32');
+  return { ...bare, conditionalEdges: [...bare.conditionalEdges, { edges: [{ from: '4.19.40', to: '4.20.32' }], risks: [EUS_ONLY_CONDITIONAL] }] };
+}
+
+/** `eus-4.20` answers with `eus`, or never answers when `eus` is 'pending'. `query` extends the route's link. */
+function openRoute(eus: RawGraph | typeof EMPTY | 'pending', query = '') {
   const fetchImpl = fakeFetch(async (url) => {
     const channel = new URL(url).searchParams.get('channel');
     if (channel === 'stable-4.20') return fakeJsonResponse(STABLE_420);
     if (channel === 'eus-4.20') return eus === 'pending' ? new Promise<Response>(() => {}) : fakeJsonResponse(eus);
     return fakeJsonResponse(EMPTY);
   });
-  window.history.pushState({}, '', '/?channel=stable-4.20&arch=amd64&start=4.18.50&target=4.20.32');
+  window.history.pushState({}, '', `/?channel=stable-4.20&arch=amd64&start=4.18.50&target=4.20.32${query}`);
   render(<App graphClient={new GraphClient({ storage: new FakeStorage(), fetchImpl })} />);
 }
 
@@ -135,5 +149,35 @@ describe('Control Plane Only guidance on a stable-4.20 route (4.18.50 -> 4.19.40
     expect(await commandLines()).toEqual(['oc adm upgrade --to 4.19.40', 'oc adm upgrade --to 4.20.32']);
     expect(leg().querySelector('h3')?.textContent).toBe('Leg 1: 4.18 → 4.20 (checking eus-4.20)');
     expect(leg().textContent).not.toMatch(/"paused"/);
+  });
+});
+
+describe("a link's mark on a conditional risk only the leg's EUS channel attaches", () => {
+  const notice = () => screen.queryByText(/EusOnlyConditional~/);
+  const linkedMarks = () => new URLSearchParams(window.location.search).getAll('na');
+  const lookaheadSettled = () => expect(document.querySelector('#target')?.closest('.field')?.getAttribute('aria-busy')).toBe('false');
+
+  it('restores the mark on the leg once eus-4.20 loads, with no notice', async () => {
+    openRoute(withConditionalRiskOnArrival(STABLE_420), `&na=${EUS_ONLY_NA}`);
+
+    await waitFor(() => expect(within(leg()).getByRole('checkbox', { name: "Doesn't apply to my cluster: EusOnlyConditional" })).toBeChecked());
+    expect(notice()).toBeNull();
+    expect(linkedMarks()).toEqual([EUS_ONLY_NA]);
+  });
+
+  it('keeps the mark, with no notice, while eus-4.20 is still loading', async () => {
+    openRoute('pending', `&na=${EUS_ONLY_NA}`);
+
+    await waitFor(lookaheadSettled);
+    await waitFor(() => expect(leg().querySelector('h3')?.textContent).toBe('Leg 1: 4.18 → 4.20 (checking eus-4.20)'));
+    expect(notice()).toBeNull();
+    expect(linkedMarks()).toEqual([EUS_ONLY_NA]);
+  });
+
+  it('drops the mark with a notice once eus-4.20 loads without that risk', async () => {
+    openRoute(STABLE_420, `&na=${EUS_ONLY_NA}`);
+
+    await waitFor(() => expect(notice()).not.toBeNull());
+    expect(linkedMarks()).toEqual([]);
   });
 });
