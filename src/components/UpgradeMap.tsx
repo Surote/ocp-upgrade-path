@@ -10,10 +10,15 @@ import type { GraphNode, Version } from '../graph/types';
  * Geometry, in CSS pixels. The SVG renders 1:1 and is never scaled to its
  * container, so dots, strokes, labels and spacing are the same size on every
  * viewport; a path wider than the screen scrolls inside `.map-scroll`.
- * STATION_GAP fits a typical four-station path in a 390px-wide phone.
+ * Spacing depends only on the path: STATION_GAP and MARGIN_X are minimums
+ * (a typical four-station path fits a 390px-wide phone), widened when the
+ * longest version label (`4.18.0-rc.10`) would otherwise clip or collide.
  */
 const STATION_GAP = 88;
 const MARGIN_X = 40;
+const LABEL_CHAR_PX = 7.2; // 12px IBM Plex Mono station label (App.css), 0.6em per glyph
+const LABEL_GAP = 16; // clear space between neighbouring labels
+const LABEL_EDGE = 8; // clear space between an end label and the svg edge
 const R = 6; // station dot radius
 const R_HIT = 14; // invisible station click/tap target
 
@@ -97,7 +102,11 @@ export function UpgradeMap({
 }) {
   const versions = path.versions;
   const n = versions.length;
-  const width = MARGIN_X * 2 + STATION_GAP * Math.max(n - 1, 0);
+  const longestLabel = Math.max(0, ...versions.map((v) => v.length)) * LABEL_CHAR_PX;
+  const gap = Math.max(STATION_GAP, Math.ceil(longestLabel + LABEL_GAP));
+  const marginX = Math.max(MARGIN_X, Math.ceil(longestLabel / 2 + LABEL_EDGE));
+  const stationX = (i: number) => marginX + gap * i;
+  const width = marginX * 2 + gap * Math.max(n - 1, 0);
   const minors = versions.map((v) => parseVersion(v).minor);
   const hasInterchange = commands.some((c) => c.channelSwitch);
 
@@ -112,8 +121,8 @@ export function UpgradeMap({
           aria-label="Interactive upgrade path map. Tab through stations and hops for details."
         >
           {path.hops.map((hop, i) => {
-            const x1 = MARGIN_X + STATION_GAP * i;
-            const x2 = MARGIN_X + STATION_GAP * (i + 1);
+            const x1 = stationX(i);
+            const x2 = stationX(i + 1);
             const midX = (x1 + x2) / 2;
             const toMinor = minors[i + 1] as number;
             const state = hopRiskState(hop.risks);
@@ -151,7 +160,7 @@ export function UpgradeMap({
           })}
 
           {versions.map((version, i) => {
-            const x = MARGIN_X + STATION_GAP * i;
+            const x = stationX(i);
             const minor = minors[i] as number;
             const isStart = i === 0;
             const isTarget = i === n - 1;

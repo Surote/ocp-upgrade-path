@@ -116,3 +116,52 @@ describe('UpgradeMap — interchange ring placement (plan.md §6 "Where the swit
     }
   });
 });
+
+describe('UpgradeMap — version labels fit the fixed-size map', () => {
+  afterEach(cleanup);
+
+  // Station labels are 12px IBM Plex Mono, whose glyphs advance 0.6em.
+  const LABEL_CHAR_PX = 7.2;
+
+  it('keeps every centred label inside the svg and clear of its neighbours, even for long prerelease and build versions', () => {
+    const versions = [v('4.17.30'), v('4.18.0-rc.10'), v('4.22.1+build.1')];
+    const path: Path = {
+      versions,
+      hops: [
+        { from: versions[0] as Version, to: versions[1] as Version, risks: [] },
+        { from: versions[1] as Version, to: versions[2] as Version, risks: [] },
+      ],
+      cost: { hops: 2, riskWeight: 0, tieBreak: 0 },
+      riskSummary: [],
+    };
+    const commands: readonly HopCommand[] = path.hops.map((h) => ({ from: h.from, to: h.to, upgradeTo: `oc adm upgrade --to ${h.to}` }));
+    render(
+      <UpgradeMap
+        path={path}
+        nodeInfo={EMPTY_NODE_INFO}
+        commands={commands}
+        selectedHopIndex={null}
+        selectedStationIndex={null}
+        onSelectHop={noop}
+        onSelectStation={noop}
+      />,
+    );
+
+    const svgWidth = Number(screen.getByRole('group', { name: /upgrade path map/i }).getAttribute('width'));
+    const labels = versions.map((version) => {
+      const station = screen.getByRole('button', { name: new RegExp(`^Station ${version.replace(/[.+]/g, '\\$&')},`) });
+      const x = Number(/translate\(([\d.]+),/.exec(station.getAttribute('transform') ?? '')?.[1]);
+      const half = (version.length * LABEL_CHAR_PX) / 2;
+      return { version, left: x - half, right: x + half };
+    });
+
+    for (const label of labels) {
+      expect(label.left, `${label.version} clipped on the left`).toBeGreaterThanOrEqual(0);
+      expect(label.right, `${label.version} clipped on the right`).toBeLessThanOrEqual(svgWidth);
+    }
+    for (const [i, next] of labels.slice(1).entries()) {
+      const prev = labels[i] as (typeof labels)[number];
+      expect(next.left - prev.right, `${prev.version} runs into ${next.version}`).toBeGreaterThan(0);
+    }
+  });
+});
