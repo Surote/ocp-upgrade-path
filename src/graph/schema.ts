@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VERSION_PATTERN } from '../engine/version';
 
 /**
  * Structural validation of the two wire shapes this app ever parses:
@@ -14,10 +15,35 @@ import { z } from 'zod';
  *    unexpected there) and must be re-validated on read, but its shape is not
  *    the wire shape.
  *
- * Both schemas only check *structure*; graph/parse.ts is responsible for the
+ * Both schemas check structure and the version grammar; graph/parse.ts is responsible for the
  * semantic checks (empty-graph detection, edge index bounds) and for minting the
  * branded NodeIndex/Version types from the validated primitives.
  */
+
+// The parser's own grammar, so a graph that loads can always be sorted and
+// grouped by stream.
+const versionSchema = z.string().regex(VERSION_PATTERN, 'Not an X.Y.Z[-prerelease][+build] version.');
+
+// Payloads and channel names are pasted unquoted into the copyable
+// `oc adm upgrade` script (design/commands.ts), so both are held to characters
+// a POSIX shell reads literally, and neither may open with `-` and be read by
+// `oc` as a flag. Every pinned fixture already fits.
+const payloadSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/, 'Not a release image pullspec (registry/repo@sha256:digest or :tag).');
+
+const channelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Not a channel name.');
+// The comma-separated wire list, parsed into its names. Empty entries are
+// skipped, so `""` and `"a, ,b"` are valid.
+const channelListSchema = z
+  .string()
+  .transform((list) =>
+    list
+      .split(',')
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
+  )
+  .pipe(z.array(channelNameSchema));
 
 const rawMatchingRuleSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('Always') }).strict(),
@@ -35,8 +61,8 @@ const rawRiskSchema = z.object({
 });
 
 const rawConditionalEdgeRefSchema = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
+  from: versionSchema,
+  to: versionSchema,
 });
 
 const rawConditionalEdgeGroupSchema = z.object({
@@ -52,15 +78,15 @@ const rawNodeMetadataSchema = z
     // observed live, but not contractually guaranteed -- optional, and an
     // absent/empty value is treated as "member of no channels" at parse time,
     // never a validation failure (see graph/parse.ts).
-    'io.openshift.upgrades.graph.release.channels': z.string().optional(),
+    'io.openshift.upgrades.graph.release.channels': channelListSchema.optional(),
   })
   // Other metadata keys exist on the wire (previous.remove_regex, manifestref)
   // but nothing downstream needs them -- ignored, not rejected.
   .loose();
 
 const rawNodeSchema = z.object({
-  version: z.string().min(1),
-  payload: z.string().min(1),
+  version: versionSchema,
+  payload: payloadSchema,
   metadata: rawNodeMetadataSchema.optional(),
 });
 
@@ -93,13 +119,13 @@ const trimmedRiskSchema = z.object({
 });
 
 const trimmedConditionalEdgeGroupSchema = z.object({
-  edges: z.array(z.object({ from: z.string().min(1), to: z.string().min(1) })),
+  edges: z.array(z.object({ from: versionSchema, to: versionSchema })),
   risks: z.array(trimmedRiskSchema),
 });
 
 const trimmedNodeSchema = z.object({
-  version: z.string().min(1),
-  payload: z.string().min(1),
+  version: versionSchema,
+  payload: payloadSchema,
   errataUrl: z.string().optional(),
   // Required (not optional): its absence is exactly the signal that a cached
   // entry was written by the pre-channel-membership (Phase 1) shape -- see
@@ -114,7 +140,7 @@ export const trimmedGraphSchema = z.object({
   edges: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])),
   conditionalEdges: z.array(trimmedConditionalEdgeGroupSchema),
   // Required, for the same reason `channels` above is required on each node.
-  channelNames: z.array(z.string()),
+  channelNames: z.array(channelNameSchema),
 });
 
 export type TrimmedGraphJSON = z.infer<typeof trimmedGraphSchema>;

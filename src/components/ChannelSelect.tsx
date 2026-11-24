@@ -13,10 +13,14 @@ export function ChannelSelect({ id, model }: { readonly id: string; readonly mod
       <label htmlFor={id}>Channel</label>
       <select id={id} value={model.value} disabled={model.loading} onChange={(e) => model.onChange(e.target.value)}>
         <option value="">Select a channel…</option>
-        {model.options.map((channel) => (
-          <option key={channel} value={channel}>
-            {channel}
-          </option>
+        {model.groups.map((group) => (
+          <optgroup key={group.stream} label={group.stream}>
+            {group.options.map((channel) => (
+              <option key={channel} value={channel}>
+                {channel}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
       {model.loading && <span>Loading channels…</span>}

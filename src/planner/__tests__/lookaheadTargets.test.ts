@@ -3,9 +3,9 @@ import { GraphClient } from '../../graph/client';
 import type { Version } from '../../graph/types';
 import { fakeFetch, fakeJsonResponse } from '../../test-utils/fakeFetch';
 import { FakeStorage } from '../../test-utils/fakeStorage';
-import { buildGraph } from '../../test-utils/buildGraph';
 import { loadFixture } from '../../test-utils/fixtures';
-import { buildLookaheadTargetOptions, discoverLookaheadSegments } from '../lookaheadTargets';
+import { discoverLookaheadSegments } from '../lookaheadTargets';
+import { buildTargetOptions } from '../targetOptions';
 
 function v(s: string): Version {
   return s as Version;
@@ -119,88 +119,9 @@ describe('look-ahead across the 4.22 -> 5.0 major boundary (live fixtures)', () 
     const anchor = await client.getGraph({ channel: 'stable-4.22', arch: 'amd64' });
     if (!anchor.ok) throw new Error('anchor fixture did not load');
 
-    const options = buildLookaheadTargetOptions(anchor.value.graph, v('4.22.3'), segments);
+    const options = buildTargetOptions(anchor.value.graph, v('4.22.3'), segments);
     const rc8 = options.find((o) => o.version === v('5.0.0-rc.8'));
 
-    expect(rc8).toEqual({ version: v('5.0.0-rc.8'), disabled: false, reason: undefined, viaChannel: 'candidate-5.0', classFallback: true });
-  });
-});
-
-describe('buildLookaheadTargetOptions', () => {
-  it('lists a version from a look-ahead segment as reachable when the anchor and segment share an overlapping, start-reachable version', () => {
-    const anchor = buildGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]]);
-    const forward = buildGraph(['4.20.0', '4.21.0', '4.22.9'], [[0, 1], [1, 2]]);
-    const options = buildLookaheadTargetOptions(anchor, v('4.18.0'), [
-      { channel: 'eus-4.22', graph: forward, classFallback: false },
-    ]);
-
-    const target = options.find((o) => o.version === v('4.22.9'));
-    expect(target).toBeDefined();
-    expect(target?.disabled).toBe(false);
-    expect(target?.viaChannel).toBe('eus-4.22');
-    expect(target?.classFallback).toBe(false);
-  });
-
-  it('excludes versions already present in the anchor graph -- those belong to the in-channel list, not here', () => {
-    const anchor = buildGraph(['4.18.0', '4.20.0'], [[0, 1]]);
-    const forward = buildGraph(['4.20.0', '4.22.0'], [[0, 1]]);
-    const options = buildLookaheadTargetOptions(anchor, v('4.18.0'), [
-      { channel: 'eus-4.22', graph: forward, classFallback: false },
-    ]);
-    expect(options.map((o) => o.version)).not.toContain(v('4.20.0'));
-  });
-
-  it('marks a look-ahead version unreachable, with a reason, when the segment does not connect back to the reachable frontier', () => {
-    const anchor = buildGraph(['4.18.0', '4.19.0'], [[0, 1]]);
-    // forward shares NO version with anchor -- no legitimate join point.
-    const forward = buildGraph(['4.20.5', '4.21.0'], [[0, 1]]);
-    const options = buildLookaheadTargetOptions(anchor, v('4.18.0'), [
-      { channel: 'stable-4.21', graph: forward, classFallback: false },
-    ]);
-    expect(options.every((o) => o.disabled)).toBe(true);
-    expect(options[0]?.reason).toBeTruthy();
-  });
-
-  it('surfaces the class fallback flag through to the option so the UI can call it out', () => {
-    const anchor = buildGraph(['4.18.0', '4.20.0'], [[0, 1]]);
-    const forward = buildGraph(['4.20.0', '4.21.5'], [[0, 1]]);
-    const options = buildLookaheadTargetOptions(anchor, v('4.18.0'), [
-      { channel: 'stable-4.21', graph: forward, classFallback: true, requestedClass: 'eus' },
-    ]);
-    const target = options.find((o) => o.version === v('4.21.5'));
-    expect(target?.classFallback).toBe(true);
-  });
-
-  it('carries the reachable frontier across multiple chained segments', () => {
-    const anchor = buildGraph(['4.18.0', '4.20.0'], [[0, 1]]);
-    const seg1 = buildGraph(['4.20.0', '4.21.0'], [[0, 1]]); // reachable from anchor
-    const seg2 = buildGraph(['4.21.0', '4.22.9'], [[0, 1]]); // reachable via seg1
-    const options = buildLookaheadTargetOptions(anchor, v('4.18.0'), [
-      { channel: 'eus-4.21', graph: seg1, classFallback: false },
-      { channel: 'eus-4.22', graph: seg2, classFallback: false },
-    ]);
-    const target = options.find((o) => o.version === v('4.22.9'));
-    expect(target?.disabled).toBe(false);
-  });
-
-  it('joins a later segment directly to the anchor when an earlier segment is a sibling stream, not a link', () => {
-    // 4.23 and 5.0 both follow 4.22; 5.0 must not have to pass through 4.23.
-    const anchor = buildGraph(['4.22.0', '4.22.1', '4.22.5'], [[0, 1], [0, 2]]);
-    const seg423 = buildGraph(['4.22.1', '4.23.0-ec.0'], [[0, 1]]);
-    const seg50 = buildGraph(['4.22.5', '5.0.0-rc.1'], [[0, 1]]);
-    const options = buildLookaheadTargetOptions(anchor, v('4.22.0'), [
-      { channel: 'candidate-4.23', graph: seg423, classFallback: true, requestedClass: 'stable' },
-      { channel: 'candidate-5.0', graph: seg50, classFallback: true, requestedClass: 'stable' },
-    ]);
-    expect(options.find((o) => o.version === v('5.0.0-rc.1'))?.disabled).toBe(false);
-  });
-
-  it('is sorted newest first', () => {
-    const anchor = buildGraph(['4.18.0'], []);
-    const forward = buildGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]]);
-    const options = buildLookaheadTargetOptions(anchor, v('4.18.0'), [
-      { channel: 'stable-4.20', graph: forward, classFallback: false },
-    ]);
-    expect(options.map((o) => o.version)).toEqual([v('4.20.0'), v('4.19.0')]);
+    expect(rc8).toEqual({ version: v('5.0.0-rc.8'), reachable: true, via: { channel: 'candidate-5.0', classFallback: true } });
   });
 });

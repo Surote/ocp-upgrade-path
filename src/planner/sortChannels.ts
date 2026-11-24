@@ -1,5 +1,5 @@
 import { type ChannelName, parseChannelName } from '../design/channels';
-import { compareStreams } from '../engine/version';
+import { compareStreams, formatStream } from '../engine/version';
 
 /**
  * Presentation order for a channel's "class" once channels are grouped by
@@ -50,4 +50,10 @@ export function sortChannels(names: readonly string[]): readonly string[] {
   unparsed.sort((a, b) => a.localeCompare(b));
 
   return [...parsed.map((p) => p.raw), ...unparsed];
+}
+
+/** The stream a channel groups under; names outside the convention share `Other`, which `sortChannels` puts last. */
+export function channelStream(channel: string): string {
+  const parsed = parseChannelName(channel);
+  return parsed ? formatStream(parsed) : 'Other';
 }

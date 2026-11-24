@@ -76,7 +76,7 @@ describe('UpgradeMap — interchange ring placement (plan.md §6 "Where the swit
     }
 
     // The inline tag text renders once, on the correct station only.
-    expect(screen.getByText('⇄ switch to eus-4.22')).toBeInTheDocument();
+    expect(screen.getByText('⇄ eus-4.22')).toBeInTheDocument();
   });
 
   it('emits no interchange ring at all when no command carries a channelSwitch (the stable-4.20 regression)', () => {
@@ -108,11 +108,87 @@ describe('UpgradeMap — interchange ring placement (plan.md §6 "Where the swit
       />,
     );
 
-    expect(screen.queryByText(/⇄ switch to/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^⇄ (?!ring)/)).not.toBeInTheDocument();
     expect(screen.queryByText('⇄ ring = channel switch required')).not.toBeInTheDocument();
     for (const version of ['4.18.2', '4.18.50', '4.19.40', '4.20.32']) {
       const station = screen.getByRole('button', { name: new RegExp(`^Station ${version.replace(/\./g, '\\.')},`) });
       expect(station).not.toHaveAccessibleName(/interchange/);
+    }
+  });
+});
+
+describe('UpgradeMap — labels and switch tags fit the fixed-size map', () => {
+  afterEach(cleanup);
+
+  // Station labels are 12px IBM Plex Mono and switch tags 10px IBM Plex Mono,
+  // whose glyphs (the ⇄ included, measured in Chrome) advance 0.6em.
+  const CHAR_PX: Record<string, number> = { station__label: 7.2, 'interchange-tag': 6 };
+
+  function pathThrough(versions: readonly Version[]): Path {
+    return {
+      versions,
+      hops: versions.slice(1).map((to, i) => ({ from: versions[i] as Version, to, risks: [] })),
+      cost: { hops: versions.length - 1, riskWeight: 0, tieBreak: 0 },
+      riskSummary: [],
+    };
+  }
+
+  function hop(from: string, to: string, switchTo?: string): HopCommand {
+    const base = { from: v(from), to: v(to), upgradeTo: `oc adm upgrade --to ${to}` };
+    return switchTo ? { ...base, channelSwitch: `oc adm upgrade channel ${switchTo}`, channelSwitchTo: switchTo } : base;
+  }
+
+  it.each([
+    {
+      name: 'long prerelease and build versions',
+      versions: [v('4.17.30'), v('4.18.0-rc.10'), v('4.22.1+build.1')],
+      commands: [hop('4.17.30', '4.18.0-rc.10'), hop('4.18.0-rc.10', '4.22.1+build.1')],
+    },
+    {
+      name: 'channel switches on consecutive stations',
+      versions: [v('4.20.33'), v('4.21.28'), v('4.22.9')],
+      commands: [hop('4.20.33', '4.21.28', 'stable-4.21'), hop('4.21.28', '4.22.9', 'stable-4.22')],
+    },
+    {
+      name: 'a switch tag between two plain stations',
+      versions: [v('4.19.41'), v('4.20.33'), v('4.21.28'), v('4.22.9')],
+      commands: [hop('4.19.41', '4.20.33'), hop('4.20.33', '4.21.28', 'candidate-4.21'), hop('4.21.28', '4.22.9')],
+    },
+  ])('keeps every label and tag inside the svg and clear of its neighbours: $name', ({ versions, commands }) => {
+    render(
+      <UpgradeMap
+        path={pathThrough(versions)}
+        nodeInfo={EMPTY_NODE_INFO}
+        commands={commands}
+        selectedHopIndex={null}
+        selectedStationIndex={null}
+        onSelectHop={noop}
+        onSelectStation={noop}
+      />,
+    );
+
+    const svgWidth = Number(screen.getByRole('group', { name: /upgrade path map/i }).getAttribute('width'));
+    const stations = versions.map((version) => {
+      const station = screen.getByRole('button', { name: new RegExp(`^Station ${version.replace(/[.+]/g, '\\$&')},`) });
+      const x = Number(/translate\(([\d.]+),/.exec(station.getAttribute('transform') ?? '')?.[1]);
+      const boxes = [...station.querySelectorAll('text')].flatMap((text) => {
+        const charPx = CHAR_PX[text.getAttribute('class') ?? ''];
+        if (charPx === undefined) return [];
+        const width = [...(text.textContent ?? '')].length * charPx;
+        const anchorX = x + Number(text.getAttribute('x') ?? 0);
+        const left = text.getAttribute('text-anchor') === 'start' ? anchorX : anchorX - width / 2;
+        return [{ text: text.textContent, left, right: left + width }];
+      });
+      return { version, boxes, left: Math.min(...boxes.map((b) => b.left)), right: Math.max(...boxes.map((b) => b.right)) };
+    });
+
+    for (const box of stations.flatMap((s) => s.boxes)) {
+      expect(box.left, `${box.text} clipped on the left`).toBeGreaterThanOrEqual(0);
+      expect(box.right, `${box.text} clipped on the right`).toBeLessThanOrEqual(svgWidth);
+    }
+    for (const [i, next] of stations.slice(1).entries()) {
+      const prev = stations[i] as (typeof stations)[number];
+      expect(next.left - prev.right, `${prev.version} runs into ${next.version}`).toBeGreaterThan(0);
     }
   });
 });

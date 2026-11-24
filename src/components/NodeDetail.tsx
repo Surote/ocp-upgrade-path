@@ -20,24 +20,15 @@ export function NodeDetail({
   channelNames,
   multiGraph,
 }: {
-  readonly version: Version | undefined;
+  readonly version: Version;
   readonly node: GraphNode | undefined;
   readonly channelNames: readonly string[];
   readonly multiGraph: boolean;
 }) {
-  if (!version) {
-    return (
-      <section className="panel panel--node-detail" aria-labelledby="node-detail-heading">
-        <h2 id="node-detail-heading">Station detail</h2>
-        <p className="panel__hint">Select a station on the map to see its advisory, digest and channel membership.</p>
-      </section>
-    );
-  }
-
   const channels = multiGraph ? [] : channelNamesForNode(node, channelNames);
 
   return (
-    <section className="panel panel--node-detail" aria-labelledby="node-detail-heading">
+    <section className="panel" aria-labelledby="node-detail-heading">
       <h2 id="node-detail-heading">
         Station <span className="mono">{version}</span>
       </h2>

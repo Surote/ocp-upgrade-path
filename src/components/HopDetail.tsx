@@ -15,29 +15,20 @@ export function HopDetail({
   index,
   total,
 }: {
-  readonly hop: PathHop | undefined;
+  readonly hop: PathHop;
   readonly command: HopCommand | undefined;
-  readonly index: number | null;
+  readonly index: number;
   readonly total: number;
 }) {
-  if (!hop || index === null) {
-    return (
-      <section className="panel panel--hop-detail" aria-labelledby="hop-detail-heading">
-        <h2 id="hop-detail-heading">Hop detail</h2>
-        <p className="panel__hint">Select a segment on the map to see the risks and commands for that specific hop.</p>
-      </section>
-    );
-  }
-
   return (
-    <section className="panel panel--hop-detail" aria-labelledby="hop-detail-heading">
+    <section className="panel" aria-labelledby="hop-detail-heading">
       <h2 id="hop-detail-heading">
         Hop {index + 1} of {total}: <span className="mono">{hop.from}</span> → <span className="mono">{hop.to}</span>
       </h2>
 
       {command?.channelSwitch && (
         <p className="interchange-note">
-          <span className="interchange-note__icon" aria-hidden="true">
+          <span aria-hidden="true">
             ⇄
           </span>
           Switch to <span className="mono">{command.channelSwitchTo}</span> while standing on{' '}
