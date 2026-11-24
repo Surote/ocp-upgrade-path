@@ -230,6 +230,21 @@ answers "where does it enter".
 - **Emitted commands.** Per hop: the channel switch and `oc adm upgrade --to <version>`,
   with the digest form on a secondary line for disconnected clusters. Plus the whole
   sequence as one script.
+- **Channel list reaches back to 4.14.** The seed's membership names nothing older than
+  4.18, so once the seed lands the client probes the streams below it in the background:
+  stable, eus (even minors), fast and candidate for each stream down to a 4.14 floor,
+  three at a time, skipping any name a fetched graph already named. The dropdown grows
+  when answers land; there is no button and nothing blocks. Membership names older than
+  4.14 (a 4.14 graph names 4.12 channels) stay out of the list, though 4.12 and 4.13
+  releases inside those graphs remain selectable starts. Found names and empty probes are
+  cached for a day under their own `localStorage` key, outside the graph LRU, so a warm
+  load probes nothing. A failed probe is retried once and never recorded as absent.
+  Measured Nov 2026: a cold load probes 3–4 channels and lists every 4.14–4.17 channel
+  about 3 s after navigation (seed ~2.2 s, probes ~0.8 s); a warm load sends no probe.
+- **Legacy streams.** Streams older than 4.18 are labelled legacy: their channel
+  optgroups read `4.14 · legacy`, and a start in one gets a one-line note under the Start
+  field linking Red Hat's lifecycle policy. The UI never states a support date; the
+  threshold is one constant (`design/lifecycle.ts`), raised as streams age out.
 - **Permalink.** Channel, arch, start and target encoded in the query string with a copy
   button. Upgrade plans get pasted into change requests; this makes them linkable. Params
   arrive as untrusted strings and are resolved against the loaded graph before use — an
@@ -611,12 +626,13 @@ version's own "Preparing to update a cluster" page:
 
 | Entering | Ack key(s) |
 |---|---|
+| 4.13 | `ack-4.12-kube-1.26-api-removals-in-4.13` (docs source, openshift-docs `enterprise-4.13`) |
 | 4.14 | `ack-4.13-kube-1.27-api-removals-in-4.14` |
 | 4.16 | `ack-4.15-kube-1.29-api-removals-in-4.16` |
 | 4.19 | `ack-4.18-gateway-api-management-in-4.19` **and** `ack-4.18-kube-1.32-api-removals-in-4.19` |
 | 4.20 | `ack-4.19-admissionregistration-v1beta1-api-removals-in-4.20` |
 | 4.22 | `ack-4.21-boot-image-opt-out-in-4.22` |
-| 4.17, 4.18, 4.21 | none found on the destination page |
+| 4.15, 4.17, 4.18, 4.21 | none found on the destination page (4.15: "no Kubernetes API removals") |
 
 Note 4.19 needs **two**, and several minors need none — so the key must never be built from
 a pattern. Where no key was found, the UI must say *"none documented — confirm via the KCS"*,
@@ -703,10 +719,14 @@ outnumber unconditional ones roughly six to one. Suppressing them would hide mos
 risk surface. They are labelled as conditional and the query is shown for the operator to
 evaluate themselves.
 
-**Q6 · Q7 — Seed-and-expand channel discovery.** There is no endpoint listing channels —
-only node metadata naming them, which requires a graph to read. One known-good channel
-fetched at load yields the real channel names; the list expands as the user navigates.
-Nothing hardcoded to rot.
+**Q6 · Q7 — Seed-and-expand channel discovery, plus backward probes.** There is no
+endpoint listing channels — only node metadata naming them, which requires a graph to
+read. One known-good channel fetched at load yields the real channel names; the list
+expands as the user navigates. Membership only names channels a stream or two from a
+node's own, so the seed never reaches back to 4.14. Older streams are found by probing
+generated names below the seed down to a fixed 4.14 floor, in the background, with the
+answers cached by name. The floor is the one hardcoded fact: it is the product's scope,
+not a guess about what Cincinnati serves.
 
 **Q12 — Waypoint alternates, not k-shortest-paths.** Yen's algorithm answers a question
 nobody asked. Grouping by intermediate minor answers the one they did.
