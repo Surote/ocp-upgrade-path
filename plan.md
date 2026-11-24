@@ -706,7 +706,8 @@ any came from a fast or candidate graph (or has no recorded source), the leg is
 `unavailable` without fetching anything. Otherwise the planner loads `eus-4.(E+2)` through
 `GraphClient` after the route renders (one fetch per leg at most, cached like any graph; an
 `eus` anchor's look-ahead has usually loaded it already). Until it arrives, the leg reads
-`checking` and gives no pause steps. If that graph lacks a paused hop, has no releases yet,
+`checking` and gives no pause steps. Each leg settles as soon as its own graph arrives; a slow
+EUS channel for one leg never holds another leg in `checking`. If that graph lacks a paused hop, has no releases yet,
 or fails to load, the leg is `unavailable` and the panel says which, with no pause steps.
 The legs are data (`'available' | 'checking' | 'unavailable'`, each with its `eusChannel`),
 built by `controlPlaneOnlyLegs` in design/eus.ts and loaded by
