@@ -109,6 +109,28 @@ describe('look-ahead discovery through the graph client', () => {
     expect(segments.map((s) => s.channel)).toEqual(['stable-4.21', 'stable-4.22', 'stable-4.23', 'stable-4.24', 'stable-5.0']);
   });
 
+  it('routes through a stream discovered after a newer one, keeping fetch order in channelsTried', async () => {
+    // Only the 5.1 graph names candidate-4.23, so 4.23 is fetched after 5.1.
+    const client = makeClient(
+      new Map([
+        ['stable-4.22|amd64', jsonHandler(rawGraphJson(['4.21.0', '4.22.0'], [[0, 1]], ['stable-4.22', 'candidate-5.1']))],
+        ['candidate-5.1|amd64', jsonHandler(rawGraphJson(['4.23.0', '5.1.0'], [[0, 1]], ['candidate-4.23', 'candidate-5.1']))],
+        ['candidate-4.23|amd64', jsonHandler(rawGraphJson(['4.22.0', '4.23.0'], [[0, 1]]))],
+      ]),
+    );
+    const anchor = await client.getGraph({ channel: 'stable-4.22', arch: 'amd64' });
+    if (!anchor.ok) throw new Error('anchor did not load');
+    const discovery = await discoverLookahead(makeGraphLoader(client), 'stable-4.22', anchor.value.graph, 'amd64');
+
+    expect(discovery.channelsTried).toEqual(['candidate-5.1', 'candidate-4.23']);
+    const options = buildTargetOptions(anchor.value.graph, v('4.22.0'), discovery.segments);
+    expect(options.find((o) => o.version === '5.1.0')).toEqual({
+      version: '5.1.0',
+      reachable: true,
+      via: { channel: 'candidate-5.1', classFallback: true },
+    });
+  });
+
   it('records a genuine network failure instead of throwing', async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error('network down');
