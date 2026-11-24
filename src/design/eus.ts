@@ -79,7 +79,8 @@ interface StreamRun {
   readonly stream: Stream;
   readonly first: Version;
   readonly last: Version;
-  /** Index of `last` in the route's versions; hop `i` arrives at version `i + 1`. */
+  /** Indexes of `first` and `last` in the route's versions; hop `i` arrives at version `i + 1`. */
+  readonly firstIndex: number;
   readonly lastIndex: number;
 }
 
@@ -91,7 +92,7 @@ function streamRuns(versions: readonly Version[]): StreamRun[] {
     if (prev && formatStream(prev.stream) === formatStream(stream)) {
       runs[runs.length - 1] = { ...prev, last: version, lastIndex: index };
     } else {
-      runs.push({ stream, first: version, last: version, lastIndex: index });
+      runs.push({ stream, first: version, last: version, firstIndex: index, lastIndex: index });
     }
   });
   return runs;
@@ -133,11 +134,15 @@ export function controlPlaneOnlyLegs(hops: readonly PathHop[]): readonly Control
       to: c.stream,
       docsUrl: `https://docs.redhat.com/en/documentation/openshift_container_platform/${formatStream(c.stream)}/html/updating_clusters/performing-a-cluster-update#control-plane-only-update`,
     };
-    const blockingHop = hops.slice(a.lastIndex, c.lastIndex).find((hop) => !isControlPlaneOnlyHop(hop));
+    // Workers stay paused from the pause point until the cluster first reaches the destination minor; later patch
+    // hops inside it may follow unpaused, so they only decide how far into it the unpause can wait.
+    const blockingHop = hops.slice(a.lastIndex, c.firstIndex).find((hop) => !isControlPlaneOnlyHop(hop));
+    let unpauseIndex = c.firstIndex;
+    while (unpauseIndex < c.lastIndex && isControlPlaneOnlyHop(hops[unpauseIndex] as PathHop)) unpauseIndex += 1;
     legs.push(
       blockingHop
         ? { ...span, kind: 'unavailable', blockingHop }
-        : { ...span, kind: 'available', pauseAt: a.last, firstPausedHopTo: b.first, unpauseAt: c.last },
+        : { ...span, kind: 'available', pauseAt: a.last, firstPausedHopTo: b.first, unpauseAt: (hops[unpauseIndex - 1] as PathHop).to },
     );
     i += 2;
   }

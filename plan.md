@@ -694,13 +694,16 @@ assumed for 5.x.
 update "only after updates between all versions involved have been made available in
 `stable` channels", and runs it on `eus-<4.y+2>`, which receives each release when stable
 does. A minor sequence alone is not proof. Each leg therefore checks the `sourceChannel` of
-every hop from its pause point to its unpause point. If any came from a fast or candidate
+every hop that runs with workers paused: from the pause point to the first arrival in
+4.E+2. If any came from a fast or candidate
 graph (or has no recorded source), the leg is `unavailable`: the panel names that hop and
 its channel, says a Control Plane Only update isn't available for the leg on this route, and
 gives no pause steps.
 
 Each available leg pauses `mcp/worker` on the last route version in 4.E, right before the
-first hop into 4.E+1, and unpauses on the last route version in 4.E+2. Then `oc get mcp`
+first hop into 4.E+1, and unpauses on the last 4.E+2 version the route reaches over eus or
+stable hops (a later patch hop inside 4.E+2 from fast or candidate runs as an ordinary
+update after the unpause, so it no longer voids the leg). Then `oc get mcp`
 until every pool the operator paused reports `UPDATED=True` and `UPDATING=False`, before
 the route leaves that stream. The `oc patch` commands are Red Hat's verbatim. The doc link
 uses the leg's destination stream. The UI (`EusAdvisory`) shows one flat list, for example

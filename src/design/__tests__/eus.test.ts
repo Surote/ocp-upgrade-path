@@ -113,9 +113,16 @@ describe('controlPlaneOnlyLegs', () => {
     expect(summary(controlPlaneOnlyLegs(from('candidate-4.18', route(...versions), 0)))).toEqual(['4.16->4.18 pause@4.16.33 unpause@4.18.59']);
     expect(summary(controlPlaneOnlyLegs(from('fast-4.19', route(...versions), 4)))).toEqual(['4.16->4.18 pause@4.16.33 unpause@4.18.59']);
     expect(summary(controlPlaneOnlyLegs(from('candidate-4.18', route(...versions), 1)))).toEqual(['4.16->4.18 unavailable at 4.17.59']);
-    expect(summary(controlPlaneOnlyLegs(from('fast-4.18', route(...versions), 3)))).toEqual(['4.16->4.18 unavailable at 4.18.59']);
+    // Hop 3 runs inside 4.18 after the cluster first reaches it: workers unpause at 4.18.2 and 4.18.59 is an ordinary update.
+    expect(summary(controlPlaneOnlyLegs(from('fast-4.18', route(...versions), 3)))).toEqual(['4.16->4.18 pause@4.16.33 unpause@4.18.2']);
     expect(summary(controlPlaneOnlyLegs(from('eus-4.18', route(...versions), 2)))).toEqual(['4.16->4.18 pause@4.16.33 unpause@4.18.59']);
     expect(summary(controlPlaneOnlyLegs(from(undefined, route(...versions), 2)))).toEqual(['4.16->4.18 unavailable at 4.18.2']);
+  });
+
+  it('unpauses at the last destination release reached over eus or stable hops when a later patch hop is from candidate', () => {
+    // Shaped like live eus-4.14 -> 4.22.23: every hop into 4.22.22 is on eus-4.22, only 4.22.22 -> 4.22.23 is on candidate-4.22.
+    const hops = route('4.20.46', '4.21.42', '4.22.22', '4.22.23').map((hop, i) => ({ ...hop, sourceChannel: i === 2 ? 'candidate-4.22' : 'eus-4.22' }));
+    expect(summary(controlPlaneOnlyLegs(hops))).toEqual(['4.20->4.22 pause@4.20.46 unpause@4.22.22']);
   });
 
   it("links each leg to the Control Plane Only docs of the leg's destination stream", () => {
