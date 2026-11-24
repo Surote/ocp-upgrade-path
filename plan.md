@@ -296,8 +296,9 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > so did one named before it (stable-5.0 naming stable-5.2 before fast-5.1 names the
 > fast-5.2 that alone holds the target). Which channel a route needs is the route search's
 > question. On the Nov 2026 snapshot this costs 19 fetches from `eus-4.18` (was 8) and 5
-> from `stable-4.22` (was 4), and the dropdown gains the prereleases only `candidate`
-> channels reach, marked as a class change. Both also read reachability from
+> from `stable-4.22` (was 4), and target and stop options offer prereleases only from a `candidate`
+> anchor or a prerelease start (411 targets fell to 334 from `eus-4.18` 4.16.33); routes may
+> still pass through one. Both also read reachability from
 > `routeAcrossSegments` (engine/routeSearch.ts), a layered shortest-path DP over the anchor
 > plus every look-ahead segment. Its frontier carries across segments, so a segment can
 > contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
