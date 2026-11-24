@@ -108,8 +108,10 @@ Static SPA plus a thin proxy, one container.
 
 - **Client — Vite + React + TS.** Cascading dropdowns, path search, SVG rendering.
   Two-tier cache: in-memory `Map` plus `localStorage`, keyed `channel|arch`, 1-hour TTL,
-  LRU capped at 8 graphs (~1.8 MB). The trimmed shape keeps per-node **channel
-  membership**, interned as ids against a per-graph name table — it costs ~3 KB and feeds
+  compressed entries evicted least recently used past 2M characters: a 4.14 route reads
+  about 34 graphs, 7.0M characters as JSON, 1.6M gzipped (Nov 2026). The trimmed shape
+  keeps per-node **channel membership**, interned as ids against a per-graph name
+  table — it costs ~3 KB and feeds
   both the node-detail panel (§6) and seed-and-expand channel discovery (Q6), which
   otherwise has no source for the channel list.
 - **Server — Node, ~40 lines.** Serves built assets and proxies `/api/graph` to
@@ -304,8 +306,10 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
 > three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
-> channel is named that it has not tried (safety cap 48 fetches). It fetches every named
-> channel of a class the stream's preference order lists, fallbacks included, and never
+> channel is named that it has not tried (safety cap 48 fetches). It fetches in waves,
+> six at a time: every named channel not yet tried, then whatever that wave names (six
+> waves from a 4.14 anchor). It fetches every named channel of a class the stream's
+> preference order lists, fallbacks included, and never
 > decides from discovery order that a fallback is unneeded. Three successive review
 > findings came from such rules: a preferred channel named after a fallback hid it, and
 > so did one named before it (stable-5.0 naming stable-5.2 before fast-5.1 names the
@@ -754,7 +758,7 @@ not a guess about what Cincinnati serves.
 nobody asked. Grouping by intermediate minor answers the one they did.
 
 **Q14 · Q19 · Q28 — Two cache tiers, 1-hour TTL.** Server-side shared cache with
-stale-while-revalidate; client-side LRU capped at 8 trimmed graphs. No boot warming —
+stale-while-revalidate; client-side LRU of gzipped graphs, bounded by size. No boot warming —
 that would slow cold starts on a scale-to-zero service, which is backwards. A visible
 fetch timestamp and manual refresh prevent anyone planning a production upgrade against
 stale data.
