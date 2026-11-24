@@ -1,7 +1,9 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../App';
+import { ChannelNameCache } from '../cache/channelNameCache';
 import { GraphClient } from '../graph/client';
+import { legacyProbeNames } from '../planner/legacyChannels';
 import { fakeFetch, fakeJsonResponse } from '../test-utils/fakeFetch';
 import { FakeStorage } from '../test-utils/fakeStorage';
 
@@ -30,7 +32,7 @@ const WORLD: Record<string, unknown> = {
   'eus-4.14': rawGraph(['4.12.0', '4.14.0', '4.14.1'], 'eus-4.12,stable-4.12,eus-4.14,stable-4.14'),
 };
 
-type Responder = (channel: string, attempt: number) => Response | undefined;
+type Responder = (channel: string, attempt: number) => Response | Promise<Response> | undefined;
 
 /** A client over `WORLD` that records every channel fetched; `override` can answer a fetch first. */
 function worldClient(storage: Storage, override?: Responder) {
@@ -109,6 +111,27 @@ describe('Backward channel discovery', () => {
     await waitFor(() => expect(channelOptions()).toContain('stable-4.20'));
     expect(channelOptions()).toEqual(expect.arrayContaining(['stable-4.17', 'eus-4.16', 'stable-4.14', 'eus-4.14']));
     expect(second.fetched).toEqual(['stable-4.20']);
+  });
+
+  it('lists channels another tab recorded while this tab waited for the seed', async () => {
+    const storage = new FakeStorage();
+    let releaseSeed = () => {};
+    const seedGate = new Promise<void>((resolve) => {
+      releaseSeed = resolve;
+    });
+    const { client, fetched } = worldClient(storage, (channel) =>
+      channel === 'stable-4.20' ? seedGate.then(() => fakeJsonResponse(WORLD['stable-4.20'])) : undefined,
+    );
+    render(<App graphClient={client} />);
+    await waitFor(() => expect(fetched).toContain('stable-4.20'));
+
+    const present = ['stable-4.17', 'stable-4.16', 'eus-4.16', 'stable-4.15', 'stable-4.14', 'eus-4.14'];
+    const empty = legacyProbeNames({ major: 4, minor: 18 }).filter((name) => !present.includes(name));
+    new ChannelNameCache(storage).record({ present, empty });
+    releaseSeed();
+
+    await waitFor(() => expect(channelOptions()).toEqual(expect.arrayContaining(present)));
+    expect(fetched).toEqual(['stable-4.20']);
   });
 
   it('probes a channel whose fetch failed again on the next load, but not one that came back empty', async () => {
