@@ -4,11 +4,13 @@ import type { PathHop, StitchedPathResult, StitchError } from '../engine/types';
 import type { Version } from '../graph/types';
 import { describeStitchError } from '../planner/describeStitchError';
 import type { AsyncResult } from '../planner/useAsyncResult';
+import type { RouteHold } from '../planner/usePlanner';
 import { AdminAcksPanel } from './AdminAcksPanel';
 import { AlternatesPanel } from './AlternatesPanel';
 import { CommandScript } from './CommandScript';
 import { EusAdvisory } from './EusAdvisory';
 import { HopDetail } from './HopDetail';
+import { LowerRiskRoute } from './LowerRiskRoute';
 import { NodeDetail } from './NodeDetail';
 import { RiskSummary } from './RiskSummary';
 import { RouteSummary } from './RouteSummary';
@@ -25,10 +27,16 @@ export function PathResult({
   result,
   channel,
   channelNames,
+  routeHold,
+  pinnedStops,
+  onUseLowerRisk,
 }: {
   readonly result: AsyncResult<StitchedPathResult, StitchError>;
   readonly channel: string | undefined;
   readonly channelNames: readonly string[];
+  readonly routeHold?: RouteHold;
+  readonly pinnedStops: readonly Version[];
+  readonly onUseLowerRisk: () => void;
 }) {
   const [selectedHop, setSelectedHop] = useState<number | null>(null);
   const [selectedStation, setSelectedStation] = useState<number | null>(null);
@@ -46,6 +54,20 @@ export function PathResult({
     setSelectedStation(null);
   }
 
+  if (routeHold === 'invalidStops') {
+    return (
+      <p className="path-result-error" role="alert">
+        Route withheld: remove or replace the flagged stop above.
+      </p>
+    );
+  }
+  if (routeHold === 'checkingStops') {
+    return (
+      <p className="path-result-hint" aria-live="polite" aria-busy="true">
+        Checking the pinned stops…
+      </p>
+    );
+  }
   if (result.status === 'idle') {
     return <p className="path-result-hint">Select a channel, start version and target version to find an upgrade path.</p>;
   }
@@ -64,7 +86,7 @@ export function PathResult({
     );
   }
 
-  const { primary, alternates, stitch, nodeInfo } = result.value;
+  const { primary, alternates, stitch, nodeInfo, riskComparison } = result.value;
   const commands = buildHopCommands(primary, channel, nodeInfo, {
     channelNames,
     multiGraph: stitch.multiGraph,
@@ -79,11 +101,13 @@ export function PathResult({
     <div aria-live="polite">
       <StitchBanner channelsUsed={stitch.channelsUsed} classFallbacks={stitch.classFallbacks} />
       <RouteSummary path={primary} />
+      <LowerRiskRoute primary={primary} comparison={riskComparison} onUse={onUseLowerRisk} />
 
       <UpgradeMap
         path={primary}
         nodeInfo={nodeInfo}
         commands={commands}
+        pinnedStops={pinnedStops}
         selectedHopIndex={selectedHop}
         selectedStationIndex={selectedStation}
         onSelectHop={toggleHop}
