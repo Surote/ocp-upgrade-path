@@ -18,9 +18,13 @@ export interface ParsedVersion {
   readonly prerelease: readonly string[];
 }
 
-// Build metadata (`+...`) is matched but discarded: semver §10 says it never
-// affects precedence.
-export const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.+)?$/;
+// Prerelease and build are SemVer dot-separated `[0-9A-Za-z-]` identifiers and
+// nothing looser: graph/schema.ts validates every version with this pattern,
+// and design/commands.ts pastes versions unquoted into a shell script. Build
+// metadata (`+...`) is matched but discarded: semver §10 says it never affects
+// precedence.
+export const VERSION_PATTERN =
+  /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 /**
  * Parses a Cincinnati version string into its components. Throws on a string

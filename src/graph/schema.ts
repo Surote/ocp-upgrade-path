@@ -24,6 +24,20 @@ import { VERSION_PATTERN } from '../engine/version';
 // grouped by stream.
 const versionSchema = z.string().regex(VERSION_PATTERN, 'Not an X.Y.Z[-prerelease][+build] version.');
 
+// Payloads and channel names are pasted unquoted into the copyable
+// `oc adm upgrade` script (design/commands.ts), so both are held to characters
+// a POSIX shell reads literally, and neither may open with `-` and be read by
+// `oc` as a flag. Every pinned fixture already fits.
+const payloadSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/, 'Not a release image pullspec (registry/repo@sha256:digest or :tag).');
+
+const channelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Not a channel name.');
+// The comma-separated wire list; graph/parse.ts splits it and trims the spaces.
+const channelListSchema = z
+  .string()
+  .regex(/^\s*(?:[A-Za-z0-9][A-Za-z0-9._-]*)?\s*(?:,\s*(?:[A-Za-z0-9][A-Za-z0-9._-]*)?\s*)*$/, 'Not a comma-separated channel list.');
+
 const rawMatchingRuleSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('Always') }).strict(),
   z.object({
@@ -57,7 +71,7 @@ const rawNodeMetadataSchema = z
     // observed live, but not contractually guaranteed -- optional, and an
     // absent/empty value is treated as "member of no channels" at parse time,
     // never a validation failure (see graph/parse.ts).
-    'io.openshift.upgrades.graph.release.channels': z.string().optional(),
+    'io.openshift.upgrades.graph.release.channels': channelListSchema.optional(),
   })
   // Other metadata keys exist on the wire (previous.remove_regex, manifestref)
   // but nothing downstream needs them -- ignored, not rejected.
@@ -65,7 +79,7 @@ const rawNodeMetadataSchema = z
 
 const rawNodeSchema = z.object({
   version: versionSchema,
-  payload: z.string().min(1),
+  payload: payloadSchema,
   metadata: rawNodeMetadataSchema.optional(),
 });
 
@@ -104,7 +118,7 @@ const trimmedConditionalEdgeGroupSchema = z.object({
 
 const trimmedNodeSchema = z.object({
   version: versionSchema,
-  payload: z.string().min(1),
+  payload: payloadSchema,
   errataUrl: z.string().optional(),
   // Required (not optional): its absence is exactly the signal that a cached
   // entry was written by the pre-channel-membership (Phase 1) shape -- see
@@ -119,7 +133,7 @@ export const trimmedGraphSchema = z.object({
   edges: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])),
   conditionalEdges: z.array(trimmedConditionalEdgeGroupSchema),
   // Required, for the same reason `channels` above is required on each node.
-  channelNames: z.array(z.string()),
+  channelNames: z.array(channelNameSchema),
 });
 
 export type TrimmedGraphJSON = z.infer<typeof trimmedGraphSchema>;
