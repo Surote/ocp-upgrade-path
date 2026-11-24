@@ -7,7 +7,8 @@ import { ARCHES, type Arch, type Version } from '../graph/types';
 import { parseUrlState, resolveUrlArch, syncUrlState } from '../url/urlState';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
-import { type LookaheadSegment, useLookaheadSegments } from './lookaheadTargets';
+import type { ChannelSegment } from '../engine/lookahead';
+import { useLookaheadSegments } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
@@ -15,7 +16,7 @@ import { useGraphForSelection } from './useGraphForSelection';
 import { usePathSearch } from './usePathSearch';
 
 const DEFAULT_ARCH: Arch = 'amd64';
-const NO_SEGMENTS: readonly LookaheadSegment[] = [];
+const NO_SEGMENTS: readonly ChannelSegment[] = [];
 
 export interface ChannelFieldViewModel {
   readonly value: string;

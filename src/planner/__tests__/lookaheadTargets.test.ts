@@ -87,7 +87,7 @@ describe('discoverLookaheadSegments', () => {
     expect(client.__calls).toEqual(['stable-4.20']);
   });
 
-  it('fetches at most three newer streams', async () => {
+  it('fetches every newer stream membership names, not just the first three', async () => {
     const newer = ['stable-4.21', 'stable-4.22', 'stable-4.23', 'stable-4.24', 'stable-5.0'];
     const handlers = new Map<string, Handler>([
       ['stable-4.20|amd64', jsonHandler(rawGraphJson(['4.20.0'], [], ['stable-4.20', ...newer]))],
@@ -95,7 +95,7 @@ describe('discoverLookaheadSegments', () => {
     ]);
     const client = makeClient(handlers) as GraphClient & { __calls: string[] };
     const segments = await discoverLookaheadSegments(client, 'stable-4.20', 'amd64');
-    expect(segments.map((s) => s.channel)).toEqual(['stable-4.21', 'stable-4.22', 'stable-4.23']);
+    expect(segments.map((s) => s.channel)).toEqual(['stable-4.21', 'stable-4.22', 'stable-4.23', 'stable-4.24', 'stable-5.0']);
   });
 
   it('stops discovery (without throwing) on a genuine network failure', async () => {

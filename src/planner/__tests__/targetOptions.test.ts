@@ -25,11 +25,11 @@ describe('buildTargetOptions -- selected channel only', () => {
     expect(buildTargetOptions(graph, v('4.22.1-rc.1'), [])).toEqual([{ version: v('4.22.1-rc.1+build.1'), reachable: true, via: undefined }]);
   });
 
-  it('keeps a look-ahead build of the start release disabled, since the stitcher only walks forward into newer streams', () => {
+  it('offers a look-ahead build of the start release as reachable through the look-ahead channel that has the hop', () => {
     const anchor = buildGraph(['4.22.1-rc.1'], []);
     const segment = { channel: 'stable-4.23', classFallback: false, graph: buildGraph(['4.22.1-rc.1', '4.22.1-rc.1+build.1'], [[0, 1]]) };
     expect(buildTargetOptions(anchor, v('4.22.1-rc.1'), [segment])).toEqual([
-      { version: v('4.22.1-rc.1+build.1'), reachable: false, via: { channel: 'stable-4.23', classFallback: false } },
+      { version: v('4.22.1-rc.1+build.1'), reachable: true, via: { channel: 'stable-4.23', classFallback: false } },
     ]);
   });
 

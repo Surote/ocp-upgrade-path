@@ -10,14 +10,25 @@ function v(s: string): Version {
   return s as Version;
 }
 
-/** Builds a synthetic Graph via the real parse boundary, with a distinguishable payload per node so tests can prove *which* graph's copy of an overlapping node won. */
-function rawGraph(nodeVersions: readonly string[], edges: ReadonlyArray<readonly [number, number]>, payloadTag: string): Graph {
+/**
+ * Builds a synthetic Graph via the real parse boundary, with a distinguishable payload per node so tests can prove *which* graph's copy of an overlapping node won.
+ * `channels` is the membership every node advertises; the forward walk follows it to newer streams.
+ */
+function rawGraph(
+  nodeVersions: readonly string[],
+  edges: ReadonlyArray<readonly [number, number]>,
+  payloadTag: string,
+  channels: readonly string[] = [],
+): Graph {
   const raw = {
     version: 1,
     nodes: nodeVersions.map((version, i) => ({
       version,
       payload: `quay.io/openshift-release-dev/ocp-release@sha256:${payloadTag}-${i}`,
-      metadata: { url: `https://access.redhat.com/errata/${payloadTag}-${i}` },
+      metadata: {
+        url: `https://access.redhat.com/errata/${payloadTag}-${i}`,
+        'io.openshift.upgrades.graph.release.channels': channels.join(','),
+      },
     })),
     edges: edges.map(([a, b]) => [a, b]),
     conditionalEdges: [],
@@ -153,7 +164,7 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
 // and the two share their 4.20.x band -- the join.
 describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
   it('joins directly at a shared version when a same-class forward channel already reaches back to the anchor, with no unnecessary intermediate channel', async () => {
-    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR');
+    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR', ['eus-4.20', 'eus-4.22']);
     const forward = rawGraph(['4.20.0', '4.21.0', '4.22.0'], [[0, 1], [1, 2]], 'FWD');
     const calls: string[] = [];
     const loader: GraphLoader = async (channel) => {
@@ -212,6 +223,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
       ['4.18.0', '4.19.0', '4.20.0', '4.20.5', '4.20.9'],
       [[0, 1], [1, 2], [2, 3], [3, 4]],
       'ANCHOR',
+      ['eus-4.20', 'eus-4.22'],
     );
     // eus-4.22: lists the same three 4.20.x releases as real members (so
     // they're genuinely reachable channel switch targets), but its own
@@ -260,7 +272,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
   });
 
   it('falls back to stable at a minor where the anchor\'s own class has no channel (EUS odd minors), and records the fallback', async () => {
-    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR');
+    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR', ['eus-4.20', 'eus-4.21', 'stable-4.21']);
     // stable-4.21 spans back to 4.20, per the live-verified table in plan.md §6.
     const stable421 = rawGraph(['4.20.0', '4.21.5'], [[0, 1]], 'S421');
     const calls: string[] = [];
@@ -287,9 +299,9 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(result.value.primary.hops.at(-1)?.sourceChannel).toBe('stable-4.21');
   });
 
-  it('walks through multiple forward minors, falling back to stable only at the minor that needs it, until it reaches back to the anchor', async () => {
-    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR');
-    const eus422 = rawGraph(['4.20.0', '4.21.0', '4.22.0'], [[0, 1], [1, 2]], 'E422');
+  it('walks through multiple forward minors, lowest first, falling back to stable only at the minor that needs it', async () => {
+    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR', ['eus-4.20', 'eus-4.22']);
+    const eus422 = rawGraph(['4.20.0', '4.21.0', '4.22.0'], [[0, 1], [1, 2]], 'E422', ['eus-4.22', 'eus-4.23', 'stable-4.23']);
     const stable423 = rawGraph(['4.22.0', '4.23.0'], [[0, 1]], 'S423');
     const calls: string[] = [];
     const loader: GraphLoader = async (channel) => {
@@ -310,12 +322,10 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Walks target-minor-first, decrementing toward the anchor: 4.23 (falls
-    // back to stable) then 4.22 (same class succeeds and finally overlaps
-    // the anchor's own 4.20.x band) -- exactly mirroring the backward walk's
-    // one-minor-at-a-time shape, just in the opposite direction.
-    expect(calls).toEqual(['eus-4.20', 'eus-4.23', 'stable-4.23', 'eus-4.22']);
-    expect(result.value.stitch.channelsUsed).toEqual(['eus-4.20', 'stable-4.23', 'eus-4.22']);
+    // Lowest stream first, the same walk the target dropdown uses: 4.22
+    // (same class), then 4.23 (no eus channel, falls back to stable).
+    expect(calls).toEqual(['eus-4.20', 'eus-4.22', 'eus-4.23', 'stable-4.23']);
+    expect(result.value.stitch.channelsUsed).toEqual(['eus-4.20', 'eus-4.22', 'stable-4.23']);
     expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.23', requestedClass: 'eus' }]);
     expect(result.value.primary.versions).toEqual([
       v('4.18.0'),
@@ -332,13 +342,15 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(sourceChannels).toEqual(['eus-4.20', 'eus-4.20', 'eus-4.22', 'eus-4.22', 'stable-4.23']);
   });
 
-  it('gives up as targetNeverFound when no channel walking forward ever reaches back to the anchor', async () => {
-    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR');
+  it('gives up as targetNeverFound when no channel walking forward holds the target', async () => {
+    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR', ['eus-4.20', 'eus-4.22']);
+    const eus422 = rawGraph(['4.20.0', '4.22.0'], [[0, 1]], 'E422');
     const channelsFetched: string[] = [];
     const loader: GraphLoader = async (channel) => {
       channelsFetched.push(channel);
       if (channel === 'eus-4.20') return ok(anchor);
-      return err({ kind: 'empty', channel, arch: 'amd64' }); // nothing beyond the anchor ever exists in this scenario
+      if (channel === 'eus-4.22') return ok(eus422);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
     };
 
     const result = await stitchAndFindPath(loader, {
@@ -353,14 +365,13 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     expect(result.error.kind).toBe('targetNeverFound');
     if (result.error.kind !== 'targetNeverFound') return;
     expect(result.error.target).toBe(v('4.30.0'));
-    // No class exists at 4.30 -- the walk gives up at the very first stream
-    // rather than guessing further.
-    expect(result.error.channelsTried).toEqual(['eus-4.30', 'stable-4.30', 'fast-4.30', 'candidate-4.30']);
-    expect(channelsFetched).toEqual(['eus-4.20', 'eus-4.30', 'stable-4.30', 'fast-4.30', 'candidate-4.30']);
+    // Membership names nothing past 4.22, so no 4.30 channel is guessed at.
+    expect(result.error.channelsTried).toEqual(['eus-4.22']);
+    expect(channelsFetched).toEqual(['eus-4.20', 'eus-4.22']);
   });
 
   it('a genuine loadFailed during the forward walk (not a mere "channel does not exist") is surfaced immediately', async () => {
-    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR');
+    const anchor = rawGraph(['4.18.0', '4.19.0', '4.20.0'], [[0, 1], [1, 2]], 'ANCHOR', ['eus-4.20', 'eus-4.22']);
     const loader: GraphLoader = async (channel) => {
       if (channel === 'eus-4.20') return ok(anchor);
       if (channel === 'eus-4.22') return err({ kind: 'network', message: 'boom', status: 500 });
@@ -381,7 +392,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
 
   it('a channel selected in the middle of a range needs both a backward and a forward walk at once', async () => {
     const back419 = rawGraph(['4.18.1', '4.19.0'], [[0, 1]], 'BACK');
-    const anchor420 = rawGraph(['4.19.0', '4.20.0'], [[0, 1]], 'ANCHOR');
+    const anchor420 = rawGraph(['4.19.0', '4.20.0'], [[0, 1]], 'ANCHOR', ['stable-4.20', 'stable-4.22']);
     const fwd422 = rawGraph(['4.20.0', '4.21.0', '4.22.0'], [[0, 1], [1, 2]], 'FWD');
     const loader: GraphLoader = async (channel) => {
       if (channel === 'stable-4.20') return ok(anchor420);

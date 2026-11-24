@@ -325,6 +325,31 @@ function findWaypointAlternates(
 }
 
 /**
+ * The recommended path from `start` to every version reachable from it
+ * within one graph (start itself maps to the zero-hop path). Same ranking as
+ * `findPathsInGraph`, from a single Dijkstra run; empty if `start` is not a
+ * node. The stitcher (engine/stitch.ts) uses this to advance a whole frontier
+ * through a segment without one search per junction.
+ */
+export function shortestPathsFrom(graph: Graph, start: Version): ReadonlyMap<Version, Path> {
+  const versions = graph.nodes.map((n) => n.version);
+  const startIdx = versions.indexOf(start);
+  if (startIdx < 0) return new Map();
+
+  const riskIndex = new RiskIndex(graph.conditionalEdges);
+  const { forward } = buildAdjacency(graph);
+  const fwd = dijkstra(versions.length, forward, makeEdgeCost(riskIndex, versions, 'forward'), startIdx as NodeIndex);
+
+  const paths = new Map<Version, Path>();
+  fwd.dist.forEach((cost, i) => {
+    if (cost === undefined) return;
+    const chain = reconstructForwardChain(fwd.pred, startIdx as NodeIndex, i as NodeIndex);
+    paths.set(versions[i] as Version, buildPathFromChain(versions, riskIndex, chain, cost));
+  });
+  return paths;
+}
+
+/**
  * Finds the recommended upgrade path from `start` to `target` within a single
  * `Graph`, plus up to two waypoint alternates, per plan.md §4. Pure: no
  * network, no `GraphClient` -- callers (including the stitcher, engine/stitch.ts)

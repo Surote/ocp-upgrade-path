@@ -10,13 +10,22 @@ function v(s: string): Version {
   return s as Version;
 }
 
-function rawGraph(nodeVersions: readonly string[], edges: ReadonlyArray<readonly [number, number]>, payloadTag: string): Graph {
+/** `channels` is the membership every node advertises; forward discovery follows it. */
+function rawGraph(
+  nodeVersions: readonly string[],
+  edges: ReadonlyArray<readonly [number, number]>,
+  payloadTag: string,
+  channels: readonly string[] = [],
+): Graph {
   const raw = {
     version: 1,
     nodes: nodeVersions.map((version, i) => ({
       version,
       payload: `quay.io/openshift-release-dev/ocp-release@sha256:${payloadTag}-${i}`,
-      metadata: { url: `https://access.redhat.com/errata/${payloadTag}-${i}` },
+      metadata: {
+        url: `https://access.redhat.com/errata/${payloadTag}-${i}`,
+        'io.openshift.upgrades.graph.release.channels': channels.join(','),
+      },
     })),
     edges: edges.map(([a, b]) => [a, b]),
     conditionalEdges: [],
@@ -38,7 +47,7 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
     // Mirrors plan.md §6's worked example exactly: eus-4.20 spans 4.18-4.20
     // and does not contain 4.22.9; eus-4.22 spans 4.20-4.22 and shares
     // 4.20.33 with the anchor -- the earliest point the switch is possible.
-    const eus420 = rawGraph(['4.18.2', '4.18.51', '4.19.41', '4.20.33'], [[0, 1], [1, 2], [2, 3]], 'EUS420');
+    const eus420 = rawGraph(['4.18.2', '4.18.51', '4.19.41', '4.20.33'], [[0, 1], [1, 2], [2, 3]], 'EUS420', ['eus-4.20', 'eus-4.22']);
     const eus422 = rawGraph(['4.20.33', '4.21.28', '4.22.9'], [[0, 1], [1, 2]], 'EUS422');
     const loader: GraphLoader = async (channel) => {
       if (channel === 'eus-4.20') return ok(eus420);
