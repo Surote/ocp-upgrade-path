@@ -1,3 +1,4 @@
+import type { RiskName } from '../engine/risks';
 import type { RiskPolicy } from '../engine/routeConstraints';
 import { isArch, type Arch } from '../graph/types';
 
@@ -8,6 +9,7 @@ const PARAM_TARGET = 'target';
 const PARAM_STOPS = 'stops';
 const PARAM_AVOID = 'avoid';
 const AVOID_CONDITIONAL = 'conditional';
+const PARAM_NOT_APPLICABLE = 'na';
 
 /**
  * The query string, parsed into raw (unvalidated) strings only. Deliberately
@@ -25,6 +27,8 @@ export interface RawUrlState {
   /** `stops=v1,v2`, in order; blank entries dropped. */
   readonly stops?: readonly string[];
   readonly avoid?: string;
+  /** `na=Name1,Name2`: risk names the operator marked not applicable; blank entries dropped. */
+  readonly notApplicable?: readonly string[];
 }
 
 function cleanParam(v: string | null): string | undefined {
@@ -40,14 +44,15 @@ export function parseUrlState(search: string): RawUrlState {
     arch: cleanParam(params.get(PARAM_ARCH)),
     start: cleanParam(params.get(PARAM_START)),
     target: cleanParam(params.get(PARAM_TARGET)),
-    stops: parseStops(params.get(PARAM_STOPS)),
+    stops: parseList(params.get(PARAM_STOPS)),
     avoid: cleanParam(params.get(PARAM_AVOID)),
+    notApplicable: parseList(params.get(PARAM_NOT_APPLICABLE)),
   };
 }
 
-function parseStops(v: string | null): readonly string[] | undefined {
-  const stops = (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  return stops.length > 0 ? stops : undefined;
+function parseList(v: string | null): readonly string[] | undefined {
+  const items = (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return items.length > 0 ? items : undefined;
 }
 
 export interface UrlStateInput {
@@ -57,6 +62,7 @@ export interface UrlStateInput {
   readonly target?: string;
   readonly stops?: readonly string[];
   readonly riskPolicy?: RiskPolicy;
+  readonly notApplicable?: readonly string[];
 }
 
 /** Serializes the current selection back into a canonical query string (no leading `?`), omitting any unset field. */
@@ -69,6 +75,7 @@ export function serializeUrlState(state: UrlStateInput): string {
   const stops = state.stops?.filter(Boolean) ?? [];
   if (stops.length > 0) params.set(PARAM_STOPS, stops.join(','));
   if (state.riskPolicy === 'avoidConditional') params.set(PARAM_AVOID, AVOID_CONDITIONAL);
+  if (state.notApplicable?.length) params.set(PARAM_NOT_APPLICABLE, [...state.notApplicable].sort().join(','));
   // A literal comma survives URLSearchParams parsing, and keeps `stops=` readable in a shared link.
   return params.toString().replace(/%2C/gi, ',');
 }
@@ -103,6 +110,26 @@ export function resolveUrlRiskPolicy(raw: string | undefined): ResolvedUrlRiskPo
   if (raw === undefined) return { riskPolicy: 'recommended' };
   if (raw === AVOID_CONDITIONAL) return { riskPolicy: 'avoidConditional' };
   return { riskPolicy: 'recommended', notice: `Unknown avoid value "${raw}" in link -- showing the recommended route.` };
+}
+
+export interface ResolvedUrlNotApplicable {
+  readonly names: readonly RiskName[];
+  readonly notice?: string;
+}
+
+/**
+ * Keeps each linked name that exactly matches a conditional risk in `known`.
+ * A name that matches none is dropped and named in the notice, never matched
+ * loosely onto another risk.
+ */
+export function resolveUrlNotApplicable(raw: readonly string[], known: ReadonlySet<RiskName>): ResolvedUrlNotApplicable {
+  const isKnown = (name: string): name is RiskName => (known as ReadonlySet<string>).has(name);
+  const names = raw.filter(isKnown);
+  const dropped = raw.filter((name) => !isKnown(name));
+  if (dropped.length === 0) return { names, notice: undefined };
+  const list = dropped.map((name) => `"${name}"`).join(', ');
+  const noun = dropped.length === 1 ? 'that name, so the mark was' : 'those names, so the marks were';
+  return { names, notice: `The link marked ${list} as not applicable, but no conditional risk on these channels has ${noun} dropped.` };
 }
 
 /**
