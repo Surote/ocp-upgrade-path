@@ -90,7 +90,7 @@ export async function discoverLookahead(
     if (!next) break;
     // Once the walk knows of more channels than the cap allows, a prefetch a
     // later graph pushes back can spend a request the walk needs.
-    const window = untriedChannels(attested, anchor, []).length >= MAX_LOOKAHEAD_FETCHES ? 1 : LOOKAHEAD_WINDOW;
+    const window = frontier.length + channelsTried.length >= MAX_LOOKAHEAD_FETCHES ? 1 : LOOKAHEAD_WINDOW;
     for (const { channel } of frontier.slice(0, window)) {
       if (!fetches.has(channel) && fetches.size < MAX_LOOKAHEAD_FETCHES) fetches.set(channel, loader(channel, arch));
     }
