@@ -20,6 +20,11 @@ describe('buildTargetOptions -- selected channel only', () => {
     expect(buildTargetOptions(graph, v('2.0.0'), []).map((o) => o.version)).toEqual([v('3.0.0')]);
   });
 
+  it('offers a build of the start release, equal to it in SemVer precedence, when the graph has the hop', () => {
+    const graph = buildGraph(['4.22.1-rc.1', '4.22.1-rc.1+build.1'], [[0, 1]]);
+    expect(buildTargetOptions(graph, v('4.22.1-rc.1'), [])).toEqual([{ version: v('4.22.1-rc.1+build.1'), reachable: true, via: undefined }]);
+  });
+
   it('marks a reachable, newer version reachable with no channel change', () => {
     const graph = buildGraph(['1.0.0', '2.0.0'], [[0, 1]]);
     expect(buildTargetOptions(graph, v('1.0.0'), [])).toEqual([{ version: v('2.0.0'), reachable: true, via: undefined }]);

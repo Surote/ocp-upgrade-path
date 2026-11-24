@@ -334,6 +334,18 @@ describe('usePlanner — the version grammar', () => {
     expect(result.current.notices).toEqual([]);
   });
 
+  it('plans a permalink hop to a build of the start release, which ranks equal to it in SemVer', async () => {
+    setUrl('?channel=stable-4.22&start=4.22.1-rc.1&target=4.22.1-rc.1%2Bbuild.1');
+    const graph = rawGraphJson(['4.22.1-rc.1', '4.22.1-rc.1+build.1'], [[0, 1]], 'stable-4.22');
+    const client = makeClient(withSeed(new Map([['stable-4.22|amd64', jsonHandler(graph)]])));
+
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+    expect(result.current.target.groups.flatMap((g) => g.options.map((o) => o.version))).toEqual(['4.22.1-rc.1+build.1']);
+    expect(result.current.notices).toEqual([]);
+  });
+
   it('surfaces a graph with an unparseable version as a channel load error instead of crashing', async () => {
     setUrl('?channel=stable-4.22');
     const graph = rawGraphJson(['4.22'], [], 'stable-4.22');

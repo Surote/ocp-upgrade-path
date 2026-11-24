@@ -156,8 +156,8 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     [graph, resolvedStart, lookaheadSegments],
   );
 
-  // Only a listed (newer-than-start) target is searched, so a permalink whose
-  // target is not newer gets the notice below and no route alongside it.
+  // Only a listed target is searched, so a permalink whose target is the
+  // start or older gets the notice below and no route alongside it.
   const targetOption = targetOptions.find((o) => o.version === resolvedTarget);
   const pathResult = usePathSearch(client, { channel, arch, start: resolvedStart, target: targetOption?.version });
 

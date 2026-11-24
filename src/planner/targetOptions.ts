@@ -17,9 +17,11 @@ export interface TargetOption {
 }
 
 /**
- * One newest-first list of every version newer than `start`, across the
- * selected (anchor) channel and its look-ahead segments. A version in the
- * anchor wins over the same version in a segment.
+ * One newest-first list of every version other than `start` that does not
+ * rank below it, across the selected (anchor) channel and its look-ahead
+ * segments. A build of the start release (`4.22.1-rc.1+build.1` from
+ * `4.22.1-rc.1`) ranks equal in SemVer yet is a real hop, so it stays. A
+ * version in the anchor wins over the same version in a segment.
  *
  * Reachability carries a frontier from `start` through the anchor and then
  * each segment in turn, walking only that graph's own edges (plan.md §4:
@@ -48,7 +50,7 @@ export function buildTargetOptions(
     for (const { version } of graph.nodes) {
       if (seen.has(version)) continue;
       seen.add(version);
-      if (compareVersions(version, start) > 0) options.push({ version, reachable: reachable.has(version), via });
+      if (version !== start && compareVersions(version, start) >= 0) options.push({ version, reachable: reachable.has(version), via });
     }
     frontier = new Set([...frontier, ...reachable]);
   }
