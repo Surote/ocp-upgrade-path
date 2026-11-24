@@ -9,6 +9,7 @@ import { compareStreams } from '../version';
 import { graph, loaderFor } from './routeFixtures';
 
 const CAP = 48;
+const MAX_IN_FLIGHT = 6;
 
 /** The channels a walk that fetches one channel at a time takes, with no cap. */
 async function serialWalk(loader: GraphLoader, anchorGraph: Graph): Promise<string[]> {
@@ -58,9 +59,9 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
  * answers next. Calls still waiting after the discovery returns answer too,
  * so `fetched` holds every call it ever makes.
  */
-async function scheduled(graphs: Readonly<Record<string, Graph | GraphError>>, anchor: Graph, pick: (waiting: number) => number) {
+async function scheduled(graphs: Readonly<Record<string, Graph | GraphError>>, anchor: Graph, pick: (waiting: readonly string[]) => number) {
   const inner = loaderFor(graphs);
-  const waiting: (() => void)[] = [];
+  const waiting: { channel: string; answer: () => void }[] = [];
   const fetched: string[] = [];
   let inFlight = 0;
   let maxInFlight = 0;
@@ -69,15 +70,18 @@ async function scheduled(graphs: Readonly<Record<string, Graph | GraphError>>, a
     inFlight += 1;
     maxInFlight = Math.max(maxInFlight, inFlight);
     return new Promise((resolve) =>
-      waiting.push(() => {
-        inFlight -= 1;
-        resolve(inner(channel, arch));
+      waiting.push({
+        channel,
+        answer: () => {
+          inFlight -= 1;
+          resolve(inner(channel, arch));
+        },
       }),
     );
   };
   let discovery: Awaited<ReturnType<typeof discoverLookahead>> | undefined;
   void discoverLookahead(loader, 'stable-4.5', anchor, 'amd64').then((d) => (discovery = d));
-  for (await settle(); waiting.length > 0; await settle()) waiting.splice(pick(waiting.length), 1)[0]?.();
+  for (await settle(); waiting.length > 0; await settle()) waiting.splice(pick(waiting.map((call) => call.channel)), 1)[0]?.answer();
   if (!discovery) throw new Error('discovery waits on no loader call');
   return { discovery, fetched, maxInFlight };
 }
@@ -102,8 +106,9 @@ describe('look-ahead discovery does not depend on response timing', () => {
       const runs = [];
       for (const schedule of [0, 1, 2]) {
         const order = prng(trial * 3 + schedule + 1);
-        const { discovery, fetched } = await scheduled(graphs, anchor, (n) => Math.floor(order() * n));
+        const { discovery, fetched, maxInFlight } = await scheduled(graphs, anchor, (waiting) => Math.floor(order() * waiting.length));
         expect(fetched.length).toBeLessThanOrEqual(CAP);
+        expect(maxInFlight, `trial ${trial}`).toBeLessThanOrEqual(MAX_IN_FLIGHT);
         runs.push({ tried: discovery.channelsTried, segments: discovery.segments.map((s) => s.channel), fetched: [...fetched].sort() });
       }
       expect(runs[1], `trial ${trial}`).toEqual(runs[0]);
@@ -132,5 +137,20 @@ describe('look-ahead discovery does not depend on response timing', () => {
     expect(fast.segments).toHaveLength(CAP);
     expect(slow.segments.map((s) => s.channel)).toEqual(fast.segments.map((s) => s.channel));
     expect(fetched.length).toBeLessThanOrEqual(CAP);
+  });
+
+  it('keeps six loader calls in flight at most when a fast answer reveals six channels ahead of five slow ones', async () => {
+    const slow = ['stable-4.12', 'stable-4.13', 'stable-4.14', 'stable-4.15', 'stable-4.16'];
+    const revealed = ['fast-4.6', 'candidate-4.6', 'stable-4.7', 'stable-4.8', 'stable-4.9', 'stable-4.10'];
+    const graphs: Record<string, Graph> = Object.fromEntries([...slow, ...revealed].map((name) => [name, graph([], { nodes: ['4.6.1'], channels: [name] })]));
+    graphs['stable-4.6'] = graph([], { nodes: ['4.6.1'], channels: ['stable-4.6', ...revealed] });
+    const anchor = graph([], { nodes: ['4.5.0'], channels: ['stable-4.5', 'stable-4.6', ...slow] });
+
+    const inOrder = await scheduled(graphs, anchor, () => 0);
+    const slowLast = await scheduled(graphs, anchor, (waiting) => Math.max(0, waiting.findIndex((channel) => !slow.includes(channel))));
+
+    expect(slowLast.maxInFlight).toBeLessThanOrEqual(MAX_IN_FLIGHT);
+    expect(slowLast.discovery.channelsTried).toEqual(['stable-4.6', ...revealed, ...slow]);
+    expect(slowLast.discovery.channelsTried).toEqual(inOrder.discovery.channelsTried);
   });
 });
