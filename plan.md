@@ -382,10 +382,12 @@ show the risk. A marked card is de-emphasized and says the claim is the operator
 Route facts keep it in the count: "7 hops · 1 distinct risk (1 marked not applicable) · no
 other conditional risks".
 
-**A link's marks are checked before they apply.** Once the anchor and look-ahead graphs
-load, each value must name exactly one conditional advisory on them. Any other value,
-including a bare name two advisories share, is dropped with a notice that names it, and is
-never matched onto a different risk.
+**A link's marks are checked before they apply.** Each value must name exactly one
+conditional advisory on the loaded graphs. It applies as soon as a graph carrying that
+advisory loads, so a slow look-ahead fetch never holds a mark on a route inside the anchor.
+Once the anchor and look-ahead graphs have all loaded, any value still unmatched, including
+a bare name two advisories share, is dropped with a notice that names it, and is never
+matched onto a different risk.
 
 On the Nov 2026 `eus-4.18` snapshot, marking `VSphereConfigCloudControllerCrash` leaves the
 route from `4.16.33` to `5.0.1` unchanged and removes "No lower-risk route exists".

@@ -159,7 +159,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const [targetRaw, setTargetRaw] = useState(initialUrl.target ?? '');
   const [stopsRaw, setStopsRaw] = useState<readonly string[]>(initialUrl.stops ?? []);
   const [riskPolicy, setRiskPolicy] = useState<RiskPolicy>(initialRiskPolicy.riskPolicy);
-  // The link's marks wait here until the loaded channels can vouch for each name.
+  // The link's marks wait here until a loaded channel vouches for each one.
   const [linkedMarks, setLinkedMarks] = useState(initialUrl.notApplicable);
   const [notApplicable, setNotApplicable] = useState<ReadonlySet<RiskId>>(() => new Set());
   const [marksNotice, setMarksNotice] = useState<string>();
@@ -214,11 +214,15 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     () => conditionalRisks(graph ? [graph, ...lookaheadSegments.map((s) => s.graph)] : []),
     [graph, lookaheadSegments],
   );
-  if (linkedMarks && graph && !lookaheadLoading) {
-    const resolved = resolveUrlNotApplicable(linkedMarks, markable);
-    setLinkedMarks(undefined);
-    setNotApplicable((prev) => new Set([...prev, ...resolved.ids]));
-    setMarksNotice(droppedMarksNotice(resolved.unmatched));
+  // A linked mark applies as soon as a loaded graph carries its advisory, so a
+  // slow look-ahead never holds one on an anchor route; only dropping an
+  // unmatched one waits for every graph.
+  if (linkedMarks && graph) {
+    const { ids, unmatched } = resolveUrlNotApplicable(linkedMarks, markable);
+    const settled = !lookaheadLoading;
+    if (ids.length > 0) setNotApplicable((prev) => new Set([...prev, ...ids]));
+    if (settled) setMarksNotice(droppedMarksNotice(unmatched));
+    if (ids.length > 0 || settled) setLinkedMarks(settled || unmatched.length === 0 ? undefined : unmatched);
   }
   const markNotApplicable = useCallback((id: RiskId, marked: boolean) => {
     setNotApplicable((prev) => {
