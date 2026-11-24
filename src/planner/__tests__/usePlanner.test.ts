@@ -336,7 +336,10 @@ async function routeEveryReachableTarget(search: string, client: GraphClient, an
   const { result } = renderHook(() => usePlanner(client));
   await waitFor(() => expect(result.current.target.disabled).toBe(false));
   await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+  return routeEachReachableOption(result, anchor);
+}
 
+async function routeEachReachableOption(result: { readonly current: ReturnType<typeof usePlanner> }, anchor: string) {
   const options = result.current.target.groups.flatMap((g) => g.options);
   const reachable = options.filter((o) => o.reachable);
   const expected = reachable.map((o) => ({ version: o.version, channel: o.via?.channel ?? anchor }));
@@ -428,6 +431,43 @@ describe('usePlanner — every reachable target routes (dropdown and stitcher ag
     });
     expect(actual).toEqual(expected);
     expect(paths.get('5.0.1')).toEqual(['eus-4.18', 'eus-4.18', 'stable-4.19', 'eus-4.20', 'stable-4.21', 'eus-4.22', 'fast-5.0']);
+  });
+});
+
+describe('usePlanner — manual refresh', () => {
+  it('rebuilds look-ahead targets from the refreshed anchor, so every reachable option still routes', async () => {
+    // The refreshed stable-4.22 no longer names fast-5.0, so 5.0.1 has no
+    // route from it.
+    let refreshed = false;
+    const client = makeClient(
+      withSeed(
+        new Map([
+          [
+            'stable-4.22|amd64',
+            () => {
+              const channels = refreshed ? 'stable-4.22' : 'stable-4.22,fast-5.0';
+              return Promise.resolve(fakeJsonResponse(rawGraphJson(['4.22.15', '4.22.20'], [[0, 1]], channels)));
+            },
+          ],
+          ['fast-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.1'], [[0, 1]], 'fast-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15');
+    const { result } = renderHook(() => usePlanner(client));
+    await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+    await waitFor(() => expect(result.current.target.groups.flatMap((g) => g.options).map((o) => o.version)).toContain('5.0.1'));
+    const firstFetchedAt = result.current.freshness?.fetchedAt;
+
+    refreshed = true;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    act(() => result.current.freshness?.onRefresh());
+    await waitFor(() => expect(result.current.freshness?.fetchedAt).not.toBe(firstFetchedAt));
+    await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+
+    const { expected, actual } = await routeEachReachableOption(result, 'stable-4.22');
+    expect(actual).toEqual(expected);
   });
 });
 
