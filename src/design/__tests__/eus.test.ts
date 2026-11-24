@@ -221,12 +221,14 @@ describe('legSteps', () => {
   const steps = legSteps(available(leg));
   const digest = (i: number) => `quay.io/openshift-release-dev/ocp-release@sha256:${String(i).padStart(64, '0')}`;
 
-  it("follows Red Hat's CLI procedure: pools settled, switch and pause, the paused updates on eus-4.(E+2), unpause, pools settled", () => {
-    expect(steps.map((step) => (step.kind === 'update' ? `update ${step.hop.to}` : step.kind))).toEqual([
+  it("follows Red Hat's CLI procedure: pools settled, switch and pause, each paused update on eus-4.(E+2) then its completion check, unpause, pools settled", () => {
+    expect(steps.map((step) => (step.kind === 'update' || step.kind === 'waitForUpdate' ? `${step.kind} ${step.hop.to}` : step.kind))).toEqual([
       'checkPools',
       'pause',
       'update 4.17.59',
+      'waitForUpdate 4.17.59',
       'update 4.18.59',
+      'waitForUpdate 4.18.59',
       'unpause',
       'waitForPools',
       'returnChannel',
@@ -251,10 +253,18 @@ describe('legSteps', () => {
     ]);
   });
 
-  it('unpauses once the cluster reports the last release reached with workers paused', () => {
+  it("waits for each paused update to finish, as Red Hat's procedure checks it, before the next step", () => {
+    const checks = steps.filter((step) => step.kind === 'waitForUpdate');
+    expect(checks.map((step) => [step.hop.to, step.commands, step.when])).toEqual([
+      ['4.17.59', ['oc adm upgrade'], 'Wait for the update to 4.17.59 to finish: run this until it prints "Cluster version is 4.17.59". While the update runs, it prints "info: An upgrade is in progress" instead.'],
+      ['4.18.59', ['oc adm upgrade'], 'Wait for the update to 4.18.59 to finish: run this until it prints "Cluster version is 4.18.59". While the update runs, it prints "info: An upgrade is in progress" instead.'],
+    ]);
+  });
+
+  it('unpauses once the last release reached with workers paused has finished updating', () => {
     expect(steps.find((step) => step.kind === 'unpause')).toEqual({
       kind: 'unpause',
-      when: 'Once the cluster reports 4.18.59',
+      when: 'Then unpause workers so they update to 4.18.59',
       commands: [`oc patch mcp/worker --type merge --patch '{"spec":{"paused":false}}'`],
     });
   });

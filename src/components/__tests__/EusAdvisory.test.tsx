@@ -138,3 +138,28 @@ describe('the pool check after a leg', () => {
     expect(check).not.toHaveTextContent(/worker UPDATED=True/);
   });
 });
+
+describe('the paused updates', () => {
+  it('checks that each update finished before the next update and before the unpause, each check its own copy', () => {
+    renderAdvisory(route('4.16.33', '4.17.59', '4.18.59'));
+
+    const [leg] = legItems() as [HTMLElement];
+    const steps = [...leg.querySelectorAll('li')];
+    const firstCommand = steps.map((step) => step.querySelector('code')?.textContent);
+    expect(firstCommand).toEqual([
+      'oc get mcp',
+      `oc adm upgrade channel eus-4.18 && oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`,
+      'oc adm upgrade --to 4.17.59',
+      'oc adm upgrade',
+      'oc adm upgrade --to 4.18.59',
+      'oc adm upgrade',
+      `oc patch mcp/worker --type merge --patch '{"spec":{"paused":false}}'`,
+      'oc get mcp',
+    ]);
+    for (const [i, version] of [[3, '4.17.59'], [5, '4.18.59']] as const) {
+      expect([...(steps[i] as HTMLElement).querySelectorAll('code')].map((code) => code.textContent)).toEqual(['oc adm upgrade']);
+      expect(steps[i]).toHaveTextContent(`run this until it prints "Cluster version is ${version}"`);
+      expect(within(steps[i] as HTMLElement).getByRole('button', { name: `Copy leg 1 check that the update to ${version} finished` })).toBeTruthy();
+    }
+  });
+});
