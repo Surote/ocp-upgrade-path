@@ -286,7 +286,9 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
 > three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
-> stream is named (safety cap 12 streams). Both also read reachability from
+> channel is named that it has not tried (safety cap 48 fetches). A preferred channel
+> named only by a later graph (fast-5.0's releases name stable-5.0) is fetched too, beside
+> the fallback that reached its stream. Both also read reachability from
 > `routeAcrossSegments` (engine/stitch.ts), a layered shortest-path DP over the anchor
 > plus every look-ahead segment. Its frontier carries across segments, so a segment can
 > contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
