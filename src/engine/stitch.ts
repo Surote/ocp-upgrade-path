@@ -74,8 +74,8 @@ function predecessorStream(graph: Graph, own: Stream): Stream | undefined {
 }
 
 /**
- * Each station of `route` with the metadata of the graph that supplied the
- * hop arriving at it; the start with the first hop's graph (the first
+ * Each station `hops` reaches, with the metadata of the graph that supplied
+ * the hop arriving at it; the start with the first hop's graph (the first
  * segment's for a zero-hop route).
  */
 function routeNodeInfo(segments: readonly ChannelSegment[], start: Version, hops: readonly PathHop[]): ReadonlyMap<Version, GraphNode> {
