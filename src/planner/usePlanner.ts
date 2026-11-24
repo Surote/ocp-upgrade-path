@@ -50,7 +50,8 @@ export interface TargetFieldViewModel {
   /**
    * Newer-than-start targets from the selected channel and the look-ahead
    * channels beyond it (plan.md §6: selecting `eus-4.20` must still offer
-   * `4.22.9`), merged newest first. A look-ahead target carries `via`.
+   * `4.22.9`), merged newest first. A look-ahead target carries `via`, the
+   * channel the route under the pinned stops and risk policy ends on.
    */
   readonly groups: readonly StreamGroup<TargetOption>[];
   /** True while look-ahead channels are still being fetched; in-channel targets are already listed. */
@@ -220,6 +221,12 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     [stopRows],
   );
   const routeConstraints = useMemo<RouteConstraints>(() => ({ stops: pinnedStops, riskPolicy }), [pinnedStops, riskPolicy]);
+  // Selection and stop checks read `targetOptions`; only the labels follow the
+  // constraints, since the stops are themselves checked against the target.
+  const shownTargetOptions = useMemo(() => {
+    const constrained = routeConstraints.stops.length > 0 || routeConstraints.riskPolicy !== 'recommended';
+    return graph && resolvedStart && constrained ? buildTargetOptions(graph, resolvedStart, lookaheadSegments, routeConstraints) : targetOptions;
+  }, [graph, resolvedStart, lookaheadSegments, routeConstraints, targetOptions]);
 
   const pathResult = usePathSearch(client, {
     channel,
@@ -321,7 +328,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     },
     target: {
       value: targetRaw,
-      groups: groupByStream(targetOptions, (o) => versionStream(o.version)),
+      groups: groupByStream(shownTargetOptions, (o) => versionStream(o.version)),
       lookaheadLoading,
       disabled: !resolvedStart,
       onChange: setTarget,
