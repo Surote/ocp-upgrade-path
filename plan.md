@@ -653,13 +653,35 @@ update"**, not "EUS-to-EUS". The old link this app shipped —
 `.../updating_clusters/performing-a-cluster-update#control-plane-only-update`, confirmed
 for both 4.20 and 4.22.
 
-An EUS-to-EUS upgrade such as 4.18 → 4.20 requires pausing worker MachineConfigPools so
-nodes reboot once instead of twice. **Cincinnati does not encode this.** The tool detects
-the shape — start and target both on EUS minors, two or more minors crossed — and shows
-the `oc patch mcp` guidance in a visually separate block, cited to Red Hat's
-documentation and explicitly labelled as guidance rather than API-derived data. It is the
-highest-value thing a 4.18 → 4.20 planner needs, and precisely the thing the graph will
-not tell them.
+**A Control Plane Only update covers one leg: 4.E → 4.E+1 → 4.E+2.** Red Hat's procedure
+pauses the non-`master` pools, updates 4.y → 4.y+1 → 4.y+2, then unpauses, so workers
+reboot once for two minors. It is "only viable between even-numbered minor versions", and
+"if pools are not unpaused, the cluster is not permitted to update to any future minor
+versions". A long route is therefore a chain of legs, never one pause across the whole
+route. Source: [Performing a Control Plane Only update](https://docs.redhat.com/en/documentation/openshift_container_platform/4.16/html/updating_clusters/performing-a-cluster-update#control-plane-only-update)
+(read from the `openshift-docs` source, branches `enterprise-4.16` through `main`, because
+docs.redhat.com returns 403 to scripted fetches).
+
+**Cincinnati does not encode this.** `controlPlaneOnlyLegs` (`design/eus.ts`) reads the
+route's actual versions, after stops and avoids, and groups them into stream runs. Each
+contiguous 4.E → 4.E+1 → 4.E+2 run with 4.E an EUS minor is one leg. Legs chain at their
+shared EUS stream, so 4.14 → 4.22 yields 4.14→4.16, 4.16→4.18, 4.18→4.20 and 4.20→4.22. A
+route entering at an odd minor starts at the next EUS stream. A trailing 4.E → 4.E+1 is not
+a leg. The major boundary (4.22 → 5.0) is never a leg, and no EUS rule is assumed for 5.x.
+
+Each leg pauses `mcp/worker` on the last route version in 4.E, right before the first hop
+into 4.E+1, and unpauses on the last route version in 4.E+2, followed by `oc get mcp` until
+the worker pool reports `UPDATED=True` before the route leaves that stream. The `oc patch`
+commands are Red Hat's verbatim. The doc link uses the leg's destination stream. The UI
+(`EusAdvisory`) shows one flat list, for example "Leg 1: 4.16 → 4.18 (pause workers before
+4.17, unpause at 4.18)", with the leg's commands and a copy button, labelled as guidance.
+A route with no complete leg renders nothing.
+
+**No 60-day limit.** Earlier versions of this tool said to finish within 60 days. Red Hat's
+procedure states no such limit, and the 4.16.42 release notes call the web console's
+60-day warning "this invalid alert" (OCPBUGS-56858). The real constraint on pause length is
+certificate rotation: a paused pool does not receive the rotated
+`kube-apiserver-to-kubelet-signer` CA, so pauses should be short.
 
 ---
 
