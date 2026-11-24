@@ -28,6 +28,7 @@ describe('stitch banner', () => {
         result={{ status: 'success', value: result.value, retry: () => {} }}
         channel="stable-4.22"
         channelNames={[]}
+        controlPlaneOnlyLegs={[]}
         pinnedStops={[]}
         riskApplicability={{ notApplicable: NO_MARKS, onChange: () => {} }}
         onUseLowerRisk={() => {}}

@@ -53,6 +53,7 @@ function App({ graphClient }: AppProps = {}) {
           result={planner.result}
           channel={planner.channel.value || undefined}
           channelNames={planner.channelNames}
+          controlPlaneOnlyLegs={planner.controlPlaneOnlyLegs}
           routeHold={planner.routeHold}
           pinnedStops={planner.pinnedStops}
           riskApplicability={planner.riskApplicability}

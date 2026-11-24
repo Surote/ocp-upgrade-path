@@ -12,6 +12,13 @@ import { compareStreams, type Stream } from './version';
  */
 const MAX_LOOKAHEAD_FETCHES = 48;
 
+/**
+ * How many of the walk's next channels are fetched ahead of it. Each
+ * Cincinnati response streams at a few hundred KB/s, so a stream's channels
+ * finish far sooner side by side.
+ */
+const LOOKAHEAD_WINDOW = 6;
+
 /** `classFallback` is true when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
 export type ChannelSegment = { readonly channel: string; readonly graph: Graph } & (
   | { readonly classFallback: false }
@@ -21,7 +28,7 @@ export type ChannelSegment = { readonly channel: string; readonly graph: Graph }
 export interface LookaheadDiscovery {
   /** Lowest stream first; within a stream, every channel that loaded, least preferred first. */
   readonly segments: readonly ChannelSegment[];
-  /** Every channel fetched, in fetch order. */
+  /** Every channel the walk took, in the order a one-at-a-time walk takes them. */
   readonly channelsTried: readonly string[];
   /**
    * The first fetch that failed for a reason other than "channel is empty".
@@ -72,11 +79,26 @@ export async function discoverLookahead(
   const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
-  for (let fetches = 0; fetches < MAX_LOOKAHEAD_FETCHES; fetches += 1) {
-    const next = nextChannel(attested, anchor, channelsTried);
+  // Each turn fetches the walk's next few channels as its own takes so far
+  // rank them. Which channels are fetched then depends only on graph
+  // contents, never on which response came first, so neither does which
+  // channels the cap leaves out.
+  const fetches = new Map<string, Promise<LoadResult>>();
+  for (;;) {
+    const frontier = untriedChannels(attested, anchor, channelsTried);
+    const next = frontier[0];
     if (!next) break;
+    // Once the walk knows of more channels than the cap allows, a prefetch a
+    // later graph pushes back can spend a request the walk needs.
+    const window = untriedChannels(attested, anchor, []).length >= MAX_LOOKAHEAD_FETCHES ? 1 : LOOKAHEAD_WINDOW;
+    for (const { channel } of frontier.slice(0, window)) {
+      if (!fetches.has(channel) && fetches.size < MAX_LOOKAHEAD_FETCHES) fetches.set(channel, loader(channel, arch));
+    }
+    const pending = fetches.get(next.channel);
+    // The cap went on fetches a graph taken since then pushed behind `next`.
+    if (!pending) break;
+    const result = await pending;
     channelsTried.push(next.channel);
-    const result = await loader(next.channel, arch);
     if (!result.ok) {
       if (result.error.kind === 'empty') {
         emptyChannels.add(next.channel);
@@ -101,6 +123,8 @@ export async function discoverLookahead(
   return { segments, channelsTried, failure };
 }
 
+type LoadResult = Awaited<ReturnType<GraphLoader>>;
+
 interface Candidate {
   readonly channel: string;
   readonly stream: Stream;
@@ -112,22 +136,19 @@ interface Found extends Candidate {
   readonly graph: Graph;
 }
 
-/** The next channel to fetch: the most preferred attested channel not yet tried at the lowest newer stream that has one. */
-function nextChannel(
+/** Attested channels not yet tried, lowest stream first, most preferred first within a stream. */
+function untriedChannels(
   attested: ReadonlySet<string>,
   anchor: Stream & { readonly cls: string },
   tried: readonly string[],
-): Candidate | undefined {
-  let best: Candidate | undefined;
+): Candidate[] {
+  const candidates: Candidate[] = [];
   for (const name of attested) {
     const parsed = parseChannelName(name);
     if (!parsed || compareStreams(parsed, anchor) <= 0 || tried.includes(name)) continue;
     const stream = { major: parsed.major, minor: parsed.minor };
     const rank = candidateChannelsForStream(anchor.cls, stream).indexOf(name);
-    if (rank < 0) continue;
-    if (!best || compareStreams(stream, best.stream) < 0 || (compareStreams(stream, best.stream) === 0 && rank < best.rank)) {
-      best = { channel: name, stream, rank };
-    }
+    if (rank >= 0) candidates.push({ channel: name, stream, rank });
   }
-  return best;
+  return candidates.sort((a, b) => compareStreams(a.stream, b.stream) || a.rank - b.rank);
 }

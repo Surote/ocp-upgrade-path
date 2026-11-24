@@ -13,13 +13,16 @@ import type { Version } from '../graph/types';
  * `ack-4.<N-1>-<topic>-in-4.<N>`, but the topic segment is unpredictable
  * (`kube-1.27-api-removals`, `gateway-api-management`, `boot-image-opt-out`,
  * ...) and some destination minors need more than one key (4.19 needs two)
- * while others need none at all (4.17, 4.18, 4.21, per the destination
- * version's own "Preparing to update a cluster" docs, checked individually).
+ * while others need none at all (4.15, 4.17, 4.18, 4.21, per the destination
+ * version's own "Preparing to update a cluster" docs, checked individually;
+ * 4.13 and 4.15 were read from the docs source, openshift/openshift-docs
+ * branches enterprise-4.13 and enterprise-4.15).
  * This table is the *only* source of truth -- every entry was read off the
  * real docs page for that destination minor, not derived from a rule.
  * Keyed by `formatStream` so a later major (5.14) never picks up a 4.x entry.
  */
 const ACK_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['4.13', ['ack-4.12-kube-1.26-api-removals-in-4.13']],
   ['4.14', ['ack-4.13-kube-1.27-api-removals-in-4.14']],
   ['4.16', ['ack-4.15-kube-1.29-api-removals-in-4.16']],
   ['4.19', ['ack-4.18-gateway-api-management-in-4.19', 'ack-4.18-kube-1.32-api-removals-in-4.19']],
@@ -46,8 +49,8 @@ const KCS_ARTICLE_IDS: ReadonlyMap<string, string> = new Map([
 
 /**
  * The ack keys documented for entering `stream`. Returns an empty array
- * both when the destination page was checked and genuinely lists none (4.17,
- * 4.18, 4.21) and when the minor has never been checked at all (anything not
+ * both when the destination page was checked and genuinely lists none (4.15,
+ * 4.17, 4.18, 4.21) and when the minor has never been checked at all (anything not
  * in `ACK_KEYS`) -- deliberately: absence of a key on a docs page is not
  * proof that no acknowledgement is required for that minor, so both cases
  * must render identically as "none documented" rather than diverge into a

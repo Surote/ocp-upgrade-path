@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrokenJsonResponse, fakeFetch, fakeJsonResponse } from '../../test-utils/fakeFetch';
 import { FakeStorage } from '../../test-utils/fakeStorage';
 import { loadFixture } from '../../test-utils/fixtures';
@@ -177,5 +177,119 @@ describe('GraphClient — two-tier caching', () => {
       expect(second.value.fetchedAt).toBe(first.value.fetchedAt);
     }
     vi.restoreAllMocks();
+  });
+});
+
+/**
+ * Holds each of the first `count` gzip streams of `name` constructed after
+ * this call until its `release`, so a cache read or write is still pending
+ * while a refresh runs. Later streams run freely.
+ */
+function holdStreams(name: 'CompressionStream' | 'DecompressionStream', count: number) {
+  const Real = globalThis[name];
+  const gates = Array.from({ length: count }, () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => (markStarted = resolve));
+    return { gate, release, started, markStarted };
+  });
+  let constructed = 0;
+  class Held {
+    readonly writable: WritableStream;
+    readonly readable: ReadableStream;
+    constructor(format: CompressionFormat) {
+      const real = new Real(format);
+      const held = gates[constructed++];
+      this.writable = real.writable;
+      this.readable = held ? real.readable.pipeThrough(new TransformStream({ start: () => held.gate })) : real.readable;
+      held?.markStarted();
+    }
+  }
+  vi.stubGlobal(name, Held);
+  return gates.map(({ release, started }) => ({ release, started }));
+}
+
+function holdFirstStream(name: 'CompressionStream' | 'DecompressionStream') {
+  return holdStreams(name, 1)[0] as { release: () => void; started: Promise<void> };
+}
+
+describe('GraphClient — a refresh is never undone by an older cache operation', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const OLD_NODES = 124;
+
+  function sequenceFetch(...fixtures: string[]) {
+    let call = 0;
+    return fakeFetch(async () => fakeJsonResponse(loadFixture(fixtures[Math.min(call++, fixtures.length - 1)] as string)));
+  }
+
+  it('a disk read that finishes after a refresh does not replace the refreshed graph', async () => {
+    const storage = new FakeStorage();
+    await makeClient(sequenceFetch('stable-4.20.json'), storage).getGraph(PARAMS);
+    const client = makeClient(sequenceFetch('stable-4.19.json'), storage);
+    const disk = holdFirstStream('DecompressionStream');
+
+    const staleRead = client.getGraph(PARAMS);
+    await disk.started;
+    client.invalidate(PARAMS);
+    const refreshed = await client.getGraph(PARAMS);
+    disk.release();
+    await staleRead;
+
+    const after = await client.getGraph(PARAMS);
+    expect(refreshed.ok && refreshed.value.graph.nodes.length).not.toBe(OLD_NODES);
+    expect(after.ok && after.value.graph.nodes.length).toBe(refreshed.ok && refreshed.value.graph.nodes.length);
+  });
+
+  it('a disk write still compressing when the entry is refreshed does not land after the refresh', async () => {
+    const storage = new FakeStorage();
+    const client = makeClient(sequenceFetch('stable-4.20.json', 'stable-4.19.json'), storage);
+    const write = holdFirstStream('CompressionStream');
+
+    const firstLoad = client.getGraph(PARAMS);
+    await write.started;
+    client.invalidate(PARAMS);
+    const refreshed = await client.getGraph(PARAMS);
+    write.release();
+    await firstLoad;
+
+    const reloaded = await makeClient(sequenceFetch('stable-4.21.json'), storage).getGraph(PARAMS);
+    expect(refreshed.ok && refreshed.value.graph.nodes.length).not.toBe(OLD_NODES);
+    expect(reloaded.ok && reloaded.value.graph.nodes.length).toBe(refreshed.ok && refreshed.value.graph.nodes.length);
+  });
+
+  it('a disk read retried after a forced refresh began does not put the old graph back', async () => {
+    const storage = new FakeStorage();
+    await makeClient(sequenceFetch('stable-4.20.json'), storage).getGraph(PARAMS);
+    let openNetwork!: () => void;
+    const network = new Promise<void>((resolve) => (openNetwork = resolve));
+    let fetches = 0;
+    let markRetriedOnNetwork!: () => void;
+    const retriedOnNetwork = new Promise<void>((resolve) => (markRetriedOnNetwork = resolve));
+    const fetchImpl = fakeFetch(async () => {
+      if (++fetches === 2) markRetriedOnNetwork();
+      await network;
+      return fakeJsonResponse(loadFixture('stable-4.19.json'));
+    });
+    const client = makeClient(fetchImpl, storage);
+    const [firstRead, retriedRead] = holdStreams('DecompressionStream', 2) as [
+      { release: () => void; started: Promise<void> },
+      { release: () => void; started: Promise<void> },
+    ];
+
+    const staleRead = client.getGraph(PARAMS);
+    await firstRead.started;
+    const refresh = client.getGraph(PARAMS, { forceRefresh: true });
+    firstRead.release();
+    await Promise.race([retriedRead.started, retriedOnNetwork]);
+    openNetwork();
+    const refreshed = await refresh;
+    retriedRead.release();
+    await staleRead;
+
+    const after = await client.getGraph(PARAMS);
+    expect(refreshed.ok && refreshed.value.graph.nodes.length).not.toBe(OLD_NODES);
+    expect(after.ok && after.value.graph.nodes.length).toBe(refreshed.ok && refreshed.value.graph.nodes.length);
   });
 });

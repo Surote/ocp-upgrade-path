@@ -1,6 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GraphClient } from '../graph/client';
 import { describeGraphError } from '../graph/errors';
+import { makeGraphLoader } from './graphLoader';
+import { isListedChannel, legacyProbeNames, oldestStream, probeChannels } from './legacyChannels';
 import { sortChannels } from './sortChannels';
 import { useAsyncResult } from './useAsyncResult';
 
@@ -16,7 +18,7 @@ const SEED_CHANNEL = 'stable-4.20';
 const SEED_ARCH = 'amd64';
 
 export interface ChannelCatalog {
-  /** Every channel name discovered so far (seed plus anything unioned in via `addChannels`), sorted per `sortChannels`. */
+  /** Every channel name discovered so far (seed, backward probes, anything unioned in via `addChannels`) down to `OLDEST_LISTED_STREAM`, sorted per `sortChannels`. */
   readonly channels: readonly string[];
   readonly loading: boolean;
   /** Names the seed channel, per plan.md §6 ("the error names which channel fetch failed"). */
@@ -33,6 +35,14 @@ export interface ChannelCatalog {
  * `addChannels` with every subsequently-fetched graph's `channelNames` too,
  * so navigating to a channel outside the seed's own span still grows the
  * catalog. Nothing beyond `SEED_CHANNEL` is hardcoded.
+ *
+ * Membership only names channels a stream or two from a node's own, so the
+ * seed never names anything older than 4.18. Once the seed lands,
+ * backward discovery probes the streams below it in the background
+ * (planner/legacyChannels.ts) and the list grows when answers arrive. Names
+ * it finds are cached (`GraphClient.channelNames`) and restored at mount,
+ * and the probe list skips every name already cached, so a warm load
+ * fetches nothing beyond the seed.
  */
 export function useChannelCatalog(client: GraphClient): ChannelCatalog {
   // `known` accumulates channel names discovered from graphs OTHER than the
@@ -43,7 +53,7 @@ export function useChannelCatalog(client: GraphClient): ChannelCatalog {
   // inputs. The seed channel's own contribution is folded in below via
   // `useMemo` instead of a second `setState`-in-effect for the same set,
   // since it's derivable from `seed`'s current value on every render.
-  const [known, setKnown] = useState<ReadonlySet<string>>(new Set());
+  const [known, setKnown] = useState<ReadonlySet<string>>(() => new Set(client.channelNames.read().present));
 
   const seed = useAsyncResult(true, `${SEED_CHANNEL}|${SEED_ARCH}`, (signal) =>
     client.getGraph({ channel: SEED_CHANNEL, arch: SEED_ARCH }, { signal }),
@@ -65,13 +75,37 @@ export function useChannelCatalog(client: GraphClient): ChannelCatalog {
   }, []);
 
   const seedChannelNames = seed.status === 'success' ? seed.value.graph.channelNames : undefined;
+
+  // Read once the seed lands, not at mount: another tab may have recorded
+  // names meanwhile. The sweep skips exactly these, so the list shows them.
+  const cached = useMemo(() => (seedChannelNames ? client.channelNames.read() : undefined), [client, seedChannelNames]);
+
+  useEffect(() => {
+    const oldest = seedChannelNames && oldestStream(seedChannelNames);
+    if (!seedChannelNames || !cached || !oldest) return;
+    const controller = new AbortController();
+    const load = makeGraphLoader(client, { signal: controller.signal });
+    void probeChannels(
+      (channel) => load(channel, SEED_ARCH),
+      legacyProbeNames(oldest),
+      new Set([...seedChannelNames, ...cached.present, ...cached.empty]),
+      (outcome) => {
+        if (outcome.kind === 'empty') {
+          client.channelNames.record({ present: [], empty: [outcome.channel] });
+          return;
+        }
+        const names = [outcome.channel, ...outcome.memberOf].filter(isListedChannel);
+        client.channelNames.record({ present: names, empty: [] });
+        addChannels(names);
+      },
+    );
+    return () => controller.abort();
+  }, [client, seedChannelNames, cached, addChannels]);
+
   const channels = useMemo(() => {
-    const merged = new Set(known);
-    if (seedChannelNames) {
-      for (const name of seedChannelNames) merged.add(name);
-    }
-    return sortChannels([...merged]);
-  }, [known, seedChannelNames]);
+    const merged = new Set([...known, ...(seedChannelNames ?? []), ...(cached?.present ?? [])]);
+    return sortChannels([...merged].filter(isListedChannel));
+  }, [known, seedChannelNames, cached]);
 
   return {
     channels,

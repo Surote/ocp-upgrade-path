@@ -91,6 +91,11 @@ main {
   font-size: 0.75rem;
 }
 
+.field-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .field-error {
   color: var(--risk-always);
   font-size: 0.85rem;
@@ -786,6 +791,51 @@ main {
   flex: 1 1 320px;
   min-width: 0;
   margin: 8px 0 0;
+}
+
+.cpo-leg-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cpo-leg-list h3 {
+  font-size: 0.95rem;
+  margin: 0 0 4px;
+}
+
+.cpo-checkpoints {
+  margin: 8px 0 0;
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cpo-checkpoint__when {
+  margin: 0;
+}
+
+.cpo-leg-command {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin: 4px 0 0;
+}
+
+.cpo-leg-command code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cpo-risk-note {
+  border-left: 2px solid var(--risk-always);
+  padding-left: 12px;
+  margin: 6px 0;
+  color: var(--text-h);
+  font-size: 0.9rem;
 }
 
 .admin-acks-unknown {

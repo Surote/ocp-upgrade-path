@@ -1,3 +1,4 @@
+import { LIFECYCLE_POLICY_URL } from '../design/lifecycle';
 import type { StartFieldViewModel } from '../planner/usePlanner';
 
 /**
@@ -23,6 +24,15 @@ export function StartSelect({ id, model }: { readonly id: string; readonly model
         ))}
       </select>
       {model.loading && <span>Loading versions…</span>}
+      {model.legacyStream && (
+        <p className="field-note">
+          {model.legacyStream} is a legacy release; check{' '}
+          <a href={LIFECYCLE_POLICY_URL} target="_blank" rel="noopener noreferrer">
+            Red Hat's OpenShift lifecycle policy
+          </a>{' '}
+          for its support status.
+        </p>
+      )}
       {model.error && (
         <p role="alert" className="field-error">
           {model.error}{' '}

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StitchedPathResult, StitchError } from '../engine/types';
+import type { ControlPlaneOnlyLeg } from '../design/eus';
 import type { GraphClient } from '../graph/client';
 import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
+import { isLegacyStream } from '../design/lifecycle';
+import { formatStream, streamOf } from '../engine/version';
 import {
   droppedMarksNotice,
   parseUrlState,
@@ -19,10 +22,11 @@ import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
 import { conditionalRisks, type RiskId } from '../engine/risks';
 import { useLookahead } from './lookaheadTargets';
-import { channelStream } from './sortChannels';
+import { channelGroupLabel, sortChannels } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
 import { useGraphForSelection } from './useGraphForSelection';
+import { useControlPlaneOnlyLegs } from './useControlPlaneOnlyLegs';
 import { usePathSearch } from './usePathSearch';
 
 const DEFAULT_ARCH: Arch = 'amd64';
@@ -49,6 +53,8 @@ export interface StartFieldViewModel {
   readonly loading: boolean;
   readonly disabled: boolean;
   readonly error?: string;
+  /** The start's stream, e.g. `4.14`, when it is older than every stream Red Hat still supports in a standard term. */
+  readonly legacyStream?: string;
   readonly onChange: (version: string) => void;
   readonly onRetry: () => void;
 }
@@ -125,6 +131,8 @@ export interface PlannerViewModel {
    * every station.
    */
   readonly channelNames: readonly string[];
+  /** The route's Control Plane Only legs, each `checking` until its EUS graph loads. */
+  readonly controlPlaneOnlyLegs: readonly ControlPlaneOnlyLeg[];
 }
 
 /**
@@ -179,6 +187,16 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   const graph = graphState.status === 'success' ? graphState.value.graph : undefined;
 
+  // The catalog stops at the 4.14 floor, but a saved link can select an older
+  // channel. Once its graph loads the planner routes on it, so list it too.
+  const listedChannels = useMemo(
+    () =>
+      channel && graph && !channelCatalog.channels.includes(channel)
+        ? sortChannels([...channelCatalog.channels, channel])
+        : channelCatalog.channels,
+    [channel, graph, channelCatalog.channels],
+  );
+
   // Look-ahead target discovery (plan.md §6), keyed on the loaded anchor
   // graph -- it doesn't need `start` to discover *which* channels exist
   // beyond the anchor, only to later decide which of their versions are
@@ -210,21 +228,6 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     return undefined;
   }, [graph, targetRaw, lookaheadSegments]);
 
-  const markable = useMemo(
-    () => conditionalRisks(graph ? [graph, ...lookaheadSegments.map((s) => s.graph)] : []),
-    [graph, lookaheadSegments],
-  );
-  // A linked mark applies as soon as a loaded graph carries its advisory, so a
-  // slow look-ahead never holds one on an anchor route; only dropping an
-  // unmatched one waits for every graph.
-  if (linkedMarks && graph) {
-    const ids = linkedMarks.filter((id) => markable.has(id));
-    const unmatched = linkedMarks.filter((id) => !markable.has(id));
-    const settled = !lookaheadLoading;
-    if (ids.length > 0) setNotApplicable((prev) => new Set([...prev, ...ids]));
-    if (settled) setMarksNotice(droppedMarksNotice(unmatched));
-    if (ids.length > 0 || settled) setLinkedMarks(settled || unmatched.length === 0 ? undefined : unmatched);
-  }
   const markNotApplicable = useCallback((id: RiskId, marked: boolean) => {
     setNotApplicable((prev) => {
       const next = new Set(prev);
@@ -235,6 +238,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   }, []);
 
   const startOptions = useMemo(() => (graph ? buildStartOptions(graph) : []), [graph]);
+  const startStream = resolvedStart && streamOf(resolvedStart);
   const targetOptions = useMemo(
     () => (graph && resolvedStart ? buildTargetOptions(graph, resolvedStart, lookaheadSegments) : []),
     [graph, resolvedStart, lookaheadSegments],
@@ -295,14 +299,36 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const offered = <T extends { readonly version: Version }>(options: readonly T[], selected: string): readonly T[] =>
     channel && resolvedStart ? offeredOptions(options, { channel, start: resolvedStart, selected }) : options;
 
+  const searchedTarget = routeHold ? undefined : targetOption?.version;
   const pathResult = usePathSearch(client, {
     channel,
     arch,
     start: resolvedStart,
-    target: routeHold ? undefined : targetOption?.version,
+    target: searchedTarget,
     anchor: anchorResult && { ...anchorResult, lookahead: lookaheadSnapshot?.discovery },
     constraints: routeConstraints,
   });
+
+  const legCheck = useControlPlaneOnlyLegs(client, arch, pathResult);
+
+  const markable = useMemo(
+    () => conditionalRisks(graph ? [graph, ...lookaheadSegments.map((s) => s.graph), ...legCheck.graphs] : []),
+    [graph, lookaheadSegments, legCheck.graphs],
+  );
+  // A linked mark applies as soon as a loaded graph carries its advisory, so a
+  // slow look-ahead never holds one on an anchor route. Dropping an unmatched
+  // one waits for every graph that could carry it: the look-ahead, and the EUS
+  // graphs of the route's legs, which only a found route names. An active
+  // search reads `idle` for one render before it starts.
+  if (linkedMarks && graph) {
+    const ids = linkedMarks.filter((id) => markable.has(id));
+    const unmatched = linkedMarks.filter((id) => !markable.has(id));
+    const searching = channel !== undefined && resolvedStart !== undefined && searchedTarget !== undefined && (pathResult.status === 'idle' || pathResult.status === 'loading');
+    const settled = !lookaheadLoading && !searching && !legCheck.legs.some((leg) => leg.kind === 'checking');
+    if (ids.length > 0) setNotApplicable((prev) => new Set([...prev, ...ids]));
+    if (settled) setMarksNotice(droppedMarksNotice(unmatched));
+    if (ids.length > 0 || settled) setLinkedMarks(settled || unmatched.length === 0 ? undefined : unmatched);
+  }
 
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
   // Stops clear with the target; a target change keeps them, and any the
@@ -379,7 +405,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   return {
     channel: {
       value: channel ?? '',
-      groups: groupByStream(channelCatalog.channels, channelStream),
+      groups: groupByStream(listedChannels, channelGroupLabel),
       loading: channelCatalog.loading,
       error: channelCatalog.error,
       onChange: setChannel,
@@ -395,6 +421,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
         graphState.status === 'error'
           ? describeChannelLoadError(channel ?? '', graphState.error)
           : undefined,
+      legacyStream: startStream && isLegacyStream(startStream) ? formatStream(startStream) : undefined,
       onChange: setStart,
       onRetry: graphState.retry,
     },
@@ -426,5 +453,6 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     notices,
     result: pathResult,
     channelNames: graph?.channelNames ?? [],
+    controlPlaneOnlyLegs: legCheck.legs,
   };
 }

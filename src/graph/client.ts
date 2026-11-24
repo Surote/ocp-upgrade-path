@@ -1,6 +1,7 @@
+import { ChannelNameCache } from '../cache/channelNameCache';
 import { LocalStorageGraphCache } from '../cache/localStorageCache';
 import { MemoryCache } from '../cache/memoryCache';
-import { makeCacheKey, type CacheEntry } from '../cache/types';
+import { makeCacheKey, type CacheEntry, type CacheKey } from '../cache/types';
 import { err, ok, type Result } from '../lib/result';
 import type { GraphError } from './errors';
 import { parseRawGraph } from './parse';
@@ -23,7 +24,7 @@ export interface GraphParams {
 }
 
 export interface FetchGraphOptions {
-  /** Skip both cache tiers and go straight to the network -- the manual refresh path. */
+  /** Drop this key from both cache tiers and go straight to the network -- the manual refresh path. */
   readonly forceRefresh?: boolean;
   readonly signal?: AbortSignal;
 }
@@ -45,14 +46,30 @@ export class GraphClient {
   private readonly memory = new MemoryCache<Graph>();
   private readonly persistent: LocalStorageGraphCache;
   private readonly fetchImpl: typeof fetch;
+  /** Names found by backward channel discovery (planner/legacyChannels.ts), on the same storage as the graphs. */
+  readonly channelNames: ChannelNameCache;
+  /**
+   * Bumped by every invalidation and refresh. A cache read or write that began
+   * under an older generation holds data the refresh replaced, so it must not
+   * land in either tier once its await resumes (plan.md §3).
+   */
+  private readonly generations = new Map<CacheKey, number>();
+  private clearedAt = 0;
+  private lastGeneration = 0;
 
   constructor(options?: { readonly storage?: Storage; readonly fetchImpl?: typeof fetch }) {
     this.persistent = new LocalStorageGraphCache(options?.storage);
+    this.channelNames = new ChannelNameCache(options?.storage);
     this.fetchImpl = options?.fetchImpl ?? fetch.bind(globalThis);
   }
 
   async getGraph(params: GraphParams, options: FetchGraphOptions = {}): Promise<Result<GraphResult, GraphError>> {
     const key = makeCacheKey(params.channel, params.arch);
+    // Dropping the entries, not just skipping them, keeps a read that the
+    // refresh overtook from rereading the old entry when it retries.
+    if (options.forceRefresh) this.invalidate(params);
+    const generation = this.generationOf(key);
+    const isCurrent = () => this.generationOf(key) === generation;
 
     if (!options.forceRefresh) {
       const memHit = this.memory.get(key);
@@ -60,7 +77,8 @@ export class GraphClient {
         return ok({ graph: memHit.value, fetchedAt: memHit.fetchedAt });
       }
 
-      const diskHit = this.persistent.get(key);
+      const diskHit = await this.persistent.get(key);
+      if (!isCurrent()) return this.getGraph(params, options);
       if (diskHit) {
         this.memory.set(key, diskHit);
         return ok({ graph: diskHit.value, fetchedAt: diskHit.fetchedAt });
@@ -73,22 +91,36 @@ export class GraphClient {
     }
 
     const entry: CacheEntry<Graph> = { value: fetched.value, fetchedAt: Date.now() };
-    this.memory.set(key, entry);
-    this.persistent.set(key, entry);
+    if (isCurrent()) {
+      this.memory.set(key, entry);
+      await this.persistent.set(key, entry, isCurrent);
+    }
     return ok({ graph: entry.value, fetchedAt: entry.fetchedAt });
   }
 
   /** Manual invalidate/refresh path for one channel/arch pair (both tiers). */
   invalidate(params: GraphParams): void {
     const key = makeCacheKey(params.channel, params.arch);
+    this.bumpGeneration(key);
     this.memory.delete(key);
     this.persistent.invalidate(key);
   }
 
   /** Manual invalidate/refresh path for the whole cache (both tiers). */
   invalidateAll(): void {
+    this.lastGeneration += 1;
+    this.clearedAt = this.lastGeneration;
     this.memory.clear();
     this.persistent.clear();
+  }
+
+  private bumpGeneration(key: CacheKey): void {
+    this.lastGeneration += 1;
+    this.generations.set(key, this.lastGeneration);
+  }
+
+  private generationOf(key: CacheKey): number {
+    return Math.max(this.generations.get(key) ?? 0, this.clearedAt);
   }
 
   private async fetchFromNetwork(params: GraphParams, signal: AbortSignal | undefined): Promise<Result<Graph, GraphError>> {

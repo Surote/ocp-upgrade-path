@@ -1,5 +1,6 @@
 import { type ChannelName, parseChannelName } from '../design/channels';
-import { compareStreams, formatStream } from '../engine/version';
+import { streamLabel } from '../design/lifecycle';
+import { compareStreams } from '../engine/version';
 
 /**
  * Presentation order for a channel's "class" once channels are grouped by
@@ -52,8 +53,8 @@ export function sortChannels(names: readonly string[]): readonly string[] {
   return [...parsed.map((p) => p.raw), ...unparsed];
 }
 
-/** The stream a channel groups under; names outside the convention share `Other`, which `sortChannels` puts last. */
-export function channelStream(channel: string): string {
+/** The optgroup a channel lists under, `4.20` or `4.14 · legacy`; names outside the convention share `Other`, which `sortChannels` puts last. */
+export function channelGroupLabel(channel: string): string {
   const parsed = parseChannelName(channel);
-  return parsed ? formatStream(parsed) : 'Other';
+  return parsed ? streamLabel(parsed) : 'Other';
 }

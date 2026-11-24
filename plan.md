@@ -108,8 +108,10 @@ Static SPA plus a thin proxy, one container.
 
 - **Client — Vite + React + TS.** Cascading dropdowns, path search, SVG rendering.
   Two-tier cache: in-memory `Map` plus `localStorage`, keyed `channel|arch`, 1-hour TTL,
-  LRU capped at 8 graphs (~1.8 MB). The trimmed shape keeps per-node **channel
-  membership**, interned as ids against a per-graph name table — it costs ~3 KB and feeds
+  compressed entries evicted least recently used past 2M characters: a 4.14 route reads
+  about 34 graphs, 7.0M characters as JSON, 1.6M gzipped (Nov 2026). The trimmed shape
+  keeps per-node **channel membership**, interned as ids against a per-graph name
+  table — it costs ~3 KB and feeds
   both the node-detail panel (§6) and seed-and-expand channel discovery (Q6), which
   otherwise has no source for the channel list.
 - **Server — Node, ~40 lines.** Serves built assets and proxies `/api/graph` to
@@ -230,6 +232,25 @@ answers "where does it enter".
 - **Emitted commands.** Per hop: the channel switch and `oc adm upgrade --to <version>`,
   with the digest form on a secondary line for disconnected clusters. Plus the whole
   sequence as one script.
+- **Channel list reaches back to 4.14.** The seed's membership names nothing older than
+  4.18, so once the seed lands the client probes the streams below it in the background:
+  stable, eus (even minors), fast and candidate for each stream down to a 4.14 floor,
+  three at a time, skipping any name a fetched graph already named. The dropdown grows
+  when answers land; there is no button and nothing blocks. Membership names older than
+  4.14 (a 4.14 graph names 4.12 channels) stay out of the list, though 4.12 and 4.13
+  releases inside those graphs remain selectable starts. A saved link that selects an
+  older channel (`?channel=stable-4.13`) still lists that one channel, under its legacy
+  label, once its graph loads, so the select never reads blank while routing on it. Found
+  names and empty probes are cached for a day under their own `localStorage` key, outside
+  the graph LRU, so a warm load probes nothing. The cache is read again when the seed
+  lands, and every name the sweep skips as cached is listed, including names another tab
+  recorded meanwhile. A failed probe is retried once and never recorded as absent.
+  Measured Nov 2026: a cold load probes 3–4 channels and lists every 4.14–4.17 channel
+  about 3 s after navigation (seed ~2.2 s, probes ~0.8 s); a warm load sends no probe.
+- **Legacy streams.** Streams older than 4.18 are labelled legacy: their channel
+  optgroups read `4.14 · legacy`, and a start in one gets a one-line note under the Start
+  field linking Red Hat's lifecycle policy. The UI never states a support date; the
+  threshold is one constant (`design/lifecycle.ts`), raised as streams age out.
 - **Permalink.** Channel, arch, start and target encoded in the query string with a copy
   button. Upgrade plans get pasted into change requests; this makes them linkable. Params
   arrive as untrusted strings and are resolved against the loaded graph before use — an
@@ -289,8 +310,19 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
 > three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
-> channel is named that it has not tried (safety cap 48 fetches). It fetches every named
-> channel of a class the stream's preference order lists, fallbacks included, and never
+> channel is named that it has not tried (safety cap: 48 loader calls, counting
+> prefetches). The walk takes channels one at a time in priority order, and each turn
+> fetches its next six as the channels it has taken so far rank them. Which channels are
+> fetched therefore depends only on graph contents, never on which response arrived first,
+> so the same graphs always give the same targets. Fetching everything any loaded graph
+> named made this depend on timing: a slow first channel let 46 later fetches start
+> before it named two earlier channels, and the walk stopped at the cap with 2 usable
+> segments where a fast response gave 48. Once the walk knows of 48 or more channels it
+> fetches one at a time, since a prefetch a later graph pushes back could spend a request
+> it needs. When the cap does not bind, the channels taken match a serial walk exactly.
+> When it binds, the walk never makes a 49th request, and what it took is the start of
+> the serial walk. Live 4.14 routes use 39 to 45 requests. It fetches every named channel of a class the stream's
+> preference order lists, fallbacks included, and never
 > decides from discovery order that a fallback is unneeded. Three successive review
 > findings came from such rules: a preferred channel named after a fallback hid it, and
 > so did one named before it (stable-5.0 naming stable-5.2 before fast-5.1 names the
@@ -388,9 +420,12 @@ other conditional risks".
 **A link's marks are checked before they apply.** Each value must match the name and URL
 of a conditional advisory on the loaded graphs exactly. It applies as soon as a graph
 carrying that advisory loads, so a slow look-ahead fetch never holds a mark on a route inside
-the anchor, and an exact match cannot become ambiguous when more graphs load. Once the
-anchor and look-ahead graphs have all loaded, any value still unmatched is dropped with a
-notice that names it, and is never matched onto a same-name advisory at another URL. A
+the anchor, and an exact match cannot become ambiguous when more graphs load. The graphs
+checked are the anchor, the look-ahead, and the `eus-4.(E+2)` graphs the route's Control
+Plane Only legs load, since a leg lists that channel's own risks and its card offers the
+mark. Once the anchor and look-ahead graphs have all loaded, the route search has settled,
+and no leg is still `checking`, any value still unmatched is dropped with a notice that
+names it, and is never matched onto a same-name advisory at another URL. A
 value without `~` names no URL, and is dropped with a notice straight away.
 
 On the Nov 2026 `eus-4.18` snapshot, marking `VSphereConfigCloudControllerCrash` leaves the
@@ -611,12 +646,13 @@ version's own "Preparing to update a cluster" page:
 
 | Entering | Ack key(s) |
 |---|---|
+| 4.13 | `ack-4.12-kube-1.26-api-removals-in-4.13` (docs source, openshift-docs `enterprise-4.13`) |
 | 4.14 | `ack-4.13-kube-1.27-api-removals-in-4.14` |
 | 4.16 | `ack-4.15-kube-1.29-api-removals-in-4.16` |
 | 4.19 | `ack-4.18-gateway-api-management-in-4.19` **and** `ack-4.18-kube-1.32-api-removals-in-4.19` |
 | 4.20 | `ack-4.19-admissionregistration-v1beta1-api-removals-in-4.20` |
 | 4.22 | `ack-4.21-boot-image-opt-out-in-4.22` |
-| 4.17, 4.18, 4.21 | none found on the destination page |
+| 4.15, 4.17, 4.18, 4.21 | none found on the destination page (4.15: "no Kubernetes API removals") |
 
 Note 4.19 needs **two**, and several minors need none — so the key must never be built from
 a pattern. Where no key was found, the UI must say *"none documented — confirm via the KCS"*,
@@ -653,13 +689,99 @@ update"**, not "EUS-to-EUS". The old link this app shipped —
 `.../updating_clusters/performing-a-cluster-update#control-plane-only-update`, confirmed
 for both 4.20 and 4.22.
 
-An EUS-to-EUS upgrade such as 4.18 → 4.20 requires pausing worker MachineConfigPools so
-nodes reboot once instead of twice. **Cincinnati does not encode this.** The tool detects
-the shape — start and target both on EUS minors, two or more minors crossed — and shows
-the `oc patch mcp` guidance in a visually separate block, cited to Red Hat's
-documentation and explicitly labelled as guidance rather than API-derived data. It is the
-highest-value thing a 4.18 → 4.20 planner needs, and precisely the thing the graph will
-not tell them.
+**A Control Plane Only update covers one leg: 4.E → 4.E+1 → 4.E+2.** Red Hat's procedure
+pauses the non-`master` pools, updates 4.y → 4.y+1 → 4.y+2, then unpauses, so workers
+reboot once for two minors. It is "only viable between even-numbered minor versions", and
+"if pools are not unpaused, the cluster is not permitted to update to any future minor
+versions". A long route is therefore a chain of legs, never one pause across the whole
+route. Source: [Performing a Control Plane Only update](https://docs.redhat.com/en/documentation/openshift_container_platform/4.16/html/updating_clusters/performing-a-cluster-update#control-plane-only-update)
+(read from the `openshift-docs` source, branches `enterprise-4.16` through `main`, because
+docs.redhat.com returns 403 to scripted fetches).
+
+**Cincinnati does not encode this.** `controlPlaneOnlyLegs` (`design/eus.ts`) reads the
+route's actual hops, after stops and avoids, and groups their versions into stream runs.
+Each contiguous 4.E → 4.E+1 → 4.E+2 run with 4.E an EUS minor is one leg. Legs chain at
+their shared EUS stream, so 4.14 → 4.22 yields 4.14→4.16, 4.16→4.18, 4.18→4.20 and
+4.20→4.22. A route entering at an odd minor starts at the next EUS stream. A trailing
+4.E → 4.E+1 is not a leg. The major boundary (4.22 → 5.0) is never a leg, and no EUS rule is
+assumed for 5.x.
+
+**A leg is available only when `eus-4.(E+2)` publishes its paused hops.** Red Hat offers a
+Control Plane Only update "only after updates between all versions involved have been made
+available in `stable` channels", and its CLI procedure switches the cluster to
+`eus-<4.y+2>` before pausing worker pools. A stable channel publishing a hop does not prove
+the EUS channel does, so each leg is judged against `eus-4.(E+2)`'s own graph. The hops that
+run with workers paused are the ones from the pause point to the first arrival in 4.E+2. If
+any came from a fast or candidate graph (or has no recorded source), the leg is
+`unavailable` without fetching anything. Otherwise the planner loads `eus-4.(E+2)` through
+`GraphClient` after the route renders (one fetch per leg at most, cached like any graph; an
+`eus` anchor's look-ahead has usually loaded it already). Until it arrives, the leg reads
+`checking` and gives no pause steps. Each leg settles as soon as its own graph arrives; a slow
+EUS channel for one leg never holds another leg in `checking`. Results belong to one
+verification run, keyed on the arch and the EUS channel names: leaving a route and coming
+back starts a new run, and its legs read `checking` until its own results arrive, never an
+earlier run's `unavailable`. A rerank that keeps the same EUS channels (marking a risk does
+this) keeps the run and its requests. If that graph lacks a paused hop, has no releases yet,
+or fails to load, the leg is `unavailable` and the panel says which, with no pause steps.
+The legs are data (`'available' | 'checking' | 'unavailable'`, each with its `eusChannel`),
+built by `controlPlaneOnlyLegs` in design/eus.ts and loaded by
+planner/useControlPlaneOnlyLegs.ts.
+
+Each available leg is its own procedure on `eus-4.(E+2)`, built by `legSteps` in
+design/eus.ts in Red Hat's CLI order:
+
+1. At the last route version in 4.E, right before the first hop into 4.E+1: `oc get mcp`
+   until every pool reports `UPDATED=True` and `UPDATING=False`.
+2. `oc adm upgrade channel eus-4.(E+2) && oc patch mcp/worker ...`, chained so a failed
+   switch never pauses workers on the old channel.
+3. Each update run with workers paused, as `eus-4.(E+2)`'s graph publishes it: its
+   `oc adm upgrade --to`, its `--to-image` digest from that graph's node, and the risks that
+   graph attaches to the edge (its `RiskIndex`), shown as risk cards that honor the
+   operator's "doesn't apply" marks. Each update is followed by its own step, Red Hat's
+   check that it finished: `oc adm upgrade` until it prints "Cluster version is <version>"
+   rather than "info: An upgrade is in progress". `--to` only requests the update, so the
+   next update and the unpause wait on that check.
+4. Unpause on the last 4.E+2 version the route reaches over hops `eus-4.(E+2)` publishes from
+   eus or stable (a later patch hop inside 4.E+2 from fast or candidate runs as an ordinary
+   update after the unpause).
+5. `oc get mcp` until every pool the operator paused reports `UPDATED=True` and
+   `UPDATING=False`, before the next update of any kind, a patch inside 4.E+2 included: the
+   early unpause can leave a fast or candidate patch hop in the same minor while workers
+   still catch up.
+6. When the main route's next update runs on another channel, `oc adm upgrade channel` back
+   to it.
+
+**The leg never changes the main route.** The route's map, Commands, hop details, risk
+summary, facts line, via labels, stops and permalink are the same whether or not any EUS
+graph has loaded, and the Commands still run every hop on the channel whose graph supplied
+it, with that channel's risks (the attribution rule above). Earlier, a verified leg switched
+the main script onto `eus-4.(E+2)` for its paused hops once that graph arrived. That
+rewrote the route on screen after a network round trip, so the via label, the stops and the
+script could disagree with what was first shown, and the hop details kept the stable
+channel's risks for an edge the script now took on the EUS channel. The leg says instead
+that following it replaces the main script's updates from the pause point to the unpause
+point.
+
+**A verified leg can attach risks the main route does not.** `eus-4.(E+2)` may publish the
+same edge with a different risk set, for example an `Always` risk the stable channel lacks.
+The leg lists its own risks for each update and names every difference in a note, such as
+"eus-4.20 attaches X (Always) to the update from 4.19.40 to 4.20.32, which stable-4.20 does not." The
+main route's risk summary, the lower-risk comparison and the avoid-conditional ranking are
+the engine's, computed over the main route's own channels, and an EUS leg never feeds
+into them.
+
+The `oc` commands are Red Hat's verbatim. The doc link uses the leg's destination stream.
+The UI (`EusAdvisory`) shows one flat list, for example "Leg 1: 4.16 → 4.18 (pause workers
+before 4.17, unpause at 4.18)", labelled as guidance. Each step is its own block with its own
+copy button: they run at different points in the route, so no single copy may hold both the
+pause and the unpause, and an update's `--to` and `--to-image` are alternatives copied
+separately. A route with no complete leg renders nothing.
+
+**No 60-day limit.** Earlier versions of this tool said to finish within 60 days. Red Hat's
+procedure states no such limit, and the 4.16.42 release notes call the web console's
+60-day warning "this invalid alert" (OCPBUGS-56858). The real constraint on pause length is
+certificate rotation: a paused pool does not receive the rotated
+`kube-apiserver-to-kubelet-signer` CA, so pauses should be short.
 
 ---
 
@@ -703,16 +825,20 @@ outnumber unconditional ones roughly six to one. Suppressing them would hide mos
 risk surface. They are labelled as conditional and the query is shown for the operator to
 evaluate themselves.
 
-**Q6 · Q7 — Seed-and-expand channel discovery.** There is no endpoint listing channels —
-only node metadata naming them, which requires a graph to read. One known-good channel
-fetched at load yields the real channel names; the list expands as the user navigates.
-Nothing hardcoded to rot.
+**Q6 · Q7 — Seed-and-expand channel discovery, plus backward probes.** There is no
+endpoint listing channels — only node metadata naming them, which requires a graph to
+read. One known-good channel fetched at load yields the real channel names; the list
+expands as the user navigates. Membership only names channels a stream or two from a
+node's own, so the seed never reaches back to 4.14. Older streams are found by probing
+generated names below the seed down to a fixed 4.14 floor, in the background, with the
+answers cached by name. The floor is the one hardcoded fact: it is the product's scope,
+not a guess about what Cincinnati serves.
 
 **Q12 — Waypoint alternates, not k-shortest-paths.** Yen's algorithm answers a question
 nobody asked. Grouping by intermediate minor answers the one they did.
 
 **Q14 · Q19 · Q28 — Two cache tiers, 1-hour TTL.** Server-side shared cache with
-stale-while-revalidate; client-side LRU capped at 8 trimmed graphs. No boot warming —
+stale-while-revalidate; client-side LRU of gzipped graphs, bounded by size. No boot warming —
 that would slow cold starts on a scale-to-zero service, which is backwards. A visible
 fetch timestamp and manual refresh prevent anyone planning a production upgrade against
 stale data.
