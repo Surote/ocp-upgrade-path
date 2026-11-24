@@ -303,13 +303,13 @@ function findWaypointAlternates(
   bwd: DijkstraResult,
   startIdx: NodeIndex,
   targetIdx: NodeIndex,
-  primary: Path,
+  primary: readonly Version[],
 ): readonly Path[] {
   const startStream = streamOf(versions[startIdx] as Version);
   const targetStream = streamOf(versions[targetIdx] as Version);
 
-  const primarySignature = waypointSignature(primary.versions, startStream, targetStream);
-  const bestPerSignature = new Map<string, Path>([[primarySignature, primary]]);
+  const primarySignature = waypointSignature(primary, startStream, targetStream);
+  const bestPerSignature = new Map<string, Path>();
 
   for (let i = 0; i < versions.length; i += 1) {
     if (i === startIdx || i === targetIdx) continue;
@@ -376,8 +376,17 @@ export function shortestPathsFrom(graph: Graph, start: Version): ReadonlyMap<Ver
  * `Graph`, plus up to two waypoint alternates, per plan.md §4. Pure: no
  * network, no `GraphClient` -- callers (including the stitcher, engine/stitch.ts)
  * supply the `Graph` they've already fetched/validated.
+ *
+ * Alternates differ in waypoint from `shownPrimary` when given, else from
+ * this function's own primary. The stitcher displays its route search's
+ * primary, which can break a tie differently, so it passes that one.
  */
-export function findPathsInGraph(graph: Graph, start: Version, target: Version): Result<FindPathSuccess, NoPathReason> {
+export function findPathsInGraph(
+  graph: Graph,
+  start: Version,
+  target: Version,
+  shownPrimary?: readonly Version[],
+): Result<FindPathSuccess, NoPathReason> {
   const versions = graph.nodes.map((n) => n.version);
   const indexOfVersion = new Map<Version, NodeIndex>();
   versions.forEach((ver, i) => indexOfVersion.set(ver, i as NodeIndex));
@@ -412,7 +421,7 @@ export function findPathsInGraph(graph: Graph, start: Version, target: Version):
   const primary = buildPathFromChain(versions, riskIndex, primaryChain, targetDist);
 
   const bwd = dijkstraFrom(n, reverse, makeEdgeCost(riskIndex, versions, 'backward'), targetIdx);
-  const alternates = findWaypointAlternates(versions, riskIndex, fwd, bwd, startIdx, targetIdx, primary);
+  const alternates = findWaypointAlternates(versions, riskIndex, fwd, bwd, startIdx, targetIdx, shownPrimary ?? primary.versions);
 
   return ok({ primary, alternates });
 }

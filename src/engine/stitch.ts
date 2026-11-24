@@ -187,23 +187,7 @@ export async function stitchAndFindPath(
 
   let lookahead: readonly ChannelSegment[] = [];
   let lookaheadFailure: LookaheadDiscovery['failure'];
-  let alternates: readonly Path[] = [];
-  if (singleGraph) {
-    // The common case (every worked example in plan.md resolves within a
-    // single graph): the single-graph engine names why no path exists and
-    // finds the waypoint alternates. Its alternates ignore stops and rank by
-    // the recommended order, so they are offered only when neither applies.
-    const singleGraphResult = findPathsInGraph(anchor.graph, start, target);
-    if (!singleGraphResult.ok) {
-      return err(singleGraphResult.error);
-    }
-    if (constraints.stops.length === 0 && constraints.riskPolicy === 'recommended') {
-      alternates = singleGraphResult.value.alternates.map((p) => ({
-        ...p,
-        hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })),
-      }));
-    }
-  } else if (!targetInAnchor) {
+  if (!targetInAnchor) {
     const discovery = params.anchor?.lookahead ?? (await discoverLookahead(loader, anchorChannel, anchor.graph, arch));
     lookaheadFailure = discovery.failure;
     if (!discovery.segments.some((segment) => versionsOf(segment.graph).has(target))) {
@@ -220,6 +204,11 @@ export async function stitchAndFindPath(
   const found = findRoute(model, start, target, constraints);
   if (!found.ok) {
     if (found.error.kind === 'stopUnreachable') return err(found.error);
+    // The single-graph engine names why no path exists (plan.md §4).
+    if (singleGraph) {
+      const reason = findPathsInGraph(anchor.graph, start, target);
+      if (!reason.ok) return err(reason.error);
+    }
     // Start and target are each present but no shared version joins them,
     // unless the channel that failed to load would have.
     // No cross-graph `nearestReachable`: the single-graph path computes one
@@ -237,8 +226,16 @@ export async function stitchAndFindPath(
   const riskComparison = comparison && { route: comparison.route && toPath(comparison.route), conditionalFree: comparison.conditionalFree };
 
   if (singleGraph) {
+    const primary = toPath(route);
+    // Waypoint alternates ignore stops and rank by the recommended order, so
+    // they are offered only when neither applies.
+    const unconstrained = constraints.stops.length === 0 && constraints.riskPolicy === 'recommended';
+    const single = unconstrained ? findPathsInGraph(anchor.graph, start, target, primary.versions) : undefined;
+    const alternates = single?.ok
+      ? single.value.alternates.map((p) => ({ ...p, hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })) }))
+      : [];
     return ok({
-      primary: toPath(route),
+      primary,
       riskComparison,
       alternates,
       stitch: { channelsUsed: [anchor.channel], classFallbacks: [], multiGraph: false },
