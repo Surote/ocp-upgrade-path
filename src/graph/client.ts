@@ -64,7 +64,7 @@ export class GraphClient {
         return ok({ graph: memHit.value, fetchedAt: memHit.fetchedAt });
       }
 
-      const diskHit = this.persistent.get(key);
+      const diskHit = await this.persistent.get(key);
       if (diskHit) {
         this.memory.set(key, diskHit);
         return ok({ graph: diskHit.value, fetchedAt: diskHit.fetchedAt });
@@ -78,7 +78,7 @@ export class GraphClient {
 
     const entry: CacheEntry<Graph> = { value: fetched.value, fetchedAt: Date.now() };
     this.memory.set(key, entry);
-    this.persistent.set(key, entry);
+    await this.persistent.set(key, entry);
     return ok({ graph: entry.value, fetchedAt: entry.fetchedAt });
   }
 
