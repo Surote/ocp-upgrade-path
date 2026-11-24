@@ -183,6 +183,14 @@ describe('route stops', () => {
     expect(urlParam('avoid')).toBe('conditional');
   });
 
+  it('says alternates are not computed under a pinned stop or Avoid conditional risks, rather than that none exist', async () => {
+    await renderAt(`${BASE}&avoid=conditional`);
+
+    const panel = screen.getByRole('region', { name: 'Alternate routes' });
+    expect(panel).toHaveTextContent(/not computed/i);
+    expect(panel).not.toHaveTextContent(/only viable/);
+  });
+
   it('asks for a target, rather than checking forever, when the target is cleared with stops pinned', async () => {
     await renderAt(`${BASE}&stops=4.19.41`);
 
