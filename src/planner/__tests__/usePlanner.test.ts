@@ -124,6 +124,17 @@ describe('usePlanner — URL restore on load', () => {
     expect(result.current.target.groups.flatMap((g) => g.options)).toEqual([]);
   });
 
+  it('a target param equal to the start shows only the notice, never a zero-hop route', async () => {
+    setUrl('?channel=stable-4.20&start=4.20.32&target=4.20.32');
+    const graph = rawGraphJson(['4.18.2', '4.20.32'], [[0, 1]], 'stable-4.20');
+    const client = makeClient(withSeed(new Map([['stable-4.20|amd64', jsonHandler(graph)]])));
+
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.notices.some((n) => n.includes('4.20.32') && n.includes('not newer'))).toBe(true));
+    expect(result.current.result.status).toBe('idle');
+  });
+
   it('an unknown/garbage channel param never crashes and surfaces a named fetch error', async () => {
     setUrl('?channel=totally-bogus-channel');
     const client = makeClient(withSeed(new Map([['totally-bogus-channel|amd64', jsonHandler({ nodes: [], edges: [], conditionalEdges: [] })]])));

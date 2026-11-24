@@ -156,7 +156,10 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     [graph, resolvedStart, lookaheadSegments],
   );
 
-  const pathResult = usePathSearch(client, { channel, arch, start: resolvedStart, target: resolvedTarget });
+  // Only a listed (newer-than-start) target is searched, so a permalink whose
+  // target is not newer gets the notice below and no route alongside it.
+  const targetOption = targetOptions.find((o) => o.version === resolvedTarget);
+  const pathResult = usePathSearch(client, { channel, arch, start: resolvedStart, target: targetOption?.version });
 
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
   const setChannel = useCallback((next: string) => {
@@ -191,10 +194,9 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
       list.push(`Target version "${targetRaw}" from the link was not found in channel "${channel}" -- please reselect.`);
     }
     if (resolvedTarget && resolvedStart) {
-      const opt = targetOptions.find((o) => o.version === resolvedTarget);
-      if (!opt) {
+      if (!targetOption) {
         list.push(`Target version "${resolvedTarget}" from the link is not newer than the start version -- please choose a different target.`);
-      } else if (!opt.reachable) {
+      } else if (!targetOption.reachable) {
         list.push(`Target version "${resolvedTarget}" from the link is not reachable from the start version -- please choose a different target.`);
       }
     }
@@ -207,7 +209,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     targetRaw,
     resolvedTarget,
     channel,
-    targetOptions,
+    targetOption,
     lookaheadLoading,
   ]);
 
