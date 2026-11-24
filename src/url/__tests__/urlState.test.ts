@@ -168,6 +168,11 @@ describe('risks marked not applicable', () => {
     });
   });
 
+  it('keeps a marked name with a comma or surrounding spaces intact', () => {
+    const qs = serializeUrlState({ notApplicable: ['A,B', ' C '] });
+    expect(parseUrlState(qs).notApplicable).toEqual([' C ', 'A,B']);
+  });
+
   it('omits na when nothing is marked', () => {
     expect(serializeUrlState({ channel: 'eus-4.18', notApplicable: [] })).toBe('channel=eus-4.18');
     expect(parseUrlState('?na=,').notApplicable).toBeUndefined();

@@ -133,3 +133,74 @@ describe('marking a conditional risk not applicable', () => {
     expect(new URLSearchParams(window.location.search).get('na')).toBe('VSphereRisk');
   });
 });
+
+describe('two conditional advisories that share a name', () => {
+  const dup = (n: number) => ({
+    url: `https://issues.redhat.com/browse/TEST-DUP-${n}`,
+    name: 'DupRisk',
+    message: `Advisory ${n}.`,
+    matchingRules: [{ type: 'PromQL', promql: { promql: `dup_${n}` } }],
+  });
+
+  /** 4.18.2 -> 4.20.32 directly carries DupRisk #2, or cleanly through 4.19.41; 4.20.32 -> 4.20.40 carries DupRisk #1. */
+  function sharedNameClient(): GraphClient {
+    const versions = ['4.18.2', '4.19.41', '4.20.32', '4.20.40'];
+    const graph = {
+      version: 1,
+      nodes: versions.map((version, i) => ({
+        version,
+        payload: `quay.io/openshift-release-dev/ocp-release@sha256:${i.toString().padStart(64, '0')}`,
+        metadata: { url: `https://access.redhat.com/errata/TEST-${i}`, 'io.openshift.upgrades.graph.release.channels': CHANNEL },
+      })),
+      edges: [
+        [0, 1],
+        [1, 2],
+      ],
+      conditionalEdges: [
+        { edges: [{ from: '4.18.2', to: '4.20.32' }], risks: [dup(2)] },
+        { edges: [{ from: '4.20.32', to: '4.20.40' }], risks: [dup(1)] },
+      ],
+    };
+    const fetchImpl = fakeFetch(async (url) =>
+      fakeJsonResponse(new URL(url).searchParams.get('channel') === CHANNEL ? graph : { version: 1, nodes: [], edges: [], conditionalEdges: [] }),
+    );
+    return new GraphClient({ storage: new FakeStorage(), fetchImpl });
+  }
+
+  function markOf(n: number): HTMLInputElement {
+    const link = within(riskSummary()).getByRole('link', { name: (_, el) => el.getAttribute('href') === dup(n).url });
+    return within(link.closest('li') as HTMLElement).getByRole('checkbox') as HTMLInputElement;
+  }
+
+  it('marks only the advisory whose card was checked, and routes around the other', async () => {
+    window.history.pushState({}, '', `/?channel=${CHANNEL}&arch=amd64&start=4.18.2&target=4.20.40`);
+    render(<App graphClient={sharedNameClient()} />);
+    await screen.findByRole('list', { name: 'Upgrade path stops' });
+    expect(stops()).toEqual(['4.18.2', '4.20.32', '4.20.40']);
+
+    fireEvent.click(markOf(1));
+    await waitFor(() => expect(markOf(1)).toBeChecked());
+    expect(markOf(2)).not.toBeChecked();
+    expect(routeFacts()).toBe('2 hops · 2 distinct risks (1 marked not applicable)');
+
+    fireEvent.change(screen.getByLabelText('Target version'), { target: { value: '4.20.32' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Avoid conditional risks' }));
+    await waitFor(() => expect(stops()).toEqual(['4.18.2', '4.19.41', '4.20.32']));
+  });
+
+  it('names the checked advisory in the link and restores only it', async () => {
+    window.history.pushState({}, '', `/?channel=${CHANNEL}&arch=amd64&start=4.18.2&target=4.20.40`);
+    render(<App graphClient={sharedNameClient()} />);
+    await screen.findByRole('list', { name: 'Upgrade path stops' });
+    fireEvent.click(markOf(1));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).getAll('na')).toEqual([`DupRisk ${dup(1).url}`]));
+
+    const link = `${window.location.pathname}${window.location.search}`;
+    cleanup();
+    window.history.pushState({}, '', link);
+    render(<App graphClient={sharedNameClient()} />);
+    await screen.findByRole('list', { name: 'Upgrade path stops' });
+    await waitFor(() => expect(markOf(1)).toBeChecked());
+    expect(markOf(2)).not.toBeChecked();
+  });
+});
