@@ -3,6 +3,8 @@ import { parseRawGraph } from '../../graph/parse';
 import type { Graph, Version } from '../../graph/types';
 import { err, ok, type Result } from '../../lib/result';
 import type { GraphError } from '../../graph/errors';
+import { buildTargetOptions } from '../../planner/targetOptions';
+import { discoverLookahead } from '../lookahead';
 import { stitchAndFindPath } from '../stitch';
 import type { GraphLoader } from '../types';
 
@@ -321,6 +323,35 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     // latter is the genuine eus -> stable drop the UI must call out.
     const sourceChannels = result.value.primary.hops.map((h) => h.sourceChannel);
     expect(sourceChannels).toEqual(['eus-4.20', 'eus-4.20', 'eus-4.22', 'eus-4.22', 'stable-4.23']);
+  });
+
+  it('keeps a reachable same-class route over a shorter one on candidate, in both the route and the target dropdown', async () => {
+    const anchor = rawGraph(['4.20.0'], [], 'ANCHOR', ['stable-4.20', 'stable-4.21', 'candidate-4.22']);
+    const stable421 = rawGraph(['4.20.0', '4.21.0', '4.21.1'], [[0, 1], [1, 2]], 'S421');
+    const candidate422 = rawGraph(['4.20.0', '4.21.1', '4.22.0'], [[0, 1], [1, 2]], 'C422');
+    const loader: GraphLoader = async (channel) => {
+      if (channel === 'stable-4.20') return ok(anchor);
+      if (channel === 'stable-4.21') return ok(stable421);
+      if (channel === 'candidate-4.22') return ok(candidate422);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.20',
+      arch: 'amd64',
+      start: v('4.20.0'),
+      target: v('4.21.1'),
+    });
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.primary.hops.map((h) => [h.to, h.sourceChannel])).toEqual([
+      [v('4.21.0'), 'stable-4.21'],
+      [v('4.21.1'), 'stable-4.21'],
+    ]);
+    expect(result.value.stitch.classFallbacks).toEqual([]);
+
+    const { segments } = await discoverLookahead(loader, 'stable-4.20', anchor, 'amd64');
+    const option = buildTargetOptions(anchor, v('4.20.0'), segments).find((o) => o.version === v('4.21.1'));
+    expect(option?.via).toEqual({ channel: 'stable-4.21', classFallback: false });
   });
 
   it('gives up as targetNeverFound when no channel walking forward holds the target', async () => {
