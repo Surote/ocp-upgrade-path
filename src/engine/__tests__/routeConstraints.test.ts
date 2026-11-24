@@ -62,11 +62,11 @@ describe('stops', () => {
     ]);
   });
 
-  it('offers only alternates that pass every stop', async () => {
+  it('offers no alternate that skips a stop', async () => {
     const result = await route(single, '4.18.0', '4.20.0', stops('4.19.10'));
     if (!result.ok) throw new Error(result.error.kind);
     expect(result.value.primary.versions).toContain(v('4.19.10'));
-    for (const alternate of result.value.alternates) expect(alternate.versions).toContain(v('4.19.10'));
+    expect(result.value.alternates).toEqual({ kind: 'notComputed', reason: 'constrained' });
   });
 
   it('names the first stop that cannot be honored', async () => {

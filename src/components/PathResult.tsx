@@ -137,7 +137,7 @@ export function PathResult({
       <RiskSummary riskSummary={primary.riskSummary} />
       <AdminAcksPanel path={primary} />
       {start && target && <EusAdvisory start={start} target={target} />}
-      <AlternatesPanel alternates={alternates} multiGraph={stitch.multiGraph} channelsUsed={stitch.channelsUsed} />
+      <AlternatesPanel alternates={alternates} channelsUsed={stitch.channelsUsed} />
     </div>
   );
 }

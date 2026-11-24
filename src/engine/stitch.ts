@@ -7,7 +7,7 @@ import { NO_CONSTRAINTS, type RouteConstraints } from './routeConstraints';
 import { buildRoutingModel, type Route, type RoutingModel, searchRoutes } from './routeSearch';
 import { dedupeRisks } from './risks';
 import { compareStreams, type Stream, streamOf } from './version';
-import type { GraphLoader, Path, PathHop, StitchError, StitchedPathResult } from './types';
+import type { Alternates, GraphLoader, Path, PathHop, StitchError, StitchedPathResult } from './types';
 
 /**
  * Stitching, per plan.md §4 and §6 "Look-ahead targets (bidirectional
@@ -226,13 +226,13 @@ export async function stitchAndFindPath(
 
   if (singleGraph) {
     const primary = toPath(route);
-    // Waypoint alternates ignore stops and rank by the recommended order, so
-    // they are offered only when neither applies.
     const unconstrained = constraints.stops.length === 0 && constraints.riskPolicy === 'recommended';
-    const single = unconstrained ? findPathsInGraph(anchor.graph, start, target, primary.versions) : undefined;
-    const alternates = single?.ok
-      ? single.value.alternates.map((p) => ({ ...p, hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })) }))
-      : [];
+    let alternates: Alternates = { kind: 'notComputed', reason: 'constrained' };
+    if (unconstrained) {
+      const single = findPathsInGraph(anchor.graph, start, target, primary.versions);
+      const paths = single.ok ? single.value.alternates : [];
+      alternates = { kind: 'computed', paths: paths.map((p) => ({ ...p, hops: p.hops.map((h) => ({ ...h, sourceChannel: anchor.channel })) })) };
+    }
     return ok({
       primary,
       riskComparison,
@@ -253,7 +253,7 @@ export async function stitchAndFindPath(
     // mean repeating the layered DP once per candidate waypoint per segment,
     // and the trick that makes single-graph alternates cheap doesn't hold
     // across a channel boundary.
-    alternates: [],
+    alternates: { kind: 'notComputed', reason: 'multiGraph' },
     stitch: {
       channelsUsed: [anchor.channel, ...anchorSideFirst.map((s) => s.channel), ...usedLookahead.map((s) => s.channel)],
       classFallbacks: usedLookahead.flatMap((segment) =>

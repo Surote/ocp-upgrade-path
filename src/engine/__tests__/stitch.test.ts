@@ -69,7 +69,7 @@ describe('stitchAndFindPath — single-graph fast path', () => {
         // never walks forward (deliberate test update, not a regression).
         expect(result.value.stitch).toEqual({ channelsUsed: ['stable-4.20'], classFallbacks: [], multiGraph: false });
         expect(result.value.primary.versions).toEqual([v('4.18.0'), v('4.19.20'), v('4.20.0')]); // higher-patch waypoint wins
-        expect(result.value.alternates).toHaveLength(1); // the 4.19.10 waypoint
+        expect(result.value.alternates.kind === 'computed' && result.value.alternates.paths).toHaveLength(1); // the 4.19.10 waypoint
         expect(result.value.stations.find((n) => n.version === '4.18.0')?.payload).toContain('stable420');
         // Per-hop provenance (plan.md §6): every hop of a single-graph path
         // carries the same `sourceChannel` -- there is only one fetched
@@ -118,7 +118,7 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     expect(result.value.primary.versions).toEqual([v('4.18.1'), v('4.19.5'), v('4.20.1')]);
     expect(result.value.primary.cost.hops).toBe(2);
     // Documented scope decision: multi-graph stitches return primary only.
-    expect(result.value.alternates).toEqual([]);
+    expect(result.value.alternates).toEqual({ kind: 'notComputed', reason: 'multiGraph' });
   });
 
   it('reads each station\'s node metadata from the graph that supplied the hop arriving at it', async () => {
@@ -572,7 +572,8 @@ describe('single-graph alternates', () => {
     const result = await stitchAndFindPath(loader, { targetChannel: 'candidate-4.20', arch: 'amd64', start: v('4.18.14'), target: v('4.20.0-ec.2') });
 
     if (!result.ok) throw new Error(result.error.kind);
-    const shown = [result.value.primary, ...result.value.alternates].map((p) => p.versions.join(' > '));
+    const { alternates } = result.value;
+    const shown = [result.value.primary, ...(alternates.kind === 'computed' ? alternates.paths : [])].map((p) => p.versions.join(' > '));
     expect(new Set(shown).size).toBe(shown.length);
     expect(shown.some((route) => route.includes('4.19.0-rc.2'))).toBe(true);
     expect(shown.some((route) => route.includes('4.19.0-rc.3'))).toBe(true);
