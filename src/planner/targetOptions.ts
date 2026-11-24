@@ -50,7 +50,11 @@ export function buildTargetOptions(
     for (const { version } of graph.nodes) {
       if (seen.has(version)) continue;
       seen.add(version);
-      if (version !== start && compareVersions(version, start) >= 0) options.push({ version, reachable: reachable.has(version), via });
+      const order = compareVersions(version, start);
+      if (version === start || order < 0) continue;
+      // The stitcher only walks look-ahead graphs into streams newer than the
+      // anchor, so it cannot route to a build that ties the start's precedence there.
+      options.push({ version, reachable: reachable.has(version) && (via === undefined || order > 0), via });
     }
     frontier = new Set([...frontier, ...reachable]);
   }

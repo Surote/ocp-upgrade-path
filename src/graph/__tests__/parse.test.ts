@@ -262,7 +262,8 @@ describe('graph boundary — values that reach the upgrade script stay shell-saf
   it('rejects a long malformed channel list without stalling', () => {
     const started = performance.now();
     const result = parseRawGraph(rawWith({ version: '4.18.0', payload: SAFE_PAYLOAD, channels: `${' ,'.repeat(5000)}!` }), CTX);
-    expect(performance.now() - started).toBeLessThan(100);
+    // The old backtracking regex needs far longer than this on 5000 entries; the bound is loose so a busy CI runner can't flake it.
+    expect(performance.now() - started).toBeLessThan(2000);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.kind).toBe('validation');

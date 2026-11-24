@@ -25,6 +25,14 @@ describe('buildTargetOptions -- selected channel only', () => {
     expect(buildTargetOptions(graph, v('4.22.1-rc.1'), [])).toEqual([{ version: v('4.22.1-rc.1+build.1'), reachable: true, via: undefined }]);
   });
 
+  it('keeps a look-ahead build of the start release disabled, since the stitcher only walks forward into newer streams', () => {
+    const anchor = buildGraph(['4.22.1-rc.1'], []);
+    const segment = { channel: 'stable-4.23', classFallback: false, graph: buildGraph(['4.22.1-rc.1', '4.22.1-rc.1+build.1'], [[0, 1]]) };
+    expect(buildTargetOptions(anchor, v('4.22.1-rc.1'), [segment])).toEqual([
+      { version: v('4.22.1-rc.1+build.1'), reachable: false, via: { channel: 'stable-4.23', classFallback: false } },
+    ]);
+  });
+
   it('marks a reachable, newer version reachable with no channel change', () => {
     const graph = buildGraph(['1.0.0', '2.0.0'], [[0, 1]]);
     expect(buildTargetOptions(graph, v('1.0.0'), [])).toEqual([{ version: v('2.0.0'), reachable: true, via: undefined }]);
