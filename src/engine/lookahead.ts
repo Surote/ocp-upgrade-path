@@ -13,10 +13,11 @@ import { compareStreams, type Stream } from './version';
 const MAX_LOOKAHEAD_FETCHES = 48;
 
 /**
- * Fetches in flight at once. Each Cincinnati response streams at a few hundred
- * KB/s, so a stream's channels finish far sooner side by side.
+ * How many of the walk's next channels are fetched ahead of it. Each
+ * Cincinnati response streams at a few hundred KB/s, so a stream's channels
+ * finish far sooner side by side.
  */
-const LOOKAHEAD_CONCURRENCY = 6;
+const LOOKAHEAD_WINDOW = 6;
 
 /** `classFallback` is true when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
 export type ChannelSegment = { readonly channel: string; readonly graph: Graph } & (
@@ -78,48 +79,25 @@ export async function discoverLookahead(
   const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
-  // Fetching runs ahead of the walk: every channel any loaded graph names is
-  // fetched as soon as a slot frees, so one slow channel never holds back
-  // what its siblings named. The walk below still takes channels one at a
-  // time in priority order from the loaded results, so it takes the channels
-  // a serial walk would, unless the cap binds (see the break below).
-  const named = new Set(anchorGraph.channelNames);
-  const loaded = new Map<string, LoadResult>();
-  const started = new Set<string>();
-  const inFlight = new Map<string, Promise<void>>();
-  const request = (channel: string) => {
-    started.add(channel);
-    const settled = loader(channel, arch).then((result) => {
-      loaded.set(channel, result);
-      if (result.ok) for (const name of result.value.channelNames) named.add(name);
-      inFlight.delete(channel);
-    });
-    inFlight.set(channel, settled);
-  };
-  const requestAhead = (next: string) => {
-    if (!started.has(next) && inFlight.size < LOOKAHEAD_CONCURRENCY) request(next);
-    // Once the named channels reach the cap the walk may not take them all,
-    // and a fetch it does not take spends a request it needs.
-    if (untriedChannels(named, anchor, []).length >= MAX_LOOKAHEAD_FETCHES) return;
-    for (const { channel } of untriedChannels(named, anchor, [...started])) {
-      if (inFlight.size >= LOOKAHEAD_CONCURRENCY || started.size >= MAX_LOOKAHEAD_FETCHES) return;
-      request(channel);
-    }
-  };
-
-  while (channelsTried.length < MAX_LOOKAHEAD_FETCHES) {
-    const next = untriedChannels(attested, anchor, channelsTried)[0];
+  // Each turn fetches the walk's next few channels as its own takes so far
+  // rank them. Which channels are fetched then depends only on graph
+  // contents, never on which response came first, so neither does which
+  // channels the cap leaves out.
+  const fetches = new Map<string, Promise<LoadResult>>();
+  for (;;) {
+    const frontier = untriedChannels(attested, anchor, channelsTried);
+    const next = frontier[0];
     if (!next) break;
-    const result = loaded.get(next.channel);
-    if (!result) {
-      // Fetches started before one graph named enough earlier channels to
-      // push them past the cap spent requests the walk needed. Stopping keeps
-      // the cap; what the walk took is still a serial walk's first channels.
-      if (!started.has(next.channel) && started.size >= MAX_LOOKAHEAD_FETCHES) break;
-      requestAhead(next.channel);
-      await Promise.race(inFlight.values());
-      continue;
+    // Once the walk knows of more channels than the cap allows, a prefetch a
+    // later graph pushes back can spend a request the walk needs.
+    const window = untriedChannels(attested, anchor, []).length >= MAX_LOOKAHEAD_FETCHES ? 1 : LOOKAHEAD_WINDOW;
+    for (const { channel } of frontier.slice(0, window)) {
+      if (!fetches.has(channel) && fetches.size < MAX_LOOKAHEAD_FETCHES) fetches.set(channel, loader(channel, arch));
     }
+    const pending = fetches.get(next.channel);
+    // The cap went on fetches a graph taken since then pushed behind `next`.
+    if (!pending) break;
+    const result = await pending;
     channelsTried.push(next.channel);
     if (!result.ok) {
       if (result.error.kind === 'empty') {

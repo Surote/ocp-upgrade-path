@@ -311,12 +311,17 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
 > channel is named that it has not tried (safety cap: 48 loader calls, counting
-> prefetches). Fetching and taking are separate: any channel a loaded graph names starts
-> as soon as one of six slots frees, while the walk takes loaded results one at a time in
-> priority order. When the cap does not bind, the channels taken match a serial walk
-> exactly. When it binds, the walk never makes a 49th request; if a late graph names
-> higher-priority channels than ones already fetched, it can stop early, and what it took
-> is still the start of the serial walk. Live 4.14 routes use 39 to 45 requests. It fetches every named channel of a class the stream's
+> prefetches). The walk takes channels one at a time in priority order, and each turn
+> fetches its next six as the channels it has taken so far rank them. Which channels are
+> fetched therefore depends only on graph contents, never on which response arrived first,
+> so the same graphs always give the same targets. Fetching everything any loaded graph
+> named made this depend on timing: a slow first channel let 46 later fetches start
+> before it named two earlier channels, and the walk stopped at the cap with 2 usable
+> segments where a fast response gave 48. Once the walk knows of 48 or more channels it
+> fetches one at a time, since a prefetch a later graph pushes back could spend a request
+> it needs. When the cap does not bind, the channels taken match a serial walk exactly.
+> When it binds, the walk never makes a 49th request, and what it took is the start of
+> the serial walk. Live 4.14 routes use 39 to 45 requests. It fetches every named channel of a class the stream's
 > preference order lists, fallbacks included, and never
 > decides from discovery order that a fallback is unneeded. Three successive review
 > findings came from such rules: a preferred channel named after a fallback hid it, and
