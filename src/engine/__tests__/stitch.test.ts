@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { buildHopCommands } from '../../design/commands';
 import { parseRawGraph } from '../../graph/parse';
 import type { Graph, Version } from '../../graph/types';
 import { err, ok, type Result } from '../../lib/result';
@@ -8,6 +9,7 @@ import { loadFixture } from '../../test-utils/fixtures';
 import { discoverLookahead } from '../lookahead';
 import { stitchAndFindPath } from '../stitch';
 import type { GraphLoader } from '../types';
+import * as fx from './routeFixtures';
 
 function v(s: string): Version {
   return s as Version;
@@ -574,5 +576,36 @@ describe('single-graph alternates', () => {
     expect(new Set(shown).size).toBe(shown.length);
     expect(shown.some((route) => route.includes('4.19.0-rc.2'))).toBe(true);
     expect(shown.some((route) => route.includes('4.19.0-rc.3'))).toBe(true);
+  });
+});
+
+describe('node metadata follows hop provenance', () => {
+  it('takes a hop\'s --to-image digest from the graph that supplied the hop, not a graph only the lower-risk route uses', async () => {
+    const anchor = fx.graph([], { nodes: ['4.20.0'] });
+    const stable421 = fx.graph([['4.20.0', '4.21.2']]);
+    const stable422 = fx.graph([], { risks: [{ from: '4.20.0', to: '4.22.0', name: 'R' }] });
+    // Only the lower-risk route walks stable-4.23, and it holds 4.22.0 under another digest.
+    const stable423 = fx.graph([['4.21.2', '4.22.0']], { nodes: ['4.21.0'] });
+    const segment = (channel: string, graph: Graph) => ({ channel, graph, classFallback: false as const });
+    const lookahead = [segment('stable-4.21', stable421), segment('stable-4.22', stable422), segment('stable-4.23', stable423)];
+    const noFetch: GraphLoader = async (channel) => {
+      throw new Error(`unexpected fetch of ${channel}`);
+    };
+
+    const result = await stitchAndFindPath(noFetch, {
+      targetChannel: 'stable-4.20',
+      arch: 'amd64',
+      start: v('4.20.0'),
+      target: v('4.22.0'),
+      anchor: { graph: anchor, lookahead: { segments: lookahead, channelsTried: lookahead.map((s) => s.channel) } },
+    });
+
+    if (!result.ok) throw new Error(result.error.kind);
+    expect(result.value.primary.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.22']);
+    expect(result.value.riskComparison?.route?.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.21', 'stable-4.23']);
+    const [command] = buildHopCommands(result.value.primary, 'stable-4.20', result.value.nodeInfo, { channelNames: [], multiGraph: true });
+    const digest = stable422.nodes.find((n) => n.version === '4.22.0')?.payload as string;
+    expect(digest).not.toBe(stable423.nodes.find((n) => n.version === '4.22.0')?.payload);
+    expect(command?.upgradeToImage).toBe(`oc adm upgrade --to-image=${digest} --allow-explicit-upgrade`);
   });
 });
