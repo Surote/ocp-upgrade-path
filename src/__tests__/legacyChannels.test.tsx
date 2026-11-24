@@ -30,6 +30,7 @@ const WORLD: Record<string, unknown> = {
   'stable-4.16': rawGraph(['4.16.1'], 'stable-4.16'),
   'stable-4.15': rawGraph(['4.14.1', '4.15.1'], 'stable-4.13,fast-4.12,stable-4.14,eus-4.14,stable-4.15'),
   'eus-4.14': rawGraph(['4.12.0', '4.14.0', '4.14.1'], 'eus-4.12,stable-4.12,eus-4.14,stable-4.14'),
+  'stable-4.13': rawGraph(['4.12.0', '4.13.1'], 'stable-4.12,stable-4.13'),
 };
 
 type Responder = (channel: string, attempt: number) => Response | Promise<Response> | undefined;
@@ -148,6 +149,21 @@ describe('Backward channel discovery', () => {
 
     await waitFor(() => expect(second.fetched).toContain('stable-4.15'));
     expect(second.fetched).not.toContain('fast-4.17');
+  });
+});
+
+describe('A saved link to a channel below the 4.14 floor', () => {
+  it('shows that channel as the selection, under its legacy label, once its graph loads', async () => {
+    window.history.pushState({}, '', '/?channel=stable-4.13&arch=amd64&start=4.12.0');
+    const { client } = worldClient(new FakeStorage());
+    render(<App graphClient={client} />);
+
+    await waitFor(() => expect(screen.getByLabelText('Start version')).toHaveValue('4.12.0'));
+    const select = screen.getByLabelText('Channel') as HTMLSelectElement;
+    expect(select).toHaveValue('stable-4.13');
+    expect(select.selectedOptions[0]?.closest('optgroup')?.label).toBe('4.13 · legacy');
+    // The floor still keeps other pre-4.14 names out of the list.
+    expect(channelOptions()).not.toContain('stable-4.12');
   });
 });
 
