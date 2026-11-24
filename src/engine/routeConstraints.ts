@@ -1,6 +1,6 @@
 import type { Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
-import { NO_MARKS, type RiskName } from './risks';
+import { NO_MARKS, type RiskId } from './risks';
 import { buildRoutingModel, forEachEdge, reachBackward, reachForward, type RoutingModel } from './routeSearch';
 import type { Path } from './types';
 import { compareVersions } from './version';
@@ -19,17 +19,17 @@ export type RiskPolicy = 'recommended' | 'avoidConditional';
  * Operator-pinned constraints on one route search. `stops` are versions the
  * route must pass through, in order, strictly between start and target.
  *
- * `notApplicable` names conditional risks the operator checked against their
+ * `notApplicable` holds conditional advisories the operator checked against their
  * cluster and found not to match. Their conditional occurrences stop counting
  * toward `Route.conditional`, so the `avoidConditional` ranking and the risk
- * comparison ignore them; an `Always` occurrence of the same name still
+ * comparison ignore them; an `Always` occurrence of the same advisory still
  * counts. The recommended ranking reads the published risk weight and never
  * changes with a mark, and every hop still carries every risk.
  */
 export interface RouteConstraints {
   readonly stops: readonly Version[];
   readonly riskPolicy: RiskPolicy;
-  readonly notApplicable: ReadonlySet<RiskName>;
+  readonly notApplicable: ReadonlySet<RiskId>;
 }
 
 export const NO_CONSTRAINTS: RouteConstraints = { stops: [], riskPolicy: 'recommended', notApplicable: NO_MARKS };

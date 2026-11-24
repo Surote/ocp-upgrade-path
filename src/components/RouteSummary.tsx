@@ -1,4 +1,4 @@
-import type { RiskName } from '../engine/risks';
+import type { RiskId } from '../engine/risks';
 import type { Path } from '../engine/types';
 import { routeFacts } from './routeFacts';
 
@@ -8,7 +8,7 @@ import { routeFacts } from './routeFacts';
  * visibly above the map -- a real `<ol>` (not clipped/hidden), so it doubles
  * as a compact route header for every reader, not only assistive tech.
  */
-export function RouteSummary({ path, notApplicable }: { readonly path: Path; readonly notApplicable: ReadonlySet<RiskName> }) {
+export function RouteSummary({ path, notApplicable }: { readonly path: Path; readonly notApplicable: ReadonlySet<RiskId> }) {
   return (
     <div className="route-summary">
       <ol aria-label="Upgrade path stops">

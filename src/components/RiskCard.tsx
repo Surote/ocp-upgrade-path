@@ -1,4 +1,4 @@
-import { isWaived, riskClass, riskNameOf } from '../engine/risks';
+import { isWaived, riskClass, riskIdOf } from '../engine/risks';
 import type { Risk } from '../graph/types';
 import type { RiskApplicabilityViewModel } from '../planner/usePlanner';
 import { CopyButton } from './CopyButton';
@@ -60,7 +60,7 @@ export function RiskCard({ risk, applicability }: { readonly risk: Risk; readonl
               type="checkbox"
               aria-label={`Doesn't apply to my cluster: ${risk.name}`}
               checked={marked}
-              onChange={(e) => applicability.onChange(riskNameOf(risk), e.target.checked)}
+              onChange={(e) => applicability.onChange(riskIdOf(risk), e.target.checked)}
             />
             Doesn't apply to my cluster
           </label>

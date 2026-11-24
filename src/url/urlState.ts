@@ -1,6 +1,6 @@
-import type { RiskName } from '../engine/risks';
+import { qualifiedRiskName, type RiskId } from '../engine/risks';
 import type { RiskPolicy } from '../engine/routeConstraints';
-import { isArch, type Arch } from '../graph/types';
+import { isArch, type Arch, type Risk } from '../graph/types';
 
 const PARAM_CHANNEL = 'channel';
 const PARAM_ARCH = 'arch';
@@ -27,7 +27,7 @@ export interface RawUrlState {
   /** `stops=v1,v2`, in order; blank entries dropped. */
   readonly stops?: readonly string[];
   readonly avoid?: string;
-  /** `na=Name1,Name2`: risk names the operator marked not applicable; blank entries dropped. */
+  /** One `na=` per advisory the operator marked not applicable, verbatim (see `encodeNotApplicable`); blank values dropped. */
   readonly notApplicable?: readonly string[];
 }
 
@@ -46,12 +46,15 @@ export function parseUrlState(search: string): RawUrlState {
     target: cleanParam(params.get(PARAM_TARGET)),
     stops: parseList(params.get(PARAM_STOPS)),
     avoid: cleanParam(params.get(PARAM_AVOID)),
-    notApplicable: parseList(params.get(PARAM_NOT_APPLICABLE)),
+    notApplicable: nonEmpty(params.getAll(PARAM_NOT_APPLICABLE).filter(Boolean)),
   };
 }
 
 function parseList(v: string | null): readonly string[] | undefined {
-  const items = (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return nonEmpty((v ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+}
+
+function nonEmpty(items: readonly string[]): readonly string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
@@ -75,9 +78,9 @@ export function serializeUrlState(state: UrlStateInput): string {
   const stops = state.stops?.filter(Boolean) ?? [];
   if (stops.length > 0) params.set(PARAM_STOPS, stops.join(','));
   if (state.riskPolicy === 'avoidConditional') params.set(PARAM_AVOID, AVOID_CONDITIONAL);
-  if (state.notApplicable?.length) params.set(PARAM_NOT_APPLICABLE, [...state.notApplicable].sort().join(','));
-  // A literal comma survives URLSearchParams parsing, and keeps `stops=` readable in a shared link.
-  return params.toString().replace(/%2C/gi, ',');
+  for (const mark of [...(state.notApplicable ?? [])].sort()) params.append(PARAM_NOT_APPLICABLE, mark);
+  // These survive URLSearchParams parsing literally, and keep `stops=` and an advisory URL in `na=` readable in a shared link.
+  return params.toString().replace(/%2C|%2F|%3A/gi, (escaped) => decodeURIComponent(escaped));
 }
 
 export interface ResolvedUrlArch {
@@ -112,24 +115,49 @@ export function resolveUrlRiskPolicy(raw: string | undefined): ResolvedUrlRiskPo
   return { riskPolicy: 'recommended', notice: `Unknown avoid value "${raw}" in link -- showing the recommended route.` };
 }
 
-export interface ResolvedUrlNotApplicable {
-  readonly names: readonly RiskName[];
-  readonly notice?: string;
+/** The advisories in `known` a `na=` value names: by bare name, or by `qualifiedRiskName`. */
+function advisoriesNamed(value: string, known: ReadonlyMap<RiskId, Risk>): readonly RiskId[] {
+  return [...known].filter(([id, risk]) => risk.name === value || qualifiedRiskName(id) === value).map(([id]) => id);
 }
 
 /**
- * Keeps each linked name that exactly matches a conditional risk in `known`.
- * A name that matches none is dropped and named in the notice, never matched
- * loosely onto another risk.
+ * The `na=` values for `marks`: a mark's bare name while no other advisory in
+ * `known` answers to it, so the common link stays readable, and otherwise the
+ * name with its URL, so the link still names exactly one advisory.
  */
-export function resolveUrlNotApplicable(raw: readonly string[], known: ReadonlySet<RiskName>): ResolvedUrlNotApplicable {
-  const isKnown = (name: string): name is RiskName => (known as ReadonlySet<string>).has(name);
-  const names = raw.filter(isKnown);
-  const dropped = raw.filter((name) => !isKnown(name));
-  if (dropped.length === 0) return { names, notice: undefined };
-  const list = dropped.map((name) => `"${name}"`).join(', ');
-  const noun = dropped.length === 1 ? 'that name, so the mark was' : 'those names, so the marks were';
-  return { names, notice: `The link marked ${list} as not applicable, but no conditional risk on these channels has ${noun} dropped.` };
+export function encodeNotApplicable(marks: ReadonlySet<RiskId>, known: ReadonlyMap<RiskId, Risk>): readonly string[] {
+  return [...marks].map((id) => {
+    const name = known.get(id)?.name;
+    return name !== undefined && advisoriesNamed(name, known).length === 1 ? name : qualifiedRiskName(id);
+  });
+}
+
+export interface ResolvedUrlNotApplicable {
+  readonly ids: readonly RiskId[];
+  /** Values that name no single advisory in `known`, never matched loosely onto one. */
+  readonly unmatched: readonly string[];
+}
+
+export function resolveUrlNotApplicable(raw: readonly string[], known: ReadonlyMap<RiskId, Risk>): ResolvedUrlNotApplicable {
+  const ids: RiskId[] = [];
+  const unmatched: string[] = [];
+  for (const value of raw) {
+    const named = advisoriesNamed(value, known);
+    if (named.length === 1) ids.push(named[0] as RiskId);
+    else unmatched.push(value);
+  }
+  return { ids, unmatched };
+}
+
+/** The notice for linked marks dropped because they name no single conditional risk. */
+export function droppedMarksNotice(dropped: readonly string[]): string | undefined {
+  if (dropped.length === 0) return undefined;
+  const list = dropped.map((value) => `"${value}"`).join(', ');
+  const tail =
+    dropped.length === 1
+      ? 'it names no single conditional risk on these channels, so the mark was dropped.'
+      : 'none of those names a single conditional risk on these channels, so the marks were dropped.';
+  return `The link marked ${list} as not applicable, but ${tail}`;
 }
 
 /**

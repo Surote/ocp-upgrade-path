@@ -31,7 +31,7 @@ export function usePathSearch(client: GraphClient, params: PathSearchParams): As
   const constraintsKey = `${constraints.stops.join(',')}|${constraints.riskPolicy}`;
   const depsKey = active ? `${channel}|${arch}|${start}|${target}|${anchor?.fetchedAt}|${constraintsKey}` : '';
   // Marks are set from the result's own risk cards, so a change re-ranks without unmounting them.
-  const refineKey = [...constraints.notApplicable].sort().join(',');
+  const refineKey = JSON.stringify([...constraints.notApplicable].sort());
 
   const task = useCallback(
     (signal: AbortSignal) => {

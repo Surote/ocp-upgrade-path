@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GraphClient } from '../../graph/client';
 import { fakeFetch, fakeJsonResponse } from '../../test-utils/fakeFetch';
@@ -73,6 +73,8 @@ function setUrl(search: string): void {
 }
 
 afterEach(() => {
+  // A hook left mounted keeps syncing its own selection into the shared URL the next test reads.
+  cleanup();
   window.history.pushState({}, '', 'http://localhost:3000/');
 });
 

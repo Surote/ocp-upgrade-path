@@ -2,7 +2,7 @@ import { parseChannelName } from '../design/channels';
 import { FALLBACK_CLASSES } from '../design/forwardChannel';
 import type { Graph, GraphNode, Risk, Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
-import { isWaived, NO_MARKS, riskClass, RiskIndex, type RiskName } from './risks';
+import { isWaived, NO_MARKS, riskClass, RiskIndex, type RiskId } from './risks';
 import type { RiskPolicy, RouteConstraints } from './routeConstraints';
 import { compareVersions, parseVersion } from './version';
 import type { PathCost, PathHop } from './types';
@@ -171,7 +171,7 @@ const RANKINGS: Readonly<Record<RiskPolicy, (a: Rank, b: Rank) => number>> = {
     comparePosture(a, b) || a.always - b.always || a.conditional - b.conditional || a.cost.hops - b.cost.hops || a.waived - b.waived || a.cost.tieBreak - b.cost.tieBreak,
 };
 
-function step(rank: Rank, arc: Edge, tier: number, notApplicable: ReadonlySet<RiskName>): Rank {
+function step(rank: Rank, arc: Edge, tier: number, notApplicable: ReadonlySet<RiskId>): Rank {
   const waived = arc.conditional === 0 || notApplicable.size === 0 ? 0 : arc.risks.filter((risk) => isWaived(risk, notApplicable)).length;
   return {
     cost: {

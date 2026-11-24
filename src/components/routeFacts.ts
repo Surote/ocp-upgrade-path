@@ -1,4 +1,4 @@
-import { isWaived, NO_MARKS, riskClass, type RiskName } from '../engine/risks';
+import { isWaived, NO_MARKS, riskClass, riskIdOf, type RiskId } from '../engine/risks';
 import type { Path } from '../engine/types';
 
 /**
@@ -7,18 +7,18 @@ import type { Path } from '../engine/types';
  * `riskSummary`: the summary keeps one occurrence per risk, and the same
  * risk can be `Always` on one channel's edge and conditional on the next.
  */
-export function hasConditionalRisk(path: Path, notApplicable: ReadonlySet<RiskName>): boolean {
+export function hasConditionalRisk(path: Path, notApplicable: ReadonlySet<RiskId>): boolean {
   return path.hops.some((hop) => hop.risks.some((risk) => riskClass(risk) !== 'Always' && !isWaived(risk, notApplicable)));
 }
 
 /** Distinct risks every occurrence of which on `path` is a marked conditional one. */
-function markedRiskCount(path: Path, notApplicable: ReadonlySet<RiskName>): number {
-  const waived = new Set<string>();
-  const counted = new Set<string>();
+function markedRiskCount(path: Path, notApplicable: ReadonlySet<RiskId>): number {
+  const waived = new Set<RiskId>();
+  const counted = new Set<RiskId>();
   for (const hop of path.hops) {
-    for (const risk of hop.risks) (isWaived(risk, notApplicable) ? waived : counted).add(risk.name);
+    for (const risk of hop.risks) (isWaived(risk, notApplicable) ? waived : counted).add(riskIdOf(risk));
   }
-  return [...waived].filter((name) => !counted.has(name)).length;
+  return [...waived].filter((id) => !counted.has(id)).length;
 }
 
 /**
@@ -28,7 +28,7 @@ function markedRiskCount(path: Path, notApplicable: ReadonlySet<RiskName>): numb
  * stay in the count and are named as marked, and once they are the only
  * conditional ones left the claim says "no other".
  */
-export function routeFacts(path: Path, notApplicable: ReadonlySet<RiskName>): string {
+export function routeFacts(path: Path, notApplicable: ReadonlySet<RiskId>): string {
   const riskCount = path.riskSummary.length;
   const facts = [`${path.hops.length} hop${path.hops.length === 1 ? '' : 's'}`];
   if (riskCount === 0) facts.push('no known risks');

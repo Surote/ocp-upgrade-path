@@ -4,13 +4,21 @@ import type { GraphClient } from '../graph/client';
 import { describeChannelLoadError } from './describeStitchError';
 import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
-import { parseUrlState, resolveUrlArch, resolveUrlNotApplicable, resolveUrlRiskPolicy, syncUrlState } from '../url/urlState';
+import {
+  droppedMarksNotice,
+  encodeNotApplicable,
+  parseUrlState,
+  resolveUrlArch,
+  resolveUrlNotApplicable,
+  resolveUrlRiskPolicy,
+  syncUrlState,
+} from '../url/urlState';
 import type { RiskPolicy, RouteConstraints, StopOption } from '../engine/routeConstraints';
 import { checkStops, stopReleases } from './stopFields';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
-import { conditionalRiskNames, type RiskName } from '../engine/risks';
+import { conditionalRisks, type RiskId } from '../engine/risks';
 import { useLookahead } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, offeredOptions, type TargetOption, versionStream } from './targetOptions';
@@ -84,8 +92,8 @@ export interface RouteConstraintsViewModel {
  * cluster, shared by every risk card that offers the mark.
  */
 export interface RiskApplicabilityViewModel {
-  readonly notApplicable: ReadonlySet<RiskName>;
-  readonly onChange: (name: RiskName, notApplicable: boolean) => void;
+  readonly notApplicable: ReadonlySet<RiskId>;
+  readonly onChange: (name: RiskId, notApplicable: boolean) => void;
 }
 
 /** Why no route is searched although start and target are set. */
@@ -153,7 +161,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const [riskPolicy, setRiskPolicy] = useState<RiskPolicy>(initialRiskPolicy.riskPolicy);
   // The link's marks wait here until the loaded channels can vouch for each name.
   const [linkedMarks, setLinkedMarks] = useState(initialUrl.notApplicable);
-  const [notApplicable, setNotApplicable] = useState<ReadonlySet<RiskName>>(() => new Set());
+  const [notApplicable, setNotApplicable] = useState<ReadonlySet<RiskId>>(() => new Set());
   const [marksNotice, setMarksNotice] = useState<string>();
 
   const channelCatalog = useChannelCatalog(client);
@@ -202,21 +210,21 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     return undefined;
   }, [graph, targetRaw, lookaheadSegments]);
 
-  const knownRiskNames = useMemo(
-    () => (graph && !lookaheadLoading ? conditionalRiskNames([graph, ...lookaheadSegments.map((s) => s.graph)]) : undefined),
-    [graph, lookaheadLoading, lookaheadSegments],
+  const markable = useMemo(
+    () => conditionalRisks(graph ? [graph, ...lookaheadSegments.map((s) => s.graph)] : []),
+    [graph, lookaheadSegments],
   );
-  if (linkedMarks && knownRiskNames) {
-    const resolved = resolveUrlNotApplicable(linkedMarks, knownRiskNames);
+  if (linkedMarks && graph && !lookaheadLoading) {
+    const resolved = resolveUrlNotApplicable(linkedMarks, markable);
     setLinkedMarks(undefined);
-    setNotApplicable((prev) => new Set([...prev, ...resolved.names]));
-    setMarksNotice(resolved.notice);
+    setNotApplicable((prev) => new Set([...prev, ...resolved.ids]));
+    setMarksNotice(droppedMarksNotice(resolved.unmatched));
   }
-  const markNotApplicable = useCallback((name: RiskName, marked: boolean) => {
+  const markNotApplicable = useCallback((id: RiskId, marked: boolean) => {
     setNotApplicable((prev) => {
       const next = new Set(prev);
-      if (marked) next.add(name);
-      else next.delete(name);
+      if (marked) next.add(id);
+      else next.delete(id);
       return next;
     });
   }, []);
@@ -357,9 +365,9 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
 
   // --- Permalink sync: replaceState only, never a new history entry (Q21) ---
   useEffect(() => {
-    const marks = [...new Set([...(linkedMarks ?? []), ...notApplicable])];
+    const marks = [...new Set([...(linkedMarks ?? []), ...encodeNotApplicable(notApplicable, markable)])];
     syncUrlState({ channel, arch, start: startRaw, target: targetRaw, stops: stopsRaw, riskPolicy, notApplicable: marks });
-  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy, linkedMarks, notApplicable]);
+  }, [channel, arch, startRaw, targetRaw, stopsRaw, riskPolicy, linkedMarks, notApplicable, markable]);
 
   return {
     channel: {

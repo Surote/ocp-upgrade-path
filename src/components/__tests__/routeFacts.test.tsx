@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { dedupeRisks, NO_MARKS, type RiskName } from '../../engine/risks';
+import { dedupeRisks, NO_MARKS, riskIdOf } from '../../engine/risks';
 import type { Path } from '../../engine/types';
 import type { Risk, Version } from '../../graph/types';
 import { LowerRiskRoute } from '../LowerRiskRoute';
@@ -49,20 +49,20 @@ describe('claims about risks marked not applicable', () => {
     cost: { hops: perHop.length, riskWeight: 0, tieBreak: 0 },
     riskSummary: dedupeRisks(perHop),
   });
-  const marks = (...names: string[]) => new Set(names as RiskName[]);
+  const marks = (...risks: Risk[]) => new Set(risks.map(riskIdOf));
 
   it('keeps a marked risk in the count, names it as marked, and says no other conditional risks remain', () => {
     const vsphere = conditional('VSphereConfigCloudControllerCrash');
-    expect(routeFacts(path([vsphere], [vsphere]), marks('VSphereConfigCloudControllerCrash'))).toBe(
+    expect(routeFacts(path([vsphere], [vsphere]), marks(vsphere))).toBe(
       '2 hops · 1 distinct risk (1 marked not applicable) · no other conditional risks',
     );
   });
 
   it('makes no conditional-free claim while an unmarked conditional risk remains', () => {
-    expect(routeFacts(path([conditional('A')], [conditional('B')]), marks('A'))).toBe('2 hops · 2 distinct risks (1 marked not applicable)');
+    expect(routeFacts(path([conditional('A')], [conditional('B')]), marks(conditional('A')))).toBe('2 hops · 2 distinct risks (1 marked not applicable)');
   });
 
   it('does not count a risk as marked where it also fires unconditionally', () => {
-    expect(routeFacts(PATH, marks('EtcdStorageVersion3Migration'))).toBe('2 hops · 1 distinct risk · no other conditional risks');
+    expect(routeFacts(PATH, marks(risk(false)))).toBe('2 hops · 1 distinct risk · no other conditional risks');
   });
 });

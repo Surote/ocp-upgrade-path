@@ -1,4 +1,4 @@
-import { NO_MARKS, type RiskName } from '../engine/risks';
+import { NO_MARKS, type RiskId } from '../engine/risks';
 import type { RiskComparison } from '../engine/routeConstraints';
 import type { Path } from '../engine/types';
 import { channelSequence, hasConditionalRisk, routeFacts } from './routeFacts';
@@ -16,7 +16,7 @@ export function LowerRiskRoute({
 }: {
   readonly primary: Path;
   readonly comparison: RiskComparison | undefined;
-  readonly notApplicable: ReadonlySet<RiskName>;
+  readonly notApplicable: ReadonlySet<RiskId>;
   readonly onUse: () => void;
 }) {
   if (!comparison) return null;

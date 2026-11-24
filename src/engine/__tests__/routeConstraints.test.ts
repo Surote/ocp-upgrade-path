@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Graph, Version } from '../../graph/types';
 import type { ChannelSegment } from '../lookahead';
-import type { RiskName } from '../risks';
 import { buildStopOptions, type RouteConstraints } from '../routeConstraints';
 import { stitchAndFindPath } from '../stitch';
 import type { GraphLoader } from '../types';
-import { graph, loaderFor, type RiskSpec, v } from './routeFixtures';
+import { fixtureRiskId, graph, loaderFor, type RiskSpec, v } from './routeFixtures';
 
 function versionsOf(result: Awaited<ReturnType<typeof stitchAndFindPath>>): readonly Version[] {
   if (!result.ok) throw new Error(`no route: ${JSON.stringify(result.error)}`);
@@ -39,7 +38,7 @@ const stops = (...versions: string[]): RouteConstraints => ({ stops: versions.ma
 const avoid = (...versions: string[]): RouteConstraints => ({ stops: versions.map(v), riskPolicy: 'avoidConditional', notApplicable: new Set() });
 const marked = (constraints: RouteConstraints, ...names: string[]): RouteConstraints => ({
   ...constraints,
-  notApplicable: new Set(names as RiskName[]),
+  notApplicable: new Set(names.map(fixtureRiskId)),
 });
 
 describe('stops', () => {

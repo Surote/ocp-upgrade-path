@@ -126,7 +126,7 @@ describe('marking a conditional risk not applicable', () => {
   });
 
   it('restores marks from the link and drops a name no risk carries, with a notice', async () => {
-    await renderAt(`${BASE}&na=VSphereRisk,vsphererisk`);
+    await renderAt(`${BASE}&na=VSphereRisk&na=vsphererisk`);
     await waitFor(() => expect(within(riskSummary()).getByRole('checkbox', { name: MARK })).toBeChecked());
     expect(screen.getByText(/"vsphererisk"/)).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Lower-risk route' })).not.toBeInTheDocument();
