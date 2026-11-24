@@ -88,60 +88,63 @@ function makeEdgeCost(riskIndex: RiskIndex, versions: readonly Version[], direct
   };
 }
 
-interface DijkstraResult {
-  readonly dist: readonly (CostTuple | undefined)[];
-  /** `pred[x]` = the node this traversal reached `x` from. For a forward run
-   * (source = start), this is `x`'s predecessor on the shortest path from
-   * start. For a backward run (source = target, walking reverse adjacency),
-   * it is `x`'s *successor* toward target -- i.e. `pred[x]` is the next hop
-   * from `x` on `x`'s shortest route to target. */
+interface DijkstraResult<C = CostTuple> {
+  readonly dist: readonly (C | undefined)[];
+  /** `pred[x]` = the node this traversal reached `x` from; undefined for a
+   * source it never improved on. For a forward run (source = start), this is
+   * `x`'s predecessor on the shortest path from start. For a backward run
+   * (source = target, walking reverse adjacency), it is `x`'s *successor*
+   * toward target -- i.e. `pred[x]` is the next hop from `x` on `x`'s
+   * shortest route to target. */
   readonly pred: readonly (NodeIndex | undefined)[];
 }
 
 /**
- * Lexicographic Dijkstra, per plan.md §4. Dijkstra (not a topological DP) was
+ * Lexicographic Dijkstra, per plan.md §4, from one or more sources, each
+ * starting at its own cost. Dijkstra (not a topological DP) was
  * chosen deliberately so the search stays correct even if the graph ever
  * contains a cycle -- `stable-4.20` has 0 non-forward edges today, but nothing
- * here assumes acyclicity.
+ * here assumes acyclicity. `extend` must make every cost strictly larger
+ * under `compare`; the hop count leading every cost here guarantees it.
  *
  * O(V²) node selection rather than a binary heap: at this graph scale
  * (fixtures top out at a few hundred nodes even after stitching several
  * channels together), a heap is complexity the codebase would carry for no
  * measurable benefit.
  */
-function dijkstra(
+function dijkstra<C>(
   n: number,
   adjacency: readonly (readonly NodeIndex[])[],
-  edgeCost: (current: NodeIndex, neighbor: NodeIndex) => { readonly riskWeight: number; readonly toPatch: number },
-  source: NodeIndex,
-): DijkstraResult {
-  const dist: (CostTuple | undefined)[] = new Array(n).fill(undefined);
+  sources: Iterable<readonly [NodeIndex, C]>,
+  extend: (cost: C, current: NodeIndex, neighbor: NodeIndex) => C,
+  compare: (a: C, b: C) => number,
+): DijkstraResult<C> {
+  const dist: (C | undefined)[] = new Array(n).fill(undefined);
   const pred: (NodeIndex | undefined)[] = new Array(n).fill(undefined);
   const visited: boolean[] = new Array(n).fill(false);
-  dist[source] = ZERO_COST;
+  for (const [source, cost] of sources) dist[source] = cost;
 
   for (let iter = 0; iter < n; iter += 1) {
     let u: NodeIndex | undefined;
-    let best: CostTuple | undefined;
+    let best: C | undefined;
     for (let i = 0; i < n; i += 1) {
       if (visited[i]) continue;
       const d = dist[i];
       if (d === undefined) continue;
-      if (best === undefined || compareCost(d, best) < 0) {
+      if (best === undefined || compare(d, best) < 0) {
         best = d;
         u = i as NodeIndex; // enumerating the graph's own 0..n-1 index space, not fabricating a foreign index
       }
     }
-    if (u === undefined) break; // everything left unvisited is unreachable from source
+    if (u === undefined) break; // everything left unvisited is unreachable from every source
     visited[u] = true;
 
-    const du = dist[u] as CostTuple;
+    const du = dist[u] as C;
     for (const v of adjacency[u] ?? []) {
       if (visited[v]) continue;
-      const { riskWeight: rw, toPatch } = edgeCost(u, v);
-      const candidate = addEdge(du, rw, toPatch);
+      const candidate = extend(du, u, v);
       const existing = dist[v];
-      if (existing === undefined || compareCost(candidate, existing) < 0) {
+      if (existing === undefined || compare(candidate, existing) < 0) {
         dist[v] = candidate;
         pred[v] = u;
       }
@@ -149,6 +152,20 @@ function dijkstra(
   }
 
   return { dist, pred };
+}
+
+/** Single-source search over the plain cost tuple. */
+function dijkstraFrom(
+  n: number,
+  adjacency: readonly (readonly NodeIndex[])[],
+  edgeCost: ReturnType<typeof makeEdgeCost>,
+  source: NodeIndex,
+): DijkstraResult {
+  const extend = (cost: CostTuple, current: NodeIndex, neighbor: NodeIndex) => {
+    const { riskWeight: rw, toPatch } = edgeCost(current, neighbor);
+    return addEdge(cost, rw, toPatch);
+  };
+  return dijkstra(n, adjacency, [[source, ZERO_COST]], extend, compareCost);
 }
 
 function buildPathFromChain(
@@ -328,8 +345,7 @@ function findWaypointAlternates(
  * The recommended path from `start` to every version reachable from it
  * within one graph (start itself maps to the zero-hop path). Same ranking as
  * `findPathsInGraph`, from a single Dijkstra run; empty if `start` is not a
- * node. The stitcher (engine/stitch.ts) uses this to advance a whole frontier
- * through a segment without one search per junction.
+ * node.
  */
 export function shortestPathsFrom(graph: Graph, start: Version): ReadonlyMap<Version, Path> {
   const versions = graph.nodes.map((n) => n.version);
@@ -338,7 +354,7 @@ export function shortestPathsFrom(graph: Graph, start: Version): ReadonlyMap<Ver
 
   const riskIndex = new RiskIndex(graph.conditionalEdges);
   const { forward } = buildAdjacency(graph);
-  const fwd = dijkstra(versions.length, forward, makeEdgeCost(riskIndex, versions, 'forward'), startIdx as NodeIndex);
+  const fwd = dijkstraFrom(versions.length, forward, makeEdgeCost(riskIndex, versions, 'forward'), startIdx as NodeIndex);
 
   const paths = new Map<Version, Path>();
   fwd.dist.forEach((cost, i) => {
@@ -347,6 +363,57 @@ export function shortestPathsFrom(graph: Graph, start: Version): ReadonlyMap<Ver
     paths.set(versions[i] as Version, buildPathFromChain(versions, riskIndex, chain, cost));
   });
   return paths;
+}
+
+/** A route found by `extendRoutesInGraph`: the seed it starts from, its total cost, and the hops walked in this graph. */
+export interface ExtendedRoute<C> {
+  readonly seed: Version;
+  readonly cost: C;
+  readonly hops: readonly PathHop[];
+}
+
+/**
+ * Extends routes that already reach some of `graph`'s versions (`seeds`,
+ * each with the cost accumulated so far) through `graph`'s own edges, in one
+ * multi-source search: the cheapest extension to every reachable version,
+ * whichever seed it starts from. A seed nothing cheaper reaches maps to
+ * itself with no hops. `step` adds one hop to a cost; it must strictly
+ * increase the cost under `compare`.
+ */
+export function extendRoutesInGraph<C>(
+  graph: Graph,
+  seeds: ReadonlyMap<Version, C>,
+  step: (cost: C, hop: { readonly riskWeight: number; readonly toPatch: number }) => C,
+  compare: (a: C, b: C) => number,
+): ReadonlyMap<Version, ExtendedRoute<C>> {
+  const versions = graph.nodes.map((n) => n.version);
+  const indexOf = new Map(versions.map((ver, i) => [ver, i as NodeIndex] as const));
+  const sources: (readonly [NodeIndex, C])[] = [];
+  for (const [ver, cost] of seeds) {
+    const idx = indexOf.get(ver);
+    if (idx !== undefined) sources.push([idx, cost]);
+  }
+
+  const riskIndex = new RiskIndex(graph.conditionalEdges);
+  const edgeCost = makeEdgeCost(riskIndex, versions, 'forward');
+  const { forward } = buildAdjacency(graph);
+  const { dist, pred } = dijkstra(versions.length, forward, sources, (cost, u, v) => step(cost, edgeCost(u, v)), compare);
+
+  const routes = new Map<Version, ExtendedRoute<C>>();
+  dist.forEach((cost, i) => {
+    if (cost === undefined) return;
+    const chain: NodeIndex[] = [i as NodeIndex];
+    for (let p = pred[i]; p !== undefined; p = pred[p]) chain.push(p);
+    chain.reverse();
+    const hops: PathHop[] = [];
+    for (let k = 0; k + 1 < chain.length; k += 1) {
+      const from = versions[chain[k] as NodeIndex] as Version;
+      const to = versions[chain[k + 1] as NodeIndex] as Version;
+      hops.push({ from, to, risks: riskIndex.risksFor(from, to) });
+    }
+    routes.set(versions[i] as Version, { seed: versions[chain[0] as NodeIndex] as Version, cost, hops });
+  });
+  return routes;
 }
 
 /**
@@ -377,7 +444,7 @@ export function findPathsInGraph(graph: Graph, start: Version, target: Version):
   const { forward, reverse } = buildAdjacency(graph);
   const n = graph.nodes.length;
 
-  const fwd = dijkstra(n, forward, makeEdgeCost(riskIndex, versions, 'forward'), startIdx);
+  const fwd = dijkstraFrom(n, forward, makeEdgeCost(riskIndex, versions, 'forward'), startIdx);
 
   const targetIdx = indexOfVersion.get(target);
   const targetDist = targetIdx !== undefined ? fwd.dist[targetIdx] : undefined;
@@ -389,7 +456,7 @@ export function findPathsInGraph(graph: Graph, start: Version, target: Version):
   const primaryChain = reconstructForwardChain(fwd.pred, startIdx, targetIdx);
   const primary = buildPathFromChain(versions, riskIndex, primaryChain, targetDist);
 
-  const bwd = dijkstra(n, reverse, makeEdgeCost(riskIndex, versions, 'backward'), targetIdx);
+  const bwd = dijkstraFrom(n, reverse, makeEdgeCost(riskIndex, versions, 'backward'), targetIdx);
   const alternates = findWaypointAlternates(versions, riskIndex, fwd, bwd, startIdx, targetIdx, primary);
 
   return ok({ primary, alternates });

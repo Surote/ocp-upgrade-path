@@ -2,7 +2,7 @@ import { formatChannelName, parseChannelName } from '../design/channels';
 import type { Arch, Graph, GraphNode, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { type ChannelSegment, discoverLookahead, type LookaheadDiscovery } from './lookahead';
-import { findPathsInGraph, shortestPathsFrom } from './pathfinder';
+import { extendRoutesInGraph, findPathsInGraph } from './pathfinder';
 import { dedupeRisks } from './risks';
 import { compareStreams, type Stream, streamOf } from './version';
 import type { GraphLoader, Path, PathCost, PathHop, StitchError, StitchedPathResult } from './types';
@@ -147,9 +147,7 @@ export interface Route {
   readonly hops: readonly PathHop[];
 }
 
-function combineCost(a: PathCost, b: PathCost): PathCost {
-  return { hops: a.hops + b.hops, riskWeight: a.riskWeight + b.riskWeight, tieBreak: a.tieBreak + b.tieBreak };
-}
+type RouteRank = Pick<Route, 'cost' | 'fallbackHops'>;
 
 /**
  * Hops, then risk, then hops spent on a class-fallback channel, then the
@@ -158,11 +156,11 @@ function combineCost(a: PathCost, b: PathCost): PathCost {
  * candidate-5.0, not stable-4.22) and move the cluster off its own class a
  * hop earlier than any equally short, equally safe route needs.
  */
-function routeLess(a: Pick<Route, 'cost' | 'fallbackHops'>, b: Pick<Route, 'cost' | 'fallbackHops'>): boolean {
-  if (a.cost.hops !== b.cost.hops) return a.cost.hops < b.cost.hops;
-  if (a.cost.riskWeight !== b.cost.riskWeight) return a.cost.riskWeight < b.cost.riskWeight;
-  if (a.fallbackHops !== b.fallbackHops) return a.fallbackHops < b.fallbackHops;
-  return a.cost.tieBreak < b.cost.tieBreak;
+function compareRoutes(a: RouteRank, b: RouteRank): number {
+  if (a.cost.hops !== b.cost.hops) return a.cost.hops - b.cost.hops;
+  if (a.cost.riskWeight !== b.cost.riskWeight) return a.cost.riskWeight - b.cost.riskWeight;
+  if (a.fallbackHops !== b.fallbackHops) return a.fallbackHops - b.fallbackHops;
+  return a.cost.tieBreak - b.cost.tieBreak;
 }
 
 /**
@@ -173,34 +171,36 @@ function routeLess(a: Pick<Route, 'cost' | 'fallbackHops'>, b: Pick<Route, 'cost
  * reachable is one the stitcher routes, through the same channels.
  *
  * A layered shortest-path DP: the frontier holds the cheapest route found so
- * far to each version. Each segment is seeded at every frontier version it
- * also contains -- a version present in both graphs, the only legal join --
- * and walked with its own edges only (`shortestPathsFrom`). The frontier
- * carries across segments rather than being replaced, so a segment can
- * contribute no hops: 5.0 can join 4.22 directly even when the sibling
- * stream 4.23 sits between them in the list. Cost only accumulates, so the
- * frontier ends holding the minimum-cost route to each version for the
- * given segment order.
+ * far to each version. Each segment is searched once, seeded at every
+ * frontier version it also contains -- a version present in both graphs,
+ * the only legal join -- with that route's cost, and walked with its own
+ * edges only (`extendRoutesInGraph`). The frontier carries across segments
+ * rather than being replaced, so a segment can contribute no hops: 5.0 can
+ * join 4.22 directly even when the sibling stream 4.23 sits between them in
+ * the list. Cost only accumulates, so the frontier ends holding the
+ * minimum-cost route to each version for the given segment order.
  */
 export function routeAcrossSegments(segments: readonly ChannelSegment[], start: Version): ReadonlyMap<Version, Route> {
   const routes = new Map<Version, Route>([[start, { cost: { hops: 0, riskWeight: 0, tieBreak: 0 }, fallbackHops: 0, hops: [] }]]);
 
   for (const segment of segments) {
     const members = versionsOf(segment.graph);
-    const sources = [...routes].filter(([version]) => members.has(version));
-    for (const [from, route] of sources) {
-      for (const [to, local] of shortestPathsFrom(segment.graph, from)) {
-        if (local.hops.length === 0) continue;
-        const cost = combineCost(route.cost, local.cost);
-        const fallbackHops = route.fallbackHops + (segment.classFallback ? local.hops.length : 0);
-        const existing = routes.get(to);
-        if (existing && !routeLess({ cost, fallbackHops }, existing)) continue;
-        routes.set(to, {
-          cost,
-          fallbackHops,
-          hops: [...route.hops, ...local.hops.map((h) => ({ ...h, sourceChannel: segment.channel }))],
-        });
-      }
+    const seeds = new Map([...routes].filter(([version]) => members.has(version)));
+    const fallbackStep = segment.classFallback ? 1 : 0;
+    const step = (rank: RouteRank, hop: { readonly riskWeight: number; readonly toPatch: number }): RouteRank => ({
+      cost: { hops: rank.cost.hops + 1, riskWeight: rank.cost.riskWeight + hop.riskWeight, tieBreak: rank.cost.tieBreak - hop.toPatch },
+      fallbackHops: rank.fallbackHops + fallbackStep,
+    });
+
+    for (const [to, extended] of extendRoutesInGraph<RouteRank>(segment.graph, seeds, step, compareRoutes)) {
+      if (extended.hops.length === 0) continue;
+      const existing = routes.get(to);
+      if (existing && compareRoutes(extended.cost, existing) >= 0) continue;
+      const seedRoute = seeds.get(extended.seed) as Route;
+      routes.set(to, {
+        ...extended.cost,
+        hops: [...seedRoute.hops, ...extended.hops.map((h) => ({ ...h, sourceChannel: segment.channel }))],
+      });
     }
   }
   return routes;
