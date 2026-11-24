@@ -18,7 +18,7 @@ function rawGraph(versions: readonly string[], channelsCsv: string): unknown {
   };
 }
 
-const EMPTY = { nodes: [], edges: [], conditionalEdges: [] };
+const EMPTY = { version: 1, nodes: [], edges: [], conditionalEdges: [] };
 
 /** Like live Cincinnati: the seed's membership names nothing older than 4.18. */
 const WORLD: Record<string, unknown> = {

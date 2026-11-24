@@ -1,3 +1,4 @@
+import { ChannelNameCache } from '../cache/channelNameCache';
 import { LocalStorageGraphCache } from '../cache/localStorageCache';
 import { MemoryCache } from '../cache/memoryCache';
 import { makeCacheKey, type CacheEntry } from '../cache/types';
@@ -45,9 +46,12 @@ export class GraphClient {
   private readonly memory = new MemoryCache<Graph>();
   private readonly persistent: LocalStorageGraphCache;
   private readonly fetchImpl: typeof fetch;
+  /** Names found by backward channel discovery (planner/legacyChannels.ts), on the same storage as the graphs. */
+  readonly channelNames: ChannelNameCache;
 
   constructor(options?: { readonly storage?: Storage; readonly fetchImpl?: typeof fetch }) {
     this.persistent = new LocalStorageGraphCache(options?.storage);
+    this.channelNames = new ChannelNameCache(options?.storage);
     this.fetchImpl = options?.fetchImpl ?? fetch.bind(globalThis);
   }
 
