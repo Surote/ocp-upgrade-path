@@ -8,6 +8,7 @@ import { FakeStorage } from '../test-utils/fakeStorage';
 const CHANNEL = 'stable-4.20';
 const BASE = `/?channel=${CHANNEL}&arch=amd64&start=4.18.2&target=4.20.32`;
 const MARK = "Doesn't apply to my cluster: VSphereRisk";
+const VSPHERE_NA = 'VSphereRisk~https://issues.redhat.com/browse/TEST-1';
 const NOTE = 'You marked this as not applicable. Check its PromQL against your cluster; the cluster-version operator evaluates it for real.';
 
 const vsphere = {
@@ -93,7 +94,7 @@ describe('marking a conditional risk not applicable', () => {
     expect(within(riskSummary()).getByText('VSphereRisk')).toBeInTheDocument();
     expect(within(riskSummary()).getByText(NOTE)).toBeInTheDocument();
     expect(routeFacts()).toBe('1 hop · 1 distinct risk (1 marked not applicable) · no other conditional risks');
-    expect(new URLSearchParams(window.location.search).get('na')).toBe('VSphereRisk');
+    expect(new URLSearchParams(window.location.search).getAll('na')).toEqual([VSPHERE_NA]);
 
     fireEvent.click(within(riskSummary()).getByRole('checkbox', { name: MARK }));
     expect(await screen.findByRole('region', { name: 'Lower-risk route' })).toBeInTheDocument();
@@ -120,17 +121,18 @@ describe('marking a conditional risk not applicable', () => {
     await renderAt(`${BASE}&avoid=conditional`);
     expect(stops()).toEqual(['4.18.2', '4.19.41', '4.20.32']);
     cleanup();
-    await renderAt(`${BASE}&avoid=conditional&na=VSphereRisk`);
+    await renderAt(`${BASE}&avoid=conditional&na=${VSPHERE_NA}`);
     await waitFor(() => expect(stops()).toEqual(['4.18.2', '4.20.32']));
     expect(routeFacts()).toBe('1 hop · 1 distinct risk (1 marked not applicable) · no other conditional risks');
   });
 
-  it('restores marks from the link and drops a name no risk carries, with a notice', async () => {
-    await renderAt(`${BASE}&na=VSphereRisk&na=vsphererisk`);
+  it('restores marks from the link and drops one whose advisory URL no risk carries, with a notice', async () => {
+    const stale = 'VSphereRisk~https://issues.redhat.com/browse/TEST-9';
+    await renderAt(`${BASE}&na=${VSPHERE_NA}&na=${stale}`);
     await waitFor(() => expect(within(riskSummary()).getByRole('checkbox', { name: MARK })).toBeChecked());
-    expect(screen.getByText(/"vsphererisk"/)).toBeInTheDocument();
+    expect(await screen.findByText(new RegExp(`"${stale}"`))).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Lower-risk route' })).not.toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get('na')).toBe('VSphereRisk');
+    expect(new URLSearchParams(window.location.search).getAll('na')).toEqual([VSPHERE_NA]);
   });
 });
 
@@ -193,7 +195,7 @@ describe('two conditional advisories that share a name', () => {
     render(<App graphClient={sharedNameClient()} />);
     await screen.findByRole('list', { name: 'Upgrade path stops' });
     fireEvent.click(markOf(1));
-    await waitFor(() => expect(new URLSearchParams(window.location.search).getAll('na')).toEqual([`DupRisk ${dup(1).url}`]));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).getAll('na')).toEqual([`DupRisk~${dup(1).url}`]));
 
     const link = `${window.location.pathname}${window.location.search}`;
     cleanup();

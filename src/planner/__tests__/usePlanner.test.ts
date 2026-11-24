@@ -567,7 +567,7 @@ describe('usePlanner — a linked mark on a route in the selected channel', () =
       ),
       'empty',
     );
-    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk');
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~https://issues.example/R');
     const { result } = renderHook(() => usePlanner(client));
 
     await waitFor(() => {
@@ -575,7 +575,80 @@ describe('usePlanner — a linked mark on a route in the selected channel', () =
       expect(routed?.versions).toEqual(['4.22.15', '4.22.20']);
     });
     expect(result.current.target.lookaheadLoading).toBe(true);
-    expect(new URLSearchParams(window.location.search).getAll('na')).toEqual(['ShortcutRisk']);
+    expect(new URLSearchParams(window.location.search).getAll('na')).toEqual(['ShortcutRisk~https://issues.example/R']);
+  });
+});
+
+describe('usePlanner — a linked mark names one advisory by name and URL', () => {
+  const shortcutRisk = (url: string) => ({ url, name: 'ShortcutRisk', message: 'r', matchingRules: [{ type: 'PromQL', promql: { promql: 'up' } }] });
+  /** 4.22.15 -> 4.22.20 directly carries ShortcutRisk at `url`, or cleanly through 4.22.18. */
+  const anchor = (url: string, channelsCsv: string) => ({
+    ...(rawGraphJson(['4.22.15', '4.22.18', '4.22.20'], [[0, 1], [1, 2]], channelsCsv) as object),
+    conditionalEdges: [{ edges: [{ from: '4.22.15', to: '4.22.20' }], risks: [shortcutRisk(url)] }],
+  });
+  const routed = (result: { current: ReturnType<typeof usePlanner> }) =>
+    result.current.result.status === 'success' ? result.current.result.value.primary.versions : undefined;
+  const linked = () => new URLSearchParams(window.location.search).getAll('na');
+
+  it('keeps a mark matched in the anchor on that advisory alone once look-ahead loads a same-name advisory at another URL', async () => {
+    // 4.22.20 -> 5.0.1 directly carries a second ShortcutRisk at another URL, or cleanly through 5.0.0.
+    const ahead = {
+      ...(rawGraphJson(['4.22.20', '5.0.0', '5.0.1'], [[0, 1], [1, 2]], 'stable-5.0') as object),
+      conditionalEdges: [{ edges: [{ from: '4.22.20', to: '5.0.1' }], risks: [shortcutRisk('https://issues.example/OTHER')] }],
+    };
+    let releaseAhead: () => void = () => {};
+    const aheadLoaded = new Promise<void>((resolve) => (releaseAhead = resolve));
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(anchor('https://issues.example/R', 'stable-4.22,stable-5.0'))],
+          ['stable-5.0|amd64', () => aheadLoaded.then(() => fakeJsonResponse(ahead))],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~https://issues.example/R');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.20']));
+    expect(result.current.target.lookaheadLoading).toBe(true);
+
+    releaseAhead();
+    await waitFor(() => expect(result.current.target.lookaheadLoading).toBe(false));
+    act(() => result.current.target.onChange('5.0.1'));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.20', '5.0.0', '5.0.1']));
+    expect(result.current.riskApplicability.notApplicable.size).toBe(1);
+    expect(result.current.notices).toEqual([]);
+    expect(linked()).toEqual(['ShortcutRisk~https://issues.example/R']);
+  });
+
+  it('drops a mark whose URL no loaded advisory carries, with a notice, and never waives the same name at another URL', async () => {
+    const client = makeClient(
+      withSeed(new Map([['stable-4.22|amd64', jsonHandler(anchor('https://issues.example/NEW', 'stable-4.22'))]])),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk~https://issues.example/OLD');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.notices.some((n) => n.includes('"ShortcutRisk~https://issues.example/OLD"'))).toBe(true));
+    expect(routed(result)).toEqual(['4.22.15', '4.22.18', '4.22.20']);
+    expect(result.current.riskApplicability.notApplicable.size).toBe(0);
+    expect(linked()).toEqual([]);
+  });
+
+  it('drops a value with no advisory URL, with a notice, and never matches it by name', async () => {
+    const client = makeClient(
+      withSeed(new Map([['stable-4.22|amd64', jsonHandler(anchor('https://issues.example/R', 'stable-4.22'))]])),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=4.22.20&avoid=conditional&na=ShortcutRisk');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(routed(result)).toEqual(['4.22.15', '4.22.18', '4.22.20']));
+    expect(result.current.notices.some((n) => n.includes('"ShortcutRisk"'))).toBe(true);
+    expect(result.current.riskApplicability.notApplicable.size).toBe(0);
+    expect(linked()).toEqual([]);
   });
 });
 
