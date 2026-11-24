@@ -156,7 +156,7 @@ describe('route stops', () => {
     await waitFor(() =>
       expect(stitchAndFindPath).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ constraints: { stops: ['4.19.41', '4.19.40'], riskPolicy: 'recommended' } }),
+        expect.objectContaining({ constraints: { stops: ['4.19.41', '4.19.40'], riskPolicy: 'recommended', notApplicable: new Set() } }),
       ),
     );
 
@@ -177,7 +177,7 @@ describe('route stops', () => {
     expect(screen.getByLabelText('Avoid conditional risks')).toBeChecked();
     expect(stitchAndFindPath).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ constraints: { stops: ['4.19.41'], riskPolicy: 'avoidConditional' } }),
+      expect.objectContaining({ constraints: { stops: ['4.19.41'], riskPolicy: 'avoidConditional', notApplicable: new Set() } }),
     );
     expect(urlParam('stops')).toBe('4.19.41');
     expect(urlParam('avoid')).toBe('conditional');

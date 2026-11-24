@@ -2,7 +2,7 @@ import { parseChannelName } from '../design/channels';
 import { FALLBACK_CLASSES } from '../design/forwardChannel';
 import type { Graph, GraphNode, Risk, Version } from '../graph/types';
 import type { ChannelSegment } from './lookahead';
-import { riskClass, RiskIndex } from './risks';
+import { isWaived, riskClass, RiskIndex, type RiskName } from './risks';
 import type { RiskPolicy, RouteConstraints } from './routeConstraints';
 import { compareVersions, parseVersion } from './version';
 import type { PathCost, PathHop } from './types';
@@ -132,7 +132,10 @@ export interface Route {
    * anchor's class.
    */
   readonly fallbackHops: readonly number[];
-  /** Risk occurrences summed per hop, so one risk on two hops counts twice. */
+  /**
+   * Risk occurrences summed per hop, so one risk on two hops counts twice.
+   * `conditional` leaves out occurrences of risks marked not applicable.
+   */
   readonly always: number;
   readonly conditional: number;
   /** Each hop's `sourceChannel` names the segment whose own edge it walks. */
@@ -166,7 +169,8 @@ const RANKINGS: Readonly<Record<RiskPolicy, (a: Rank, b: Rank) => number>> = {
     comparePosture(a, b) || a.always - b.always || a.conditional - b.conditional || a.cost.hops - b.cost.hops || a.cost.tieBreak - b.cost.tieBreak,
 };
 
-function step(rank: Rank, arc: Edge, tier: number): Rank {
+function step(rank: Rank, arc: Edge, tier: number, notApplicable: ReadonlySet<RiskName>): Rank {
+  const waived = arc.conditional === 0 || notApplicable.size === 0 ? 0 : arc.risks.filter((risk) => isWaived(risk, notApplicable)).length;
   return {
     cost: {
       hops: rank.cost.hops + 1,
@@ -175,7 +179,7 @@ function step(rank: Rank, arc: Edge, tier: number): Rank {
     },
     fallbackHops: tier < 0 ? rank.fallbackHops : rank.fallbackHops.map((n, i) => (i === tier ? n + 1 : n)),
     always: rank.always + arc.always,
-    conditional: rank.conditional + arc.conditional,
+    conditional: rank.conditional + arc.conditional - waived,
   };
 }
 
@@ -263,7 +267,7 @@ export function searchRoutes(
   start: Version,
   constraints: RouteConstraints,
 ): readonly ReadonlyMap<Version, Route>[] {
-  const { stops, riskPolicy } = constraints;
+  const { stops, riskPolicy, notApplicable } = constraints;
   const compare = RANKINGS[riskPolicy];
   const frontier: Map<Version, Route>[] = Array.from({ length: stops.length + 1 }, () => new Map());
   (frontier[0] as Map<Version, Route>).set(start, {
@@ -293,7 +297,7 @@ export function searchRoutes(
       settled.push(entry);
       forEachEdge(model, group, 'out', entry.version, (edge, segment) => {
         const layer = layerAfter(stops, entry.layer, edge.to);
-        const rank = step(entry.rank, edge, model.tiers[segment] as number);
+        const rank = step(entry.rank, edge, model.tiers[segment] as number, notApplicable);
         const existing = (best[layer] as Map<Version, Entry>).get(edge.to);
         if (existing && compare(rank, existing.rank) >= 0) return;
         const next: Entry = { layer, version: edge.to, rank, prev: entry, edge, segment };
@@ -333,7 +337,7 @@ function hopsOf(entry: Entry, model: RoutingModel): readonly PathHop[] {
 export function routeAcrossSegments(
   segments: readonly ChannelSegment[],
   start: Version,
-  constraints: RouteConstraints = { stops: [], riskPolicy: 'recommended' },
+  constraints: RouteConstraints = { stops: [], riskPolicy: 'recommended', notApplicable: new Set() },
 ): ReadonlyMap<Version, Route> {
   return searchRoutes(buildRoutingModel(segments), start, constraints).at(-1) as ReadonlyMap<Version, Route>;
 }

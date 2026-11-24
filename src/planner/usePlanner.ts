@@ -10,6 +10,7 @@ import { checkStops } from './stopFields';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
+import type { RiskName } from '../engine/risks';
 import { useLookahead } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, type TargetOption, versionStream } from './targetOptions';
@@ -19,6 +20,7 @@ import { usePathSearch } from './usePathSearch';
 
 const DEFAULT_ARCH: Arch = 'amd64';
 const NO_SEGMENTS: readonly ChannelSegment[] = [];
+const NO_MARKS: ReadonlySet<RiskName> = new Set();
 
 export interface ChannelFieldViewModel {
   readonly value: string;
@@ -220,7 +222,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     () => stopRows.flatMap((r) => (r.check.kind === 'valid' ? [r.check.version] : [])),
     [stopRows],
   );
-  const routeConstraints = useMemo<RouteConstraints>(() => ({ stops: pinnedStops, riskPolicy }), [pinnedStops, riskPolicy]);
+  const routeConstraints = useMemo<RouteConstraints>(() => ({ stops: pinnedStops, riskPolicy, notApplicable: NO_MARKS }), [pinnedStops, riskPolicy]);
   // Selection and stop checks read `targetOptions`; only the labels follow the
   // constraints, since the stops are themselves checked against the target.
   const shownTargetOptions = useMemo(() => {
