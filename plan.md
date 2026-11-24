@@ -312,7 +312,9 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
 > channel is named that it has not tried (safety cap: 48 loader calls, counting
 > prefetches). The walk takes channels one at a time in priority order, and each turn
-> fetches its next six as the channels it has taken so far rank them. Which channels are
+> fetches its next six as the channels it has taken so far rank them, with six requests in
+> flight at most: a graph can rank prefetches still in flight behind channels it reveals, so
+> newly selected requests wait for a free slot, the channel the walk awaits first. Which channels are
 > fetched therefore depends only on graph contents, never on which response arrived first,
 > so the same graphs always give the same targets. Fetching everything any loaded graph
 > named made this depend on timing: a slow first channel let 46 later fetches start
