@@ -38,8 +38,8 @@ export function LowerRiskRoute({
         </button>
       </div>
       <ol className="lower-risk__stops">
-        {route.versions.map((version) => (
-          <li key={version} className="mono">
+        {route.versions.map((version, i) => (
+          <li key={i} className="mono">
             {version}
           </li>
         ))}

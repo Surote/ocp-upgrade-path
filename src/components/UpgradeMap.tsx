@@ -208,7 +208,7 @@ export function UpgradeMap({
 
             return (
               <g
-                key={version}
+                key={i}
                 className={`station${isTerminal ? ' station--terminal' : ''}${isPinned ? ' station--pinned' : ''}${isInterchange ? ' station--interchange' : ''}${
                   selected ? ' is-selected' : ''
                 }`}

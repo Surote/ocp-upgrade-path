@@ -28,8 +28,8 @@ export function AlternatesPanel({
                 {alt.riskSummary.length === 0 ? 'no known risks' : `${alt.riskSummary.length} distinct risk(s)`}
               </p>
               <ol className="alternate-route__stops">
-                {alt.versions.map((version) => (
-                  <li key={version} className="mono">
+                {alt.versions.map((version, j) => (
+                  <li key={j} className="mono">
                     {version}
                   </li>
                 ))}

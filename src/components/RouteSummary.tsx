@@ -12,8 +12,9 @@ export function RouteSummary({ path, notApplicable }: { readonly path: Path; rea
   return (
     <div className="route-summary">
       <ol aria-label="Upgrade path stops">
-        {path.versions.map((version) => (
-          <li key={version} className="mono">
+        {path.versions.map((version, i) => (
+          // A route can visit one release twice, so a visit is its position.
+          <li key={i} className="mono">
             {version}
           </li>
         ))}
