@@ -310,9 +310,11 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
 > three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
-> channel is named that it has not tried (safety cap 48 fetches). It fetches in waves,
-> six at a time: every named channel not yet tried, then whatever that wave names (six
-> waves from a 4.14 anchor). It fetches every named channel of a class the stream's
+> channel is named that it has not tried (safety cap 48 fetches). It takes channels one
+> at a time in priority order, recomputing which comes next after each, and prefetches
+> the rest of the named channels the remaining budget covers, six at a time. So the
+> channels it takes match a serial walk even when the cap binds, and stay as fast as
+> fetching each stream's channels side by side when it does not. It fetches every named channel of a class the stream's
 > preference order lists, fallbacks included, and never
 > decides from discovery order that a fallback is unneeded. Three successive review
 > findings came from such rules: a preferred channel named after a fallback hid it, and

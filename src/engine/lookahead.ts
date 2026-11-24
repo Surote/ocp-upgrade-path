@@ -14,7 +14,7 @@ const MAX_LOOKAHEAD_FETCHES = 48;
 
 /**
  * Fetches in flight at once. Each Cincinnati response streams at a few hundred
- * KB/s, so a wave of a stream's channels finishes far sooner side by side.
+ * KB/s, so a stream's channels finish far sooner side by side.
  */
 const LOOKAHEAD_CONCURRENCY = 6;
 
@@ -27,7 +27,7 @@ export type ChannelSegment = { readonly channel: string; readonly graph: Graph }
 export interface LookaheadDiscovery {
   /** Lowest stream first; within a stream, every channel that loaded, least preferred first. */
   readonly segments: readonly ChannelSegment[];
-  /** Every channel fetched, in fetch order. */
+  /** Every channel the walk took, in the order a one-at-a-time walk takes them. */
   readonly channelsTried: readonly string[];
   /**
    * The first fetch that failed for a reason other than "channel is empty".
@@ -78,30 +78,33 @@ export async function discoverLookahead(
   const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
-  // Discovery runs in waves: every attested channel not yet tried is fetched
-  // together, then their membership names the next wave. The channels tried
-  // are the same as one at a time, since the attested set only grows; the
-  // order within a wave is fixed, so `channelsTried` and `failure` do not
-  // depend on which fetch finishes first.
-  for (;;) {
-    const wave = untriedChannels(attested, anchor, channelsTried).slice(0, MAX_LOOKAHEAD_FETCHES - channelsTried.length);
-    if (wave.length === 0) break;
-    channelsTried.push(...wave.map((c) => c.channel));
-    const results = await mapConcurrently(wave, LOOKAHEAD_CONCURRENCY, (c) => loader(c.channel, arch));
-    wave.forEach((candidate, i) => {
-      const result = results[i] as Awaited<ReturnType<GraphLoader>>;
-      if (!result.ok) {
-        if (result.error.kind === 'empty') {
-          emptyChannels.add(candidate.channel);
-          return;
-        }
-        failure ??= { channel: candidate.channel, error: result.error };
-        failedChannels.add(candidate.channel);
-        return;
+  // The walk takes channels one at a time, in priority order, recomputing the
+  // frontier after each, so near the cap a graph that names an earlier
+  // stream's channel is fetched before a later one. The rest of the frontier
+  // the budget still covers is prefetched meanwhile; when the cap does not
+  // bind, every prefetched channel is eventually taken.
+  const pending = new Map<string, ReturnType<GraphLoader>>();
+  const limit = concurrencyLimiter(LOOKAHEAD_CONCURRENCY);
+  while (channelsTried.length < MAX_LOOKAHEAD_FETCHES) {
+    const frontier = untriedChannels(attested, anchor, channelsTried);
+    const next = frontier[0];
+    if (!next) break;
+    for (const { channel } of frontier.slice(0, MAX_LOOKAHEAD_FETCHES - channelsTried.length)) {
+      if (!pending.has(channel)) pending.set(channel, limit(() => loader(channel, arch)));
+    }
+    channelsTried.push(next.channel);
+    const result = await (pending.get(next.channel) as ReturnType<GraphLoader>);
+    if (!result.ok) {
+      if (result.error.kind === 'empty') {
+        emptyChannels.add(next.channel);
+        continue;
       }
-      found.push({ ...candidate, graph: result.value });
-      for (const name of result.value.channelNames) attested.add(name);
-    });
+      failure ??= { channel: next.channel, error: result.error };
+      failedChannels.add(next.channel);
+      continue;
+    }
+    found.push({ ...next, graph: result.value });
+    for (const name of result.value.channelNames) attested.add(name);
   }
   // A fetched graph can name a stream older than one already fetched (only
   // 5.1 names 4.23), and the route search never returns to an earlier stream.
@@ -143,17 +146,22 @@ function untriedChannels(
   return candidates.sort((a, b) => compareStreams(a.stream, b.stream) || a.rank - b.rank);
 }
 
-/** `fn` over `items` with at most `limit` calls pending at once; results in input order. */
-async function mapConcurrently<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const i = next;
-      next += 1;
-      results[i] = await fn(items[i] as T);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
+/** Wraps tasks so at most `limit` run at once, started in call order. */
+function concurrencyLimiter(limit: number) {
+  let active = 0;
+  const queued: Array<() => void> = [];
+  return <R>(task: () => Promise<R>): Promise<R> =>
+    new Promise<R>((resolve, reject) => {
+      const run = () => {
+        active += 1;
+        task()
+          .then(resolve, reject)
+          .finally(() => {
+            active -= 1;
+            queued.shift()?.();
+          });
+      };
+      if (active < limit) run();
+      else queued.push(run);
+    });
 }
