@@ -368,10 +368,13 @@ checked a rule against their cluster can mark the risk "Doesn't apply to my clus
 its card, in the risk summary or the hop detail. `RouteConstraints.notApplicable` holds
 the marked advisories (`RiskId`, branded), each the name and URL together, the identity
 the risk summary dedupes by: two advisories can share a name, and checking one card must
-not waive the other. The link carries one `na=` per mark, verbatim, so a name holding a
-comma or spaces survives: the bare name (`na=VSphereConfigCloudControllerCrash`) while no
-other loaded advisory shares it, otherwise the name and URL
-(`na=DupName+https://issues.redhat.com/browse/OCPBUGS-1`).
+not waive the other. The link carries one `na=` per mark, always the name and URL joined
+by `~` (`na=VSphereConfigCloudControllerCrash~https://issues.redhat.com/browse/OCPBUGS-12345`).
+A `%` or `~` inside the name is written `%25` or `%7E`, so the first `~` splits the value,
+the URL is kept verbatim, and a name holding a comma or spaces survives. The URL is never
+left out, even for a name no other advisory shares today: which names are shared changes as
+look-ahead graphs load and as Red Hat publishes, and a bare name could later waive a
+different advisory.
 
 **A mark waives conditional occurrences only, and only from counting.** A marked risk's
 conditional occurrences leave `Route.conditional`, so the `avoidConditional` ranking,
@@ -382,12 +385,13 @@ show the risk. A marked card is de-emphasized and says the claim is the operator
 Route facts keep it in the count: "7 hops · 1 distinct risk (1 marked not applicable) · no
 other conditional risks".
 
-**A link's marks are checked before they apply.** Each value must name exactly one
-conditional advisory on the loaded graphs. It applies as soon as a graph carrying that
-advisory loads, so a slow look-ahead fetch never holds a mark on a route inside the anchor.
-Once the anchor and look-ahead graphs have all loaded, any value still unmatched, including
-a bare name two advisories share, is dropped with a notice that names it, and is never
-matched onto a different risk.
+**A link's marks are checked before they apply.** Each value must match the name and URL
+of a conditional advisory on the loaded graphs exactly. It applies as soon as a graph
+carrying that advisory loads, so a slow look-ahead fetch never holds a mark on a route inside
+the anchor, and an exact match cannot become ambiguous when more graphs load. Once the
+anchor and look-ahead graphs have all loaded, any value still unmatched is dropped with a
+notice that names it, and is never matched onto a same-name advisory at another URL. A
+value without `~` names no URL, and is dropped with a notice straight away.
 
 On the Nov 2026 `eus-4.18` snapshot, marking `VSphereConfigCloudControllerCrash` leaves the
 route from `4.16.33` to `5.0.1` unchanged and removes "No lower-risk route exists".
