@@ -8,7 +8,7 @@ import { compareStreams, formatStream, type Stream } from './version';
 /**
  * Safety bound only. Discovery normally ends when no fetched graph names a
  * newer channel it has not tried; an eus-4.18 anchor reaches 5.1 in seven
- * streams. Twelve streams, four classes each.
+ * streams and 19 fetches (Nov 2026). Twelve streams, four classes each.
  */
 const MAX_LOOKAHEAD_FETCHES = 48;
 
@@ -19,12 +19,7 @@ export type ChannelSegment = { readonly channel: string; readonly graph: Graph }
 );
 
 export interface LookaheadDiscovery {
-  /**
-   * Lowest stream first. A stream can hold a fallback and then a more
-   * preferred channel named only after the fallback was fetched (fast-5.0's
-   * releases name stable-5.0); the fallback comes first, so a route can
-   * enter the stream on it and move to the preferred one.
-   */
+  /** Lowest stream first; within a stream, every channel that loaded, least preferred first. */
   readonly segments: readonly ChannelSegment[];
   /** Every channel fetched, in fetch order. */
   readonly channelsTried: readonly string[];
@@ -52,12 +47,13 @@ export interface LookaheadDiscovery {
  * that exists but no reached node names has no release in common with the
  * walk, so it can't join it.
  *
- * At each stream the class is chosen by `candidateChannelsForStream`,
- * restricted to attested names; an empty channel falls through to the next.
- * A more preferred channel attested later is fetched too, and the fallback
- * stays: the route search (`routeAcrossSegments`) ranks posture first, so it
- * uses the preferred channel wherever it reaches. A channel that fails to
- * load is recorded in `failure`, and its stream gets no further channels.
+ * Every attested channel of a class `candidateChannelsForStream` names is
+ * fetched, preferred class first, up to the safety cap. Discovery never
+ * decides a fallback is unneeded: whether a route needs fast-5.2 depends on
+ * which channels reach it, which only the route search (`routeAcrossSegments`)
+ * knows, and it ranks posture first, so it uses the preferred channel
+ * wherever that reaches. A channel that fails to load is recorded in
+ * `failure`, and its stream gets no further channels.
  */
 export async function discoverLookahead(
   loader: GraphLoader,
@@ -70,15 +66,14 @@ export async function discoverLookahead(
   const channelsTried: string[] = [];
   if (!anchor) return { segments: [], channelsTried };
 
-  // Fetch count at which each channel was first named, for `nextChannel`.
-  const attested = new Map(anchorGraph.channelNames.map((name) => [name, 0]));
+  const attested = new Set(anchorGraph.channelNames);
   const failedStreams = new Set<string>();
   const emptyChannels = new Set<string>();
   const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
   for (let fetches = 0; fetches < MAX_LOOKAHEAD_FETCHES; fetches += 1) {
-    const next = nextChannel(attested, anchor, channelsTried, found, failedStreams);
+    const next = nextChannel(attested, anchor, channelsTried, failedStreams);
     if (!next) break;
     channelsTried.push(next.channel);
     const result = await loader(next.channel, arch);
@@ -95,7 +90,7 @@ export async function discoverLookahead(
       continue;
     }
     found.push({ ...next, graph: result.value });
-    for (const name of result.value.channelNames) if (!attested.has(name)) attested.set(name, channelsTried.length);
+    for (const name of result.value.channelNames) attested.add(name);
   }
   // A fetched graph can name a stream older than one already fetched (only
   // 5.1 names 4.23), and the route search never returns to an earlier stream.
@@ -120,29 +115,20 @@ interface Found extends Candidate {
   readonly graph: Graph;
 }
 
-/**
- * The next channel to fetch: at the lowest newer stream that has one, the
- * most preferred attested channel not yet tried that would beat every
- * channel already found there and named no later than it. A preferred
- * channel named after a fallback (stable-5.1, named only by a late
- * stable-5.0) does not displace that fallback (fast-5.1, named by fast-5.0):
- * the route search, not discovery order, decides which one a route needs.
- */
+/** The next channel to fetch: the most preferred attested channel not yet tried at the lowest newer stream that has one. */
 function nextChannel(
-  attested: ReadonlyMap<string, number>,
+  attested: ReadonlySet<string>,
   anchor: Stream & { readonly cls: string },
   tried: readonly string[],
-  found: readonly Found[],
   failedStreams: ReadonlySet<string>,
 ): Candidate | undefined {
   let best: Candidate | undefined;
-  for (const [name, namedAt] of attested) {
+  for (const name of attested) {
     const parsed = parseChannelName(name);
     if (!parsed || compareStreams(parsed, anchor) <= 0 || failedStreams.has(formatStream(parsed)) || tried.includes(name)) continue;
     const stream = { major: parsed.major, minor: parsed.minor };
     const rank = candidateChannelsForStream(anchor.cls, stream).indexOf(name);
-    const displaced = found.some((f) => compareStreams(f.stream, stream) === 0 && f.rank <= rank && (attested.get(f.channel) as number) <= namedAt);
-    if (rank < 0 || displaced) continue;
+    if (rank < 0) continue;
     if (!best || compareStreams(stream, best.stream) < 0 || (compareStreams(stream, best.stream) === 0 && rank < best.rank)) {
       best = { channel: name, stream, rank };
     }

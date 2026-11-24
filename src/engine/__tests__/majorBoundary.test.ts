@@ -130,7 +130,7 @@ describe('stitching across the 4.22 -> 5.0 major boundary (live fixtures)', () =
 
     expect(result.value.stitch.channelsUsed).toEqual(['stable-4.21', 'stable-4.22', 'candidate-5.0']);
     // Only channels a fetched node names; the unnamed stable-5.0 and fast-5.0 are never probed.
-    expect(calls).toEqual(['stable-4.21', 'stable-4.22', 'candidate-4.23', 'candidate-5.0', 'candidate-5.1']);
+    expect(calls).toEqual(['stable-4.21', 'stable-4.22', 'fast-4.22', 'candidate-4.22', 'candidate-4.23', 'candidate-5.0', 'candidate-5.1']);
     expect(result.value.primary.versions.at(-1)).toBe('5.0.0-rc.8');
   });
 

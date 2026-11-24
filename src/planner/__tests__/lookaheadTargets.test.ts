@@ -71,7 +71,7 @@ describe('look-ahead discovery through the graph client', () => {
     expect(client.__calls).toEqual([]);
   });
 
-  it('fetches only newer channels the anchor\'s membership names, preferring the anchor\'s class at each stream', async () => {
+  it('fetches every newer channel the anchor\'s membership names, the anchor\'s class first at each stream', async () => {
     const membership = ['eus-4.20', 'stable-4.20', 'stable-4.21', 'eus-4.22', 'stable-4.22'];
     const client = makeClient(
       new Map([
@@ -87,7 +87,7 @@ describe('look-ahead discovery through the graph client', () => {
       ['stable-4.21', 'eus'],
       ['eus-4.22', false],
     ]);
-    expect(client.__calls).toEqual(['eus-4.20', 'stable-4.21', 'eus-4.22']);
+    expect(client.__calls).toEqual(['eus-4.20', 'stable-4.21', 'eus-4.22', 'stable-4.22']);
   });
 
   it('fetches nothing beyond the anchor when its membership names no newer stream', async () => {

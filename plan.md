@@ -286,9 +286,15 @@ switches. `PathHop` must carry its source segment for this feature to be correct
 > stream found only in a look-ahead channel (4.22.23 in `candidate-4.23`). The dropdown's
 > three-stream cap also hid 5.0 from an `eus-4.18` anchor. Now both use
 > `discoverLookahead` (engine/lookahead.ts), which follows membership until no newer
-> channel is named that it has not tried (safety cap 48 fetches). A preferred channel
-> named only by a later graph (fast-5.0's releases name stable-5.0) is fetched too, beside
-> the fallback that reached its stream. Both also read reachability from
+> channel is named that it has not tried (safety cap 48 fetches). It fetches every named
+> channel of a class the stream's preference order lists, fallbacks included, and never
+> decides from discovery order that a fallback is unneeded. Three successive review
+> findings came from such rules: a preferred channel named after a fallback hid it, and
+> so did one named before it (stable-5.0 naming stable-5.2 before fast-5.1 names the
+> fast-5.2 that alone holds the target). Which channel a route needs is the route search's
+> question. On the Nov 2026 snapshot this costs 19 fetches from `eus-4.18` (was 8) and 5
+> from `stable-4.22` (was 4), and the dropdown gains the prereleases only `candidate`
+> channels reach, marked as a class change. Both also read reachability from
 > `routeAcrossSegments` (engine/routeSearch.ts), a layered shortest-path DP over the anchor
 > plus every look-ahead segment. Its frontier carries across segments, so a segment can
 > contribute no hops: `eus-4.22` joins `eus-4.20` directly at the shared 4.20.x band even
