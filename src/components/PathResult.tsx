@@ -38,7 +38,7 @@ export function PathResult({
   readonly result: AsyncResult<StitchedPathResult, StitchError>;
   readonly channel: string | undefined;
   readonly channelNames: readonly string[];
-  /** The primary route's legs (planner/useControlPlaneOnlyLegs.ts); a leg's paused hops run on its EUS channel in the commands. */
+  /** The primary route's legs (planner/useControlPlaneOnlyLegs.ts): each verified leg is its own procedure on its EUS channel, never folded into the route's commands. */
   readonly controlPlaneOnlyLegs: readonly ControlPlaneOnlyLeg[];
   readonly routeHold?: RouteHold;
   readonly pinnedStops: readonly Version[];
@@ -94,16 +94,10 @@ export function PathResult({
   }
 
   const { primary, alternates, stitch, stations, riskComparison } = result.value;
-  const commands = buildHopCommands(
-    primary,
-    channel,
-    stations,
-    {
-      channelNames,
-      multiGraph: stitch.multiGraph,
-    },
-    controlPlaneOnlyLegs,
-  );
+  const commands = buildHopCommands(primary, channel, stations, {
+    channelNames,
+    multiGraph: stitch.multiGraph,
+  });
 
   const toggleHop = (index: number) => setSelectedHop((prev) => (prev === index ? null : index));
   const toggleStation = (index: number) => setSelectedStation((prev) => (prev === index ? null : index));
@@ -152,7 +146,7 @@ export function PathResult({
       <CommandScript commands={commands} />
       <RiskSummary riskSummary={primary.riskSummary} applicability={riskApplicability} />
       <AdminAcksPanel path={primary} />
-      <EusAdvisory legs={controlPlaneOnlyLegs} />
+      <EusAdvisory legs={controlPlaneOnlyLegs} applicability={riskApplicability} />
       <AlternatesPanel alternates={alternates} channelsUsed={stitch.channelsUsed} />
     </div>
   );

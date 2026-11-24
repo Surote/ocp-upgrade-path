@@ -97,7 +97,8 @@ describe('controlPlaneOnlyLegs', () => {
 
   it('pauses on the last version of the EUS stream and unpauses on the last version of the next one', () => {
     const [leg] = legsOf(route('4.16.10', '4.16.33', '4.17.5', '4.17.59', '4.18.2', '4.18.59', '4.19.4'));
-    expect(leg).toMatchObject({ pauseAt: '4.16.33', firstPausedHopTo: '4.17.5', unpauseAt: '4.18.59' });
+    expect(leg).toMatchObject({ pauseAt: '4.16.33', unpauseAt: '4.18.59' });
+    expect(available(leg).pausedHops.map((hop) => hop.to)).toEqual(['4.17.5', '4.17.59', '4.18.2', '4.18.59']);
   });
 
   it('never invents EUS rules below 4.6 or for a later major', () => {

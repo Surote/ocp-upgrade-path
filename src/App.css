@@ -830,6 +830,14 @@ main {
   overflow-wrap: anywhere;
 }
 
+.cpo-risk-note {
+  border-left: 2px solid var(--risk-always);
+  padding-left: 12px;
+  margin: 6px 0;
+  color: var(--text-h);
+  font-size: 0.9rem;
+}
+
 .admin-acks-unknown {
   color: var(--risk-always);
   margin: 4px 0;

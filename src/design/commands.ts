@@ -1,7 +1,6 @@
 import type { Path } from '../engine/types';
 import type { GraphNode, Version } from '../graph/types';
 import { channelNamesForNode, parseChannelName } from './channels';
-import type { ControlPlaneOnlyLeg } from './eus';
 
 export interface HopCommand {
   readonly from: Version;
@@ -29,8 +28,6 @@ export interface HopCommand {
    * attribution rule as `channelSwitch`: the switch is at this hop's `from`.
    */
   readonly channelSwitchTo?: string;
-  /** Present iff `channelSwitch` is: `controlPlaneOnly` when the switch starts a Control Plane Only leg's paused hops on its EUS channel. */
-  readonly channelSwitchReason?: 'destination' | 'controlPlaneOnly';
   readonly upgradeTo: string;
   /** Digest form for disconnected clusters, on a secondary line (plan.md §6) -- absent only when `stations` has no node for this hop's destination, which a stitcher result always has. */
   readonly upgradeToImage?: string;
@@ -116,10 +113,6 @@ function pickSwitchChannel(memberChannels: readonly string[], preferredClass: st
  * `selectedChannel` and only changes when a switch is actually emitted, so
  * a later hop is judged against wherever the previous switch actually left
  * the cluster, not against the original selection.
- *
- * An available Control Plane Only leg overrides provenance for the hops it
- * runs with workers paused: they run on the leg's EUS channel, the one its
- * pause checkpoint switches to and whose graph was checked to publish them.
  */
 export function buildHopCommands(
   path: Path,
@@ -127,24 +120,15 @@ export function buildHopCommands(
   /** `StitchedPathResult.stations`: one node per entry of `path.versions`. */
   stations: readonly GraphNode[],
   channelContext: ChannelContext,
-  legs: readonly ControlPlaneOnlyLeg[] = [],
 ): readonly HopCommand[] {
   const { channelNames, multiGraph } = channelContext;
-  const legChannel = new Map<number, string>();
-  for (const leg of legs) {
-    if (leg.kind !== 'available') continue;
-    for (let i = leg.pausedHops.first; i <= leg.pausedHops.last; i += 1) legChannel.set(i, leg.eusChannel);
-  }
   let currentChannel = selectedChannel;
 
   return path.hops.map((hop, i) => {
     const toNode = stations[i + 1];
     let channelSwitchTo: string | undefined;
-    const pausedOn = legChannel.get(i);
 
-    if (currentChannel && pausedOn) {
-      if (pausedOn !== currentChannel) channelSwitchTo = pausedOn;
-    } else if (currentChannel && hop.sourceChannel) {
+    if (currentChannel && hop.sourceChannel) {
       // Provenance-based: the real, already-fetched channel that produced
       // this hop is the definitive answer -- see doc above.
       if (hop.sourceChannel !== currentChannel) {
@@ -168,23 +152,17 @@ export function buildHopCommands(
       to: hop.to,
       channelSwitch: channelSwitchTo ? `oc adm upgrade channel ${channelSwitchTo}` : undefined,
       channelSwitchTo,
-      channelSwitchReason: channelSwitchTo ? (pausedOn ? 'controlPlaneOnly' : 'destination') : undefined,
       upgradeTo: `oc adm upgrade --to ${hop.to}`,
       upgradeToImage: payload ? `oc adm upgrade --to-image=${payload} --allow-explicit-upgrade` : undefined,
     };
   });
 }
 
-const SWITCH_COMMENT: Record<NonNullable<HopCommand['channelSwitchReason']>, string> = {
-  destination: "# destination isn't on the current channel",
-  controlPlaneOnly: '# Control Plane Only leg: these updates run on the EUS channel',
-};
-
 /** The whole hop sequence as one copyable script (plan.md §6), channel-switch lines commented so their purpose is legible in a change request. */
 export function buildScript(commands: readonly HopCommand[]): string {
   const lines: string[] = [];
   for (const cmd of commands) {
-    if (cmd.channelSwitch) lines.push(`${cmd.channelSwitch}  ${SWITCH_COMMENT[cmd.channelSwitchReason ?? 'destination']}`);
+    if (cmd.channelSwitch) lines.push(`${cmd.channelSwitch}  # destination isn't on the current channel`);
     lines.push(cmd.upgradeTo);
   }
   return lines.join('\n');
