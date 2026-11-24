@@ -34,15 +34,14 @@ export function usePathSearch(client: GraphClient, params: PathSearchParams): As
   const task = useCallback(
     (signal: AbortSignal) => {
       const loader = makeGraphLoader(client, { signal });
-      const request = {
+      return stitchAndFindPath(loader, {
         targetChannel: channel as string,
         arch,
         start: start as Version,
         target: target as Version,
         anchor,
         constraints,
-      };
-      return stitchAndFindPath(loader, request);
+      });
     },
     [client, channel, arch, start, target, anchor, constraints],
   );

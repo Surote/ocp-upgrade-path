@@ -1,6 +1,12 @@
 import { parseChannelName } from '../design/channels';
 import type { ClassFallback } from '../engine/types';
 
+const FALLBACK_REASON: Record<ClassFallback['requestedStatus'], (requestedClass: string) => string> = {
+  unpublished: () => 'none is published there',
+  noRoute: (cls) => `no route on a ${cls} channel reaches it from here`,
+  unverified: (cls) => `the ${cls} channel for that stream could not be loaded, so a route there could not be verified`,
+};
+
 /**
  * Names which channels were stitched together, whenever more than one was
  * used, so the path stays auditable (plan.md §4/§6). Never shown for a
@@ -32,7 +38,7 @@ export function StitchBanner({
         <p key={fb.channel} className="stitch-banner__fallback" role="alert">
           <strong>Channel class change:</strong> {fb.channel} was used instead of a <span className="mono">{fb.requestedClass}</span>{' '}
           channel for that version stream, because{' '}
-          {fb.requestedStatus === 'unpublished' ? 'none is published there' : `no route on a ${fb.requestedClass} channel reaches it from here`} —
+          {FALLBACK_REASON[fb.requestedStatus](fb.requestedClass)} —
           this changes the cluster's support posture at that step, not just its version.
           {parseChannelName(fb.channel)?.cls === 'candidate' && (
             <>

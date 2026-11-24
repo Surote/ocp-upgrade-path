@@ -23,6 +23,13 @@ describe('marking a plan that relies on a candidate channel', () => {
     expect(screen.getByRole('alert')).not.toHaveTextContent(/candidate/);
   });
 
+  it('a class change whose preferred channel failed to load says the route could not be verified, not that none exists', () => {
+    render(<StitchBanner channelsUsed={['stable-4.22', 'fast-5.0']} classFallbacks={[{ channel: 'fast-5.0', requestedClass: 'stable', requestedStatus: 'unverified' }]} />);
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/could not be verified/);
+    expect(alert).not.toHaveTextContent(/none is published|no route on a stable channel/);
+  });
+
   it('a class change whose preferred channel is published but has no route says so without claiming none is published', () => {
     render(
       <StitchBanner
