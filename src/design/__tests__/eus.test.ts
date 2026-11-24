@@ -134,7 +134,11 @@ describe('legCheckpoints', () => {
     expect(legCheckpoints(available(controlPlaneOnlyLegs(LIVE_416_TO_501)[0]))).toEqual([
       { kind: 'pause', when: 'At 4.16.33, before oc adm upgrade --to 4.17.59', command: `oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'` },
       { kind: 'unpause', when: 'Once the cluster reports 4.18.59', command: `oc patch mcp/worker --type merge --patch '{"spec":{"paused":false}}'` },
-      { kind: 'waitForPools', when: 'Wait for worker UPDATED=True before leaving 4.18', command: 'oc get mcp' },
+      {
+        kind: 'waitForPools',
+        when: 'Before leaving 4.18, wait until every pool you paused reports UPDATED=True and UPDATING=False',
+        command: 'oc get mcp',
+      },
     ]);
   });
 });

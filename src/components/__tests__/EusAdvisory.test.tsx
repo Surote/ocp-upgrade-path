@@ -110,7 +110,7 @@ describe('the pool check after a leg', () => {
     const [leg] = legItems() as [HTMLElement];
     const check = within(leg).getByRole('button', { name: 'Copy leg 1 pool check' }).closest('li') as HTMLElement;
     expect(check).toHaveTextContent(/every pool you paused reports UPDATED=True and UPDATING=False/);
-    expect(check).toHaveTextContent(/before leaving 4\.18/);
+    expect(check).toHaveTextContent(/before leaving 4\.18/i);
     expect(check).not.toHaveTextContent(/worker UPDATED=True/);
   });
 });
