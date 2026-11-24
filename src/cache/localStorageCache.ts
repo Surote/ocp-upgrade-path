@@ -121,7 +121,8 @@ export class LocalStorageGraphCache {
     return { value: parsed.value, fetchedAt: record.fetchedAt };
   }
 
-  async set(key: CacheKey, entry: CacheEntry<Graph>): Promise<void> {
+  /** `isCurrent` is asked once compression finishes: false means the entry was invalidated meanwhile, so the write is dropped. */
+  async set(key: CacheKey, entry: CacheEntry<Graph>, isCurrent: () => boolean = () => true): Promise<void> {
     const record: StoredRecord = { fetchedAt: entry.fetchedAt, value: toStorable(entry.value) };
     let encoded: string;
     try {
@@ -129,7 +130,7 @@ export class LocalStorageGraphCache {
     } catch {
       return;
     }
-    if (encoded.length > this.maxStoredChars) return;
+    if (!isCurrent() || encoded.length > this.maxStoredChars) return;
     try {
       this.writeEntry(key, encoded);
     } catch {

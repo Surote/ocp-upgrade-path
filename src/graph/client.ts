@@ -1,7 +1,7 @@
 import { ChannelNameCache } from '../cache/channelNameCache';
 import { LocalStorageGraphCache } from '../cache/localStorageCache';
 import { MemoryCache } from '../cache/memoryCache';
-import { makeCacheKey, type CacheEntry } from '../cache/types';
+import { makeCacheKey, type CacheEntry, type CacheKey } from '../cache/types';
 import { err, ok, type Result } from '../lib/result';
 import type { GraphError } from './errors';
 import { parseRawGraph } from './parse';
@@ -48,6 +48,14 @@ export class GraphClient {
   private readonly fetchImpl: typeof fetch;
   /** Names found by backward channel discovery (planner/legacyChannels.ts), on the same storage as the graphs. */
   readonly channelNames: ChannelNameCache;
+  /**
+   * Bumped by every invalidation and refresh. A cache read or write that began
+   * under an older generation holds data the refresh replaced, so it must not
+   * land in either tier once its await resumes (plan.md §3).
+   */
+  private readonly generations = new Map<CacheKey, number>();
+  private clearedAt = 0;
+  private lastGeneration = 0;
 
   constructor(options?: { readonly storage?: Storage; readonly fetchImpl?: typeof fetch }) {
     this.persistent = new LocalStorageGraphCache(options?.storage);
@@ -57,6 +65,9 @@ export class GraphClient {
 
   async getGraph(params: GraphParams, options: FetchGraphOptions = {}): Promise<Result<GraphResult, GraphError>> {
     const key = makeCacheKey(params.channel, params.arch);
+    if (options.forceRefresh) this.bumpGeneration(key);
+    const generation = this.generationOf(key);
+    const isCurrent = () => this.generationOf(key) === generation;
 
     if (!options.forceRefresh) {
       const memHit = this.memory.get(key);
@@ -65,6 +76,7 @@ export class GraphClient {
       }
 
       const diskHit = await this.persistent.get(key);
+      if (!isCurrent()) return this.getGraph(params, options);
       if (diskHit) {
         this.memory.set(key, diskHit);
         return ok({ graph: diskHit.value, fetchedAt: diskHit.fetchedAt });
@@ -77,22 +89,36 @@ export class GraphClient {
     }
 
     const entry: CacheEntry<Graph> = { value: fetched.value, fetchedAt: Date.now() };
-    this.memory.set(key, entry);
-    await this.persistent.set(key, entry);
+    if (isCurrent()) {
+      this.memory.set(key, entry);
+      await this.persistent.set(key, entry, isCurrent);
+    }
     return ok({ graph: entry.value, fetchedAt: entry.fetchedAt });
   }
 
   /** Manual invalidate/refresh path for one channel/arch pair (both tiers). */
   invalidate(params: GraphParams): void {
     const key = makeCacheKey(params.channel, params.arch);
+    this.bumpGeneration(key);
     this.memory.delete(key);
     this.persistent.invalidate(key);
   }
 
   /** Manual invalidate/refresh path for the whole cache (both tiers). */
   invalidateAll(): void {
+    this.lastGeneration += 1;
+    this.clearedAt = this.lastGeneration;
     this.memory.clear();
     this.persistent.clear();
+  }
+
+  private bumpGeneration(key: CacheKey): void {
+    this.lastGeneration += 1;
+    this.generations.set(key, this.lastGeneration);
+  }
+
+  private generationOf(key: CacheKey): number {
+    return Math.max(this.generations.get(key) ?? 0, this.clearedAt);
   }
 
   private async fetchFromNetwork(params: GraphParams, signal: AbortSignal | undefined): Promise<Result<Graph, GraphError>> {
