@@ -45,6 +45,18 @@ function findRelease(segments: readonly ChannelSegment[], raw: string): Version 
 }
 
 /**
+ * The stops that name a release in `segments`, in order, whatever the
+ * target. Target labels follow these, so a stop the current target can't
+ * honor still shapes the label of a target that can.
+ */
+export function stopReleases(raws: readonly string[], segments: readonly ChannelSegment[]): readonly Version[] {
+  return raws.flatMap((raw) => {
+    const version = raw ? findRelease(segments, raw) : undefined;
+    return version ? [version] : [];
+  });
+}
+
+/**
  * Judges every stop against its neighbours. Options for stop `i` honor every
  * other stop that names a real release, so editing one stop narrows the
  * options of the stops around it.

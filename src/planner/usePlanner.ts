@@ -6,7 +6,7 @@ import { resolveVersion } from '../graph/parse';
 import { ARCHES, type Arch, type Version } from '../graph/types';
 import { parseUrlState, resolveUrlArch, resolveUrlRiskPolicy, syncUrlState } from '../url/urlState';
 import type { RiskPolicy, RouteConstraints, StopOption } from '../engine/routeConstraints';
-import { checkStops } from './stopFields';
+import { checkStops, stopReleases } from './stopFields';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
 import type { ChannelSegment } from '../engine/lookahead';
@@ -223,10 +223,16 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const routeConstraints = useMemo<RouteConstraints>(() => ({ stops: pinnedStops, riskPolicy }), [pinnedStops, riskPolicy]);
   // Selection and stop checks read `targetOptions`; only the labels follow the
   // constraints, since the stops are themselves checked against the target.
+  // Labels use every stop that names a release, not just those the current
+  // target honors, so each option names the route it gets once chosen.
+  const labelConstraints = useMemo<RouteConstraints>(
+    () => ({ stops: stopReleases(stopsRaw, stopSegments), riskPolicy }),
+    [stopsRaw, stopSegments, riskPolicy],
+  );
   const shownTargetOptions = useMemo(() => {
-    const constrained = routeConstraints.stops.length > 0 || routeConstraints.riskPolicy !== 'recommended';
-    return graph && resolvedStart && constrained ? buildTargetOptions(graph, resolvedStart, lookaheadSegments, routeConstraints) : targetOptions;
-  }, [graph, resolvedStart, lookaheadSegments, routeConstraints, targetOptions]);
+    const constrained = labelConstraints.stops.length > 0 || labelConstraints.riskPolicy !== 'recommended';
+    return graph && resolvedStart && constrained ? buildTargetOptions(graph, resolvedStart, lookaheadSegments, labelConstraints) : targetOptions;
+  }, [graph, resolvedStart, lookaheadSegments, labelConstraints, targetOptions]);
 
   const pathResult = usePathSearch(client, {
     channel,
