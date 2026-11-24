@@ -11,14 +11,16 @@ describe('adminAckKeysFor', () => {
     expect(adminAckKeysFor(s4(19))).toEqual(['ack-4.18-gateway-api-management-in-4.19', 'ack-4.18-kube-1.32-api-removals-in-4.19']);
   });
 
-  it('returns the single verified key for 4.14, 4.16, 4.20 and 4.22', () => {
+  it('returns the single verified key for 4.13, 4.14, 4.16, 4.20 and 4.22', () => {
+    expect(adminAckKeysFor(s4(13))).toEqual(['ack-4.12-kube-1.26-api-removals-in-4.13']);
     expect(adminAckKeysFor(s4(14))).toEqual(['ack-4.13-kube-1.27-api-removals-in-4.14']);
     expect(adminAckKeysFor(s4(16))).toEqual(['ack-4.15-kube-1.29-api-removals-in-4.16']);
     expect(adminAckKeysFor(s4(20))).toEqual(['ack-4.19-admissionregistration-v1beta1-api-removals-in-4.20']);
     expect(adminAckKeysFor(s4(22))).toEqual(['ack-4.21-boot-image-opt-out-in-4.22']);
   });
 
-  it('returns empty for minors verified to need none (4.17, 4.18, 4.21)', () => {
+  it('returns empty for minors verified to need none (4.15, 4.17, 4.18, 4.21)', () => {
+    expect(adminAckKeysFor(s4(15))).toEqual([]);
     expect(adminAckKeysFor(s4(17))).toEqual([]);
     expect(adminAckKeysFor(s4(18))).toEqual([]);
     expect(adminAckKeysFor(s4(21))).toEqual([]);
