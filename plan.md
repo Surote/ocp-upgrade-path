@@ -420,9 +420,12 @@ other conditional risks".
 **A link's marks are checked before they apply.** Each value must match the name and URL
 of a conditional advisory on the loaded graphs exactly. It applies as soon as a graph
 carrying that advisory loads, so a slow look-ahead fetch never holds a mark on a route inside
-the anchor, and an exact match cannot become ambiguous when more graphs load. Once the
-anchor and look-ahead graphs have all loaded, any value still unmatched is dropped with a
-notice that names it, and is never matched onto a same-name advisory at another URL. A
+the anchor, and an exact match cannot become ambiguous when more graphs load. The graphs
+checked are the anchor, the look-ahead, and the `eus-4.(E+2)` graphs the route's Control
+Plane Only legs load, since a leg lists that channel's own risks and its card offers the
+mark. Once the anchor and look-ahead graphs have all loaded, the route search has settled,
+and no leg is still `checking`, any value still unmatched is dropped with a notice that
+names it, and is never matched onto a same-name advisory at another URL. A
 value without `~` names no URL, and is dropped with a notice straight away.
 
 On the Nov 2026 `eus-4.18` snapshot, marking `VSphereConfigCloudControllerCrash` leaves the

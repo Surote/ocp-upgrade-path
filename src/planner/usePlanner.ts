@@ -228,21 +228,6 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     return undefined;
   }, [graph, targetRaw, lookaheadSegments]);
 
-  const markable = useMemo(
-    () => conditionalRisks(graph ? [graph, ...lookaheadSegments.map((s) => s.graph)] : []),
-    [graph, lookaheadSegments],
-  );
-  // A linked mark applies as soon as a loaded graph carries its advisory, so a
-  // slow look-ahead never holds one on an anchor route; only dropping an
-  // unmatched one waits for every graph.
-  if (linkedMarks && graph) {
-    const ids = linkedMarks.filter((id) => markable.has(id));
-    const unmatched = linkedMarks.filter((id) => !markable.has(id));
-    const settled = !lookaheadLoading;
-    if (ids.length > 0) setNotApplicable((prev) => new Set([...prev, ...ids]));
-    if (settled) setMarksNotice(droppedMarksNotice(unmatched));
-    if (ids.length > 0 || settled) setLinkedMarks(settled || unmatched.length === 0 ? undefined : unmatched);
-  }
   const markNotApplicable = useCallback((id: RiskId, marked: boolean) => {
     setNotApplicable((prev) => {
       const next = new Set(prev);
@@ -314,16 +299,36 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   const offered = <T extends { readonly version: Version }>(options: readonly T[], selected: string): readonly T[] =>
     channel && resolvedStart ? offeredOptions(options, { channel, start: resolvedStart, selected }) : options;
 
+  const searchedTarget = routeHold ? undefined : targetOption?.version;
   const pathResult = usePathSearch(client, {
     channel,
     arch,
     start: resolvedStart,
-    target: routeHold ? undefined : targetOption?.version,
+    target: searchedTarget,
     anchor: anchorResult && { ...anchorResult, lookahead: lookaheadSnapshot?.discovery },
     constraints: routeConstraints,
   });
 
-  const controlPlaneOnlyLegs = useControlPlaneOnlyLegs(client, arch, pathResult).legs;
+  const legCheck = useControlPlaneOnlyLegs(client, arch, pathResult);
+
+  const markable = useMemo(
+    () => conditionalRisks(graph ? [graph, ...lookaheadSegments.map((s) => s.graph), ...legCheck.graphs] : []),
+    [graph, lookaheadSegments, legCheck.graphs],
+  );
+  // A linked mark applies as soon as a loaded graph carries its advisory, so a
+  // slow look-ahead never holds one on an anchor route. Dropping an unmatched
+  // one waits for every graph that could carry it: the look-ahead, and the EUS
+  // graphs of the route's legs, which only a found route names. An active
+  // search reads `idle` for one render before it starts.
+  if (linkedMarks && graph) {
+    const ids = linkedMarks.filter((id) => markable.has(id));
+    const unmatched = linkedMarks.filter((id) => !markable.has(id));
+    const searching = channel !== undefined && resolvedStart !== undefined && searchedTarget !== undefined && (pathResult.status === 'idle' || pathResult.status === 'loading');
+    const settled = !lookaheadLoading && !searching && !legCheck.legs.some((leg) => leg.kind === 'checking');
+    if (ids.length > 0) setNotApplicable((prev) => new Set([...prev, ...ids]));
+    if (settled) setMarksNotice(droppedMarksNotice(unmatched));
+    if (ids.length > 0 || settled) setLinkedMarks(settled || unmatched.length === 0 ? undefined : unmatched);
+  }
 
   // --- User-driven cascade (Q7/Q8): channel -> arch -> start -> target ---
   // Stops clear with the target; a target change keeps them, and any the
@@ -448,6 +453,6 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
     notices,
     result: pathResult,
     channelNames: graph?.channelNames ?? [],
-    controlPlaneOnlyLegs,
+    controlPlaneOnlyLegs: legCheck.legs,
   };
 }
