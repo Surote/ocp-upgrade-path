@@ -54,7 +54,7 @@ describe('stitching across the 4.22 -> 5.0 major boundary (live fixtures)', () =
     const { primary, stitch } = result.value;
 
     expect(stitch.channelsUsed).toEqual(['stable-4.22', 'candidate-5.0']);
-    expect(stitch.classFallbacks).toEqual([{ channel: 'candidate-5.0', requestedClass: 'stable' }]);
+    expect(stitch.classFallbacks).toEqual([{ channel: 'candidate-5.0', requestedClass: 'stable', requestedStatus: 'noRoute' }]);
     expect(primary.versions[0]).toBe('4.21.0');
     expect(primary.versions.at(-1)).toBe('5.0.0-rc.8');
     expect(primary.versions.some((ver) => streamOf(ver).major === 4 && streamOf(ver).minor === 22)).toBe(true);

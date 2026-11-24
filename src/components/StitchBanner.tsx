@@ -31,8 +31,9 @@ export function StitchBanner({
       {classFallbacks.map((fb) => (
         <p key={fb.channel} className="stitch-banner__fallback" role="alert">
           <strong>Channel class change:</strong> {fb.channel} was used instead of a <span className="mono">{fb.requestedClass}</span>{' '}
-          channel for that version stream, because none is published there — this changes the cluster's support posture at that
-          step, not just its version.
+          channel for that version stream, because{' '}
+          {fb.requestedStatus === 'unpublished' ? 'none is published there' : `no route on a ${fb.requestedClass} channel reaches it from here`} —
+          this changes the cluster's support posture at that step, not just its version.
           {parseChannelName(fb.channel)?.cls === 'candidate' && (
             <>
               {' '}

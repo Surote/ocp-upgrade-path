@@ -278,7 +278,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     if (!result.ok) return;
     expect(calls).toEqual(['eus-4.20', 'eus-4.21', 'stable-4.21']); // same class probed first, per plan.md §6
     expect(result.value.stitch.channelsUsed).toEqual(['eus-4.20', 'stable-4.21']);
-    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.21', requestedClass: 'eus' }]);
+    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.21', requestedClass: 'eus', requestedStatus: 'unpublished' }]);
     expect(result.value.primary.hops.at(-1)?.sourceChannel).toBe('stable-4.21');
   });
 
@@ -309,7 +309,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
     // (same class), then 4.23 (no eus channel, falls back to stable).
     expect(calls).toEqual(['eus-4.20', 'eus-4.22', 'eus-4.23', 'stable-4.23']);
     expect(result.value.stitch.channelsUsed).toEqual(['eus-4.20', 'eus-4.22', 'stable-4.23']);
-    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.23', requestedClass: 'eus' }]);
+    expect(result.value.stitch.classFallbacks).toEqual([{ channel: 'stable-4.23', requestedClass: 'eus', requestedStatus: 'unpublished' }]);
     expect(result.value.primary.versions).toEqual([
       v('4.18.0'),
       v('4.19.0'),

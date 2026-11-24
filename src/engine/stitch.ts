@@ -314,9 +314,9 @@ export async function stitchAndFindPath(
     alternates: [],
     stitch: {
       channelsUsed: [anchor.channel, ...anchorSideFirst.map((s) => s.channel), ...usedLookahead.map((s) => s.channel)],
-      classFallbacks: usedLookahead
-        .filter((segment) => segment.classFallback)
-        .map((segment) => ({ channel: segment.channel, requestedClass: segment.requestedClass as string })),
+      classFallbacks: usedLookahead.flatMap((segment) =>
+        segment.classFallback ? [{ channel: segment.channel, requestedClass: segment.requestedClass, requestedStatus: segment.requestedStatus }] : [],
+      ),
       multiGraph: true,
     },
     nodeInfo: buildNodeInfo([...usedLookahead].reverse().concat(anchor, anchorSideFirst)),

@@ -115,8 +115,15 @@ export type GraphLoader = (channel: string, arch: Arch) => Promise<Result<Graph,
 export interface ClassFallback {
   /** The real channel actually used, e.g. `stable-4.21`. */
   readonly channel: string;
-  /** The class that was preferred but unavailable at this channel's stream, e.g. `eus`. */
+  /** The anchor's class, which the route could not stay on at this channel's stream, e.g. `eus`. */
   readonly requestedClass: string;
+  /**
+   * Why: `unpublished` when Cincinnati returned an empty graph for that
+   * class's channel at this stream; `noRoute` otherwise -- the channel is
+   * published, or no release on the way names it, and either way no route
+   * on it reaches the target.
+   */
+  readonly requestedStatus: 'unpublished' | 'noRoute';
 }
 
 /** Which channels the stitcher actually used, in fetch order -- for the audit banner, per plan.md §4/§6. */

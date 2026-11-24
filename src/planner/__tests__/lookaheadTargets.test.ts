@@ -83,9 +83,9 @@ describe('look-ahead discovery through the graph client', () => {
 
     const segments = await discoverLookaheadSegments(client, 'eus-4.20');
 
-    expect(segments.map((s) => [s.channel, s.classFallback, s.requestedClass])).toEqual([
-      ['stable-4.21', true, 'eus'],
-      ['eus-4.22', false, undefined],
+    expect(segments.map((s) => [s.channel, s.classFallback && s.requestedClass])).toEqual([
+      ['stable-4.21', 'eus'],
+      ['eus-4.22', false],
     ]);
     expect(client.__calls).toEqual(['eus-4.20', 'stable-4.21', 'eus-4.22']);
   });

@@ -2,7 +2,7 @@ import { parseChannelName } from '../design/channels';
 import { candidateChannelsForStream } from '../design/forwardChannel';
 import type { GraphError } from '../graph/errors';
 import type { Arch, Graph } from '../graph/types';
-import type { GraphLoader } from './types';
+import type { ClassFallback, GraphLoader } from './types';
 import { compareStreams, formatStream, type Stream } from './version';
 
 /**
@@ -12,14 +12,11 @@ import { compareStreams, formatStream, type Stream } from './version';
  */
 const MAX_LOOKAHEAD_FETCHES = 48;
 
-export interface ChannelSegment {
-  readonly channel: string;
-  readonly graph: Graph;
-  /** True when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
-  readonly classFallback: boolean;
-  /** The anchor's class, which had no channel at this stream -- present iff `classFallback` is true. */
-  readonly requestedClass?: string;
-}
+/** `classFallback` is true when this segment's class differs from the anchor's (plan.md §6 "Forward channel preference"). */
+export type ChannelSegment = { readonly channel: string; readonly graph: Graph } & (
+  | { readonly classFallback: false }
+  | ({ readonly classFallback: true } & Omit<ClassFallback, 'channel'>)
+);
 
 export interface LookaheadDiscovery {
   /**
@@ -75,6 +72,7 @@ export async function discoverLookahead(
 
   const attested = new Set(anchorGraph.channelNames);
   const failedStreams = new Set<string>();
+  const emptyChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
   for (let fetches = 0; fetches < MAX_LOOKAHEAD_FETCHES; fetches += 1) {
@@ -83,24 +81,29 @@ export async function discoverLookahead(
     channelsTried.push(next.channel);
     const result = await loader(next.channel, arch);
     if (!result.ok) {
-      if (result.error.kind === 'empty') continue;
+      if (result.error.kind === 'empty') {
+        emptyChannels.add(next.channel);
+        continue;
+      }
       failure ??= { channel: next.channel, error: result.error };
       // Stop at this stream rather than try the next class: a transient
       // error must not silently move the plan onto another class.
       failedStreams.add(formatStream(next.stream));
       continue;
     }
-    const classFallback = next.rank > 0;
-    found.push({
-      ...next,
-      segment: { channel: next.channel, graph: result.value, classFallback, requestedClass: classFallback ? anchor.cls : undefined },
-    });
+    found.push({ ...next, graph: result.value });
     for (const name of result.value.channelNames) attested.add(name);
   }
   // A fetched graph can name a stream older than one already fetched (only
   // 5.1 names 4.23), and routeAcrossSegments visits each segment once.
   found.sort((a, b) => compareStreams(a.stream, b.stream) || b.rank - a.rank);
-  return { segments: found.map((f) => f.segment), channelsTried, failure };
+  const segments = found.map(({ channel, stream, rank, graph }): ChannelSegment => {
+    if (rank === 0) return { channel, graph, classFallback: false };
+    const requested = candidateChannelsForStream(anchor.cls, stream)[0] as string;
+    const requestedStatus = emptyChannels.has(requested) ? 'unpublished' : 'noRoute';
+    return { channel, graph, classFallback: true, requestedClass: anchor.cls, requestedStatus };
+  });
+  return { segments, channelsTried, failure };
 }
 
 interface Candidate {
@@ -111,7 +114,7 @@ interface Candidate {
 }
 
 interface Found extends Candidate {
-  readonly segment: ChannelSegment;
+  readonly graph: Graph;
 }
 
 /**

@@ -11,14 +11,14 @@ describe('marking a plan that relies on a candidate channel', () => {
     render(
       <StitchBanner
         channelsUsed={['stable-4.22', 'candidate-5.0']}
-        classFallbacks={[{ channel: 'candidate-5.0', requestedClass: 'stable' }]}
+        classFallbacks={[{ channel: 'candidate-5.0', requestedClass: 'stable', requestedStatus: 'noRoute' }]}
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent(/relies on a candidate channel/);
   });
 
   it('an eus -> stable fallback is a class change but not a candidate warning', () => {
-    render(<StitchBanner channelsUsed={['eus-4.20', 'stable-4.21']} classFallbacks={[{ channel: 'stable-4.21', requestedClass: 'eus' }]} />);
+    render(<StitchBanner channelsUsed={['eus-4.20', 'stable-4.21']} classFallbacks={[{ channel: 'stable-4.21', requestedClass: 'eus', requestedStatus: 'unpublished' }]} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/Channel class change/);
     expect(screen.getByRole('alert')).not.toHaveTextContent(/candidate/);
   });
