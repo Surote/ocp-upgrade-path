@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import type { RouteConstraints } from '../engine/routeConstraints';
 import { type AnchorSnapshot, stitchAndFindPath } from '../engine/stitch';
 import type { StitchedPathResult, StitchError } from '../engine/types';
 import type { GraphClient } from '../graph/client';
@@ -14,6 +15,7 @@ export interface PathSearchParams {
   readonly target: Version | undefined;
   /** The anchor graph the dropdowns were built from, and the look-ahead discovered from it once known; routed against instead of refetched. */
   readonly anchor?: AnchorSnapshot & { readonly fetchedAt: number };
+  readonly constraints: RouteConstraints;
 }
 
 /**
@@ -24,22 +26,25 @@ export interface PathSearchParams {
  * the stitcher directly.
  */
 export function usePathSearch(client: GraphClient, params: PathSearchParams): AsyncResult<StitchedPathResult, StitchError> {
-  const { channel, arch, start, target, anchor } = params;
+  const { channel, arch, start, target, anchor, constraints } = params;
   const active = channel !== undefined && start !== undefined && target !== undefined;
-  const depsKey = active ? `${channel}|${arch}|${start}|${target}|${anchor?.fetchedAt}` : '';
+  const constraintsKey = `${constraints.stops.join(',')}|${constraints.riskPolicy}`;
+  const depsKey = active ? `${channel}|${arch}|${start}|${target}|${anchor?.fetchedAt}|${constraintsKey}` : '';
 
   const task = useCallback(
     (signal: AbortSignal) => {
       const loader = makeGraphLoader(client, { signal });
-      return stitchAndFindPath(loader, {
+      const request = {
         targetChannel: channel as string,
         arch,
         start: start as Version,
         target: target as Version,
         anchor,
-      });
+        constraints,
+      };
+      return stitchAndFindPath(loader, request);
     },
-    [client, channel, arch, start, target, anchor],
+    [client, channel, arch, start, target, anchor, constraints],
   );
 
   return useAsyncResult(active, depsKey, task);
