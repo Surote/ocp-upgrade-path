@@ -1,4 +1,5 @@
 import { formatChannelName, parseChannelName } from '../design/channels';
+import { FALLBACK_CLASSES } from '../design/forwardChannel';
 import type { Arch, Graph, GraphNode, Version } from '../graph/types';
 import { err, ok, type Result } from '../lib/result';
 import { type ChannelSegment, discoverLookahead, type LookaheadDiscovery } from './lookahead';
@@ -141,25 +142,36 @@ async function loadAnchorAndBackward(
 
 export interface Route {
   readonly cost: PathCost;
-  /** Hops walked on a class-fallback segment: time spent off the anchor's class. */
-  readonly fallbackHops: number;
+  /**
+   * Hops walked on a class-fallback segment, counted per class in
+   * `FALLBACK_CLASSES` order (stable, fast, candidate): time spent off the
+   * anchor's class.
+   */
+  readonly fallbackHops: readonly number[];
   /** Each hop's `sourceChannel` names the segment whose own edge it walks. */
   readonly hops: readonly PathHop[];
 }
 
 type RouteRank = Pick<Route, 'cost' | 'fallbackHops'>;
 
+const NO_FALLBACK_HOPS: readonly number[] = FALLBACK_CLASSES.map(() => 0);
+
 /**
- * Hops, then risk, then hops spent on a class-fallback channel, then the
- * patch tie-break. Without the fallback term, `-patch` alone would prefer
- * a release only the fallback channel publishes (4.22.21 is in
- * candidate-5.0, not stable-4.22) and move the cluster off its own class a
- * hop earlier than any equally short, equally safe route needs.
+ * Support posture before length (plan.md §6 "Forward channel preference"):
+ * fewest hops on candidate, then fast, then a stable fallback, and only then
+ * hops, risk and the patch tie-break. A release the anchor's class reaches in
+ * five hops is not worth moving a production cluster onto candidate to save
+ * one, and the dropdown's `via` reads the same ranking, so it names the
+ * channel this route ends on. Every term is a per-hop sum and each hop adds
+ * one to `hops`, so the order stays a valid shortest-path cost.
  */
 function compareRoutes(a: RouteRank, b: RouteRank): number {
+  for (let tier = FALLBACK_CLASSES.length - 1; tier >= 0; tier -= 1) {
+    const diff = (a.fallbackHops[tier] as number) - (b.fallbackHops[tier] as number);
+    if (diff !== 0) return diff;
+  }
   if (a.cost.hops !== b.cost.hops) return a.cost.hops - b.cost.hops;
   if (a.cost.riskWeight !== b.cost.riskWeight) return a.cost.riskWeight - b.cost.riskWeight;
-  if (a.fallbackHops !== b.fallbackHops) return a.fallbackHops - b.fallbackHops;
   return a.cost.tieBreak - b.cost.tieBreak;
 }
 
@@ -181,15 +193,15 @@ function compareRoutes(a: RouteRank, b: RouteRank): number {
  * minimum-cost route to each version for the given segment order.
  */
 export function routeAcrossSegments(segments: readonly ChannelSegment[], start: Version): ReadonlyMap<Version, Route> {
-  const routes = new Map<Version, Route>([[start, { cost: { hops: 0, riskWeight: 0, tieBreak: 0 }, fallbackHops: 0, hops: [] }]]);
+  const routes = new Map<Version, Route>([[start, { cost: { hops: 0, riskWeight: 0, tieBreak: 0 }, fallbackHops: NO_FALLBACK_HOPS, hops: [] }]]);
 
   for (const segment of segments) {
     const members = versionsOf(segment.graph);
     const seeds = new Map([...routes].filter(([version]) => members.has(version)));
-    const fallbackStep = segment.classFallback ? 1 : 0;
+    const tier = segment.classFallback ? FALLBACK_CLASSES.indexOf(parseChannelName(segment.channel)?.cls as string) : -1;
     const step = (rank: RouteRank, hop: { readonly riskWeight: number; readonly toPatch: number }): RouteRank => ({
       cost: { hops: rank.cost.hops + 1, riskWeight: rank.cost.riskWeight + hop.riskWeight, tieBreak: rank.cost.tieBreak - hop.toPatch },
-      fallbackHops: rank.fallbackHops + fallbackStep,
+      fallbackHops: rank.fallbackHops.map((n, i) => (i === tier ? n + 1 : n)),
     });
 
     for (const [to, extended] of extendRoutesInGraph<RouteRank>(segment.graph, seeds, step, compareRoutes)) {

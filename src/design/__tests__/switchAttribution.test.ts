@@ -148,7 +148,8 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
 
   it('shows each hop with exactly the risks the channel in effect attaches to that edge', async () => {
     // stable-4.21 publishes 4.20.0 -> 4.21.0 unconditionally; eus-4.22 publishes
-    // the same edge only as a conditional update with an Always risk.
+    // the same edge only as a conditional update with an Always risk. The
+    // route stays on the anchor's class, so that risk must show.
     const alwaysRisk = { url: 'https://issues.redhat.com/browse/OCPBUGS-1', name: 'EusOnlyRisk', message: 'Breaks every cluster.', matchingRules: [{ type: 'Always' as const }] };
     const graphs = new Map([
       ['eus-4.20', rawGraph(['4.19.0', '4.20.0'], [[0, 1]], 'E420', ['eus-4.20', 'stable-4.21', 'eus-4.22'])],
@@ -179,12 +180,12 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
       return { hop: `${command.from} -> ${command.to} on ${channel}`, shown: primary.hops[i]?.risks.map((r) => r.name), attached };
     });
     for (const { hop, shown, attached } of shownVsInEffect) expect({ hop, shown }).toEqual({ hop, shown: attached });
+    expect(primary.hops[1]?.risks.map((r) => r.name)).toEqual(['EusOnlyRisk']);
 
     expect(buildScript(commands).split('\n')).toEqual([
       'oc adm upgrade --to 4.20.0',
-      'oc adm upgrade channel stable-4.21  # destination isn\'t on the current channel',
-      'oc adm upgrade --to 4.21.0',
       'oc adm upgrade channel eus-4.22  # destination isn\'t on the current channel',
+      'oc adm upgrade --to 4.21.0',
       'oc adm upgrade --to 4.22.0',
     ]);
   });

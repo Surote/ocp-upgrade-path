@@ -169,9 +169,11 @@ banner names which channels were stitched, so the path stays auditable.
 
 A stitched result is therefore a *sequential composition of per-segment shortest paths*,
 joined only at a version present in both graphs — never a merged adjacency. Junctions are
-ranked by hops, then risk weight, then hops walked on a class-fallback channel (§6
-"Forward channel preference"), then the patch tie-break. Within one graph every hop shares
-a channel, so the extra term never changes a single-graph result. Node metadata
+ranked by support posture first (§6 "Forward channel preference"): fewest hops on a
+`candidate` fallback, then `fast`, then `stable`, and only then hops, risk weight and the
+patch tie-break. A release the anchor's class reaches is never routed through a shorter
+fallback. Within one graph every hop shares a channel, so the posture terms never change a
+single-graph result. Node metadata
 is the one thing that legitimately merges across graphs, under the later-channel-wins
 rule. **Multi-graph stitches return the primary path only**; waypoint alternates are
 single-graph, because the cheap concatenation trick that makes them nearly free stops

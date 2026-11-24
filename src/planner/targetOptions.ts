@@ -50,7 +50,7 @@ export function buildTargetOptions(
       if (options.has(version) || !isCandidate(version)) continue;
       const route = routes.get(version);
       const via = route
-        ? { channel: route.hops.at(-1)?.sourceChannel as string, classFallback: route.fallbackHops > 0 }
+        ? { channel: route.hops.at(-1)?.sourceChannel as string, classFallback: route.fallbackHops.some((n) => n > 0) }
         : { channel: segment.channel, classFallback: segment.classFallback };
       options.set(version, { version, reachable: route !== undefined, via });
     }
