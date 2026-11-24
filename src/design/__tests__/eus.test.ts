@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { PathHop } from '../../engine/types';
 import { formatStream, streamOf } from '../../engine/version';
-import type { Version } from '../../graph/types';
+import type { Graph, Risk, Version } from '../../graph/types';
 import { parseRawGraph } from '../../graph/parse';
 import { eusPublishing, graphOf } from '../../test-utils/eusGraphs';
 import { loadFixture } from '../../test-utils/fixtures';
-import { type AvailableLeg, controlPlaneOnlyLegs, type EusGraphLookup, eusChannelsToCheck, isEusMinor, legCheckpoints, type ControlPlaneOnlyLeg } from '../eus';
+import { type AvailableLeg, controlPlaneOnlyLegs, type EusGraphLookup, eusChannelsToCheck, isEusMinor, legSteps, type ControlPlaneOnlyLeg } from '../eus';
 
 /** A route's hops, each taken from a stable channel's graph. */
 function route(...vs: string[]): PathHop[] {
@@ -215,22 +215,43 @@ describe('a leg is available only once its destination EUS channel publishes eve
   });
 });
 
-describe('legCheckpoints', () => {
+describe('legSteps', () => {
   const [leg] = legsOf(LIVE_416_TO_501);
-  const [pause, unpause, waitForPools] = legCheckpoints(available(leg));
+  const steps = legSteps(available(leg));
+  const digest = (i: number) => `quay.io/openshift-release-dev/ocp-release@sha256:${String(i).padStart(64, '0')}`;
 
-  it("pauses as Red Hat's CLI procedure does: pools settled, then the switch to eus-4.(E+2), then the pause", () => {
+  it("follows Red Hat's CLI procedure: pools settled, switch and pause, the paused updates on eus-4.(E+2), unpause, pools settled", () => {
+    expect(steps.map((step) => (step.kind === 'update' ? `update ${step.hop.to}` : step.kind))).toEqual([
+      'checkPools',
+      'pause',
+      'update 4.17.59',
+      'update 4.18.59',
+      'unpause',
+      'waitForPools',
+      'returnChannel',
+    ]);
+  });
+
+  it('confirms the pools before the pause, and pauses only once the switch to eus-4.(E+2) succeeds', () => {
+    const [checkPools, pause] = steps;
+    expect(checkPools).toMatchObject({ kind: 'checkPools', commands: ['oc get mcp'] });
+    expect(checkPools?.kind === 'checkPools' && checkPools.when).toMatch(/^At 4\.16\.33, before the update to 4\.17\.59.*UPDATED=True and UPDATING=False/);
     expect(pause).toMatchObject({
       kind: 'pause',
       commands: [`oc adm upgrade channel eus-4.18 && oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`],
     });
-    expect(pause?.when).toMatch(/^At 4\.16\.33, before oc adm upgrade --to 4\.17\.59/);
-    expect(pause?.when).toMatch(/oc get mcp.*UPDATED=True and UPDATING=False/);
-    expect(pause?.when).toMatch(/updates through 4\.18\.59 run on eus-4\.18/);
+  });
+
+  it("runs each paused update on eus-4.(E+2), with that graph's payload", () => {
+    const updates = steps.filter((step) => step.kind === 'update');
+    expect(updates.map((step) => [step.upgradeTo, step.upgradeToImage])).toEqual([
+      ['oc adm upgrade --to 4.17.59', `oc adm upgrade --to-image=${digest(1)} --allow-explicit-upgrade`],
+      ['oc adm upgrade --to 4.18.59', `oc adm upgrade --to-image=${digest(2)} --allow-explicit-upgrade`],
+    ]);
   });
 
   it('unpauses once the cluster reports the last release reached with workers paused', () => {
-    expect(unpause).toEqual({
+    expect(steps.find((step) => step.kind === 'unpause')).toEqual({
       kind: 'unpause',
       when: 'Once the cluster reports 4.18.59',
       commands: [`oc patch mcp/worker --type merge --patch '{"spec":{"paused":false}}'`],
@@ -238,10 +259,48 @@ describe('legCheckpoints', () => {
   });
 
   it('waits for every paused pool before the next update of any kind, a patch in the same minor included', () => {
-    expect(waitForPools).toEqual({
+    expect(steps.find((step) => step.kind === 'waitForPools')).toEqual({
       kind: 'waitForPools',
       when: 'Before the next update of any kind, including a patch update within 4.18, wait until every pool you paused reports UPDATED=True and UPDATING=False',
       commands: ['oc get mcp'],
     });
   });
+
+  it("returns to the channel the main route's next update runs on", () => {
+    expect(steps.at(-1)).toEqual({
+      kind: 'returnChannel',
+      when: 'Then return to stable-4.22, the channel the main route takes its next update (4.18.59 → 4.19.55) on',
+      commands: ['oc adm upgrade channel stable-4.22'],
+    });
+  });
+
+  it('has nothing to return to when the leg ends the route', () => {
+    const [last] = legsOf(route('4.16.33', '4.17.59', '4.18.59'));
+    expect(legSteps(available(last)).at(-1)?.kind).toBe('waitForPools');
+  });
 });
+
+describe('the risks eus-4.(E+2) attaches to a paused update', () => {
+  const always = { url: 'https://example.com/A', name: 'EusOnly', message: '', matchingRules: [{ type: 'Always' as const }] };
+  const promql = (name: string) => ({ url: `https://example.com/${name}`, name, message: '', matchingRules: [{ type: 'PromQL' as const, promql: 'up' }] });
+
+  function eusGraphWithRisks(hops: readonly PathHop[], risks: readonly Risk[]): Graph {
+    const graph = graphOf(hops);
+    const { from, to } = hops[1] as PathHop;
+    return { ...graph, conditionalEdges: [{ edges: [{ from, to }], risks }] };
+  }
+
+  it("lists eus-4.(E+2)'s own risks for the hop, and names each that differs from the route channel's", () => {
+    const hops = route('4.18.50', '4.19.40', '4.20.32').map((hop, i) => (i === 1 ? { ...hop, risks: [promql('Shared'), promql('StableOnly')] } : hop));
+    const graph = eusGraphWithRisks(hops, [promql('Shared'), always]);
+    const [leg] = controlPlaneOnlyLegs(hops, () => ({ kind: 'loaded', graph }));
+    const update = legSteps(available(leg)).filter((step) => step.kind === 'update')[1];
+
+    expect(update?.hop.risks.map((risk) => risk.name)).toEqual(['Shared', 'EusOnly']);
+    expect(update?.riskNotes).toEqual([
+      'eus-4.20 attaches EusOnly (Always) to 4.19.40 → 4.20.32, which stable-4.22 does not.',
+      'stable-4.22 attaches StableOnly (conditional) to 4.19.40 → 4.20.32, which eus-4.20 does not.',
+    ]);
+  });
+});
+

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loaderFor } from '../../engine/__tests__/routeFixtures';
+import { NO_MARKS } from '../../engine/risks';
 import { stitchAndFindPath } from '../../engine/stitch';
 import type { PathHop } from '../../engine/types';
 import { parseRawGraph } from '../../graph/parse';
@@ -19,7 +20,7 @@ function legItems(): HTMLElement[] {
 
 /** The panel for `hops`, every eus channel publishing all of them. */
 function renderAdvisory(hops: readonly PathHop[]) {
-  return render(<EusAdvisory legs={controlPlaneOnlyLegs(hops, eusPublishing(hops))} />);
+  return render(<EusAdvisory legs={controlPlaneOnlyLegs(hops, eusPublishing(hops))} applicability={{ notApplicable: NO_MARKS, onChange: () => {} }} />);
 }
 
 /** A route's hops, each taken from a stable channel's graph. */

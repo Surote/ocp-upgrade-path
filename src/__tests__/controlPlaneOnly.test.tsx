@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../App';
 import { GraphClient } from '../graph/client';
@@ -7,9 +7,9 @@ import { FakeStorage } from '../test-utils/fakeStorage';
 import { loadFixture } from '../test-utils/fixtures';
 
 interface RawGraph {
-  readonly nodes: readonly { readonly version: string }[];
+  readonly nodes: readonly { readonly version: string; readonly payload: string }[];
   readonly edges: readonly (readonly [number, number])[];
-  readonly conditionalEdges: readonly { readonly edges: readonly { readonly from: string; readonly to: string }[] }[];
+  readonly conditionalEdges: readonly { readonly edges: readonly { readonly from: string; readonly to: string }[]; readonly risks: readonly unknown[] }[];
 }
 
 const STABLE_420 = loadFixture('stable-4.20.json') as RawGraph;
@@ -23,6 +23,24 @@ function withoutEdge(raw: RawGraph, from: string, to: string): RawGraph {
     conditionalEdges: raw.conditionalEdges
       .map((group) => ({ ...group, edges: group.edges.filter((e) => !(e.from === from && e.to === to)) }))
       .filter((group) => group.edges.length > 0),
+  };
+}
+
+const EUS_PAYLOAD = `quay.io/openshift-release-dev/ocp-release@sha256:${'e'.repeat(64)}`;
+
+/** `raw` with 4.19.40 -> 4.20.32 published only under an Always risk, and 4.20.32 at another payload digest. */
+function withAlwaysRiskOnArrival(raw: RawGraph): RawGraph {
+  const bare = withoutEdge(raw, '4.19.40', '4.20.32');
+  return {
+    ...bare,
+    nodes: bare.nodes.map((node) => (node.version === '4.20.32' ? { ...node, payload: EUS_PAYLOAD } : node)),
+    conditionalEdges: [
+      ...bare.conditionalEdges,
+      {
+        edges: [{ from: '4.19.40', to: '4.20.32' }],
+        risks: [{ url: 'https://issues.redhat.com/browse/OCPBUGS-1', name: 'EusOnlyRisk', message: 'Only eus-4.20 says so.', matchingRules: [{ type: 'Always' }] }],
+      },
+    ],
   };
 }
 
@@ -43,6 +61,17 @@ async function commandLines(): Promise<string[]> {
   return (section.querySelector('code')?.textContent ?? '').split('\n');
 }
 
+/** What the page says about the main route: its commands, its facts line, and each hop's detail panel. */
+async function mainRoute(): Promise<string[]> {
+  const shown = [...(await commandLines()), document.querySelector('.route-summary__meta')?.textContent ?? ''];
+  for (const n of [1, 2]) {
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^Hop ${n} of 2:`) }));
+    shown.push(screen.getByRole('heading', { name: new RegExp(`^Hop ${n} of 2:`) }).closest('section')?.textContent ?? '');
+  }
+  shown.push(screen.getByRole('region', { name: 'Risk summary' }).textContent ?? '');
+  return shown;
+}
+
 const leg = () => screen.getByRole('list', { name: 'Control Plane Only legs' }).children[0] as HTMLElement;
 
 afterEach(() => {
@@ -51,14 +80,37 @@ afterEach(() => {
 });
 
 describe('Control Plane Only guidance on a stable-4.20 route (4.18.50 -> 4.19.40 -> 4.20.32)', () => {
-  it('pauses only after eus-4.20 confirms the paused hops, and runs them on eus-4.20 in the commands too', async () => {
+  it('pauses only after eus-4.20 confirms the paused hops, and lists those updates in the leg, leaving the main commands on stable-4.20', async () => {
     openRoute(STABLE_420);
 
     await waitFor(() => expect(leg()).toHaveTextContent('"paused":true'));
-    expect(leg()).toHaveTextContent('oc adm upgrade channel eus-4.20');
-    const lines = await commandLines();
-    expect(lines[0]).toMatch(/^oc adm upgrade channel eus-4\.20\b/);
-    expect(lines.slice(1)).toEqual(['oc adm upgrade --to 4.19.40', 'oc adm upgrade --to 4.20.32']);
+    expect(leg()).toHaveTextContent('oc adm upgrade channel eus-4.20 && oc patch mcp/worker');
+    expect(within(leg()).getAllByText(/^oc adm upgrade --to 4\./).map((code) => code.textContent)).toEqual([
+      'oc adm upgrade --to 4.19.40',
+      'oc adm upgrade --to 4.20.32',
+    ]);
+    expect(await commandLines()).toEqual(['oc adm upgrade --to 4.19.40', 'oc adm upgrade --to 4.20.32']);
+  });
+
+  it('never changes the main route, its commands, facts, hop details or risk summary, when eus-4.20 resolves', async () => {
+    openRoute('pending');
+    const whileChecking = await mainRoute();
+    cleanup();
+
+    openRoute(withAlwaysRiskOnArrival(STABLE_420));
+    await waitFor(() => expect(leg()).toHaveTextContent('"paused":true'));
+    expect(await mainRoute()).toEqual(whileChecking);
+  });
+
+  it("lists each paused update with eus-4.20's own risks and payload, and names a risk stable-4.20 does not attach", async () => {
+    openRoute(withAlwaysRiskOnArrival(STABLE_420));
+
+    await waitFor(() => expect(leg()).toHaveTextContent('"paused":true'));
+    const update = within(leg()).getByText('oc adm upgrade --to 4.20.32').closest('li') as HTMLElement;
+    expect(within(update).getByText('EusOnlyRisk')).toBeTruthy();
+    expect(update).toHaveTextContent(`oc adm upgrade --to-image=${EUS_PAYLOAD} --allow-explicit-upgrade`);
+    expect(update).toHaveTextContent('eus-4.20 attaches EusOnlyRisk (Always) to 4.19.40 → 4.20.32, which stable-4.20 does not.');
+    expect(leg()).toHaveTextContent(/replaces the main Commands script's updates from 4\.18\.50 to 4\.20\.32/);
   });
 
   it('gives no pause steps when eus-4.20 does not publish a hop taken with workers paused', async () => {
