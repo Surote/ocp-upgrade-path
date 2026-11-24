@@ -523,3 +523,29 @@ describe('usePlanner — a stream not yet published outside candidate', () => {
     expect(result.current.start.error).toContain('candidate-5.0');
   });
 });
+
+describe('usePlanner — target labels under pinned stops', () => {
+  it('names the channel the route through the pinned stops ends on', async () => {
+    // Shaped like live Cincinnati once stable-5.0 published 5.0.0 and 5.0.1:
+    // straight to 5.0.1 ends on fast-5.0, through a 5.0.0 stop on stable-5.0.
+    const client = makeClient(
+      withSeed(
+        new Map([
+          ['stable-4.22|amd64', jsonHandler(rawGraphJson(['4.22.15', '4.22.20'], [[0, 1]], 'stable-4.22,fast-5.0'))],
+          ['fast-5.0|amd64', jsonHandler(rawGraphJson(['4.22.20', '5.0.0', '5.0.1'], [[0, 1], [0, 2]], 'fast-5.0,stable-5.0'))],
+          ['stable-5.0|amd64', jsonHandler(rawGraphJson(['5.0.0', '5.0.1'], [[0, 1]], 'stable-5.0'))],
+        ]),
+      ),
+      'empty',
+    );
+    setUrl('?channel=stable-4.22&arch=amd64&start=4.22.15&target=5.0.1&stops=5.0.0');
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.result.status).toBe('success'));
+    const routed = result.current.result.status === 'success' ? result.current.result.value.primary : undefined;
+    expect(routed?.versions).toEqual(['4.22.15', '4.22.20', '5.0.0', '5.0.1']);
+    expect(routed?.hops.at(-1)?.sourceChannel).toBe('stable-5.0');
+    const option = result.current.target.groups.flatMap((g) => g.options).find((o) => o.version === '5.0.1');
+    expect(option?.via?.channel).toBe('stable-5.0');
+  });
+});
