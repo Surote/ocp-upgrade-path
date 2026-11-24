@@ -119,11 +119,12 @@ export interface ClassFallback {
   readonly requestedClass: string;
   /**
    * Why: `unpublished` when Cincinnati returned an empty graph for that
-   * class's channel at this stream; `noRoute` otherwise -- the channel is
+   * class's channel at this stream; `unverified` when fetching it failed, so
+   * whether it has a route is unknown; `noRoute` otherwise -- the channel is
    * published, or no release on the way names it, and either way no route
    * on it reaches the target.
    */
-  readonly requestedStatus: 'unpublished' | 'noRoute';
+  readonly requestedStatus: 'unpublished' | 'unverified' | 'noRoute';
 }
 
 /** Which channels the stitcher actually used, in fetch order -- for the audit banner, per plan.md §4/§6. */
