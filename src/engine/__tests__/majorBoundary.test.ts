@@ -72,9 +72,9 @@ describe('stitching across the 4.22 -> 5.0 major boundary (live fixtures)', () =
       target: v('5.0.0-rc.8'),
     });
     if (!result.ok) throw new Error(describeStitchError(result.error));
-    const { primary, nodeInfo } = result.value;
+    const { primary, stations } = result.value;
 
-    const commands = buildHopCommands(primary, 'stable-4.22', nodeInfo, { channelNames: [], multiGraph: true });
+    const commands = buildHopCommands(primary, 'stable-4.22', stations, { channelNames: [], multiGraph: true });
     const switches = commands.filter((c) => c.channelSwitchTo);
     const candidate50 = new Set(graphs.get('candidate-5.0')?.nodes.map((n) => n.version));
     const firstMember = primary.versions.find((ver) => candidate50.has(ver));
@@ -91,14 +91,14 @@ describe('stitching across the 4.22 -> 5.0 major boundary (live fixtures)', () =
       target: v('5.0.0-rc.8'),
     });
     if (!result.ok) throw new Error(describeStitchError(result.error));
-    const { primary, nodeInfo } = result.value;
+    const { primary, stations } = result.value;
     const stable422 = new Set(graphs.get('stable-4.22')?.nodes.map((n) => n.version));
 
     expect(primary.versions).toHaveLength(3);
     expect(stable422.has(primary.versions[1] as Version), `middle station ${primary.versions[1]}`).toBe(true);
     expect(primary.cost.riskWeight).toBe(0);
 
-    const commands = buildHopCommands(primary, 'stable-4.22', nodeInfo, { channelNames: [], multiGraph: true });
+    const commands = buildHopCommands(primary, 'stable-4.22', stations, { channelNames: [], multiGraph: true });
     const switches = commands.filter((c) => c.channelSwitchTo);
     expect(switches.map((c) => c.channelSwitch)).toEqual(['oc adm upgrade channel candidate-5.0']);
     expect(switches[0]).toBe(commands.at(-1));

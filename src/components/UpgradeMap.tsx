@@ -92,7 +92,7 @@ const RISK_WORD: Record<RiskState, string> = { always: 'always risk', conditiona
  */
 export function UpgradeMap({
   path,
-  nodeInfo,
+  stations,
   commands,
   pinnedStops = [],
   selectedHopIndex,
@@ -101,7 +101,8 @@ export function UpgradeMap({
   onSelectStation,
 }: {
   readonly path: Path;
-  readonly nodeInfo: ReadonlyMap<Version, GraphNode>;
+  /** `StitchedPathResult.stations`: one node per entry of `path.versions`. */
+  readonly stations: readonly GraphNode[];
   readonly commands: readonly HopCommand[];
   /** Operator-pinned versions, captioned "stop" above their station; the caption row is reserved, so geometry is unchanged. */
   readonly pinnedStops?: readonly Version[];
@@ -190,7 +191,7 @@ export function UpgradeMap({
             const departingCommand = i < commands.length ? commands[i] : undefined;
             const isInterchange = Boolean(departingCommand?.channelSwitch);
             const switchTo = departingCommand?.channelSwitchTo;
-            const node = nodeInfo.get(version);
+            const node = stations[i];
             const hasErrata = Boolean(node?.errataUrl);
             const incomingRisks = i > 0 ? (path.hops[i - 1]?.risks.length ?? 0) : undefined;
             const selected = selectedStationIndex === i;

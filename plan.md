@@ -177,7 +177,8 @@ fallback. Within one graph every hop shares a channel, so the posture terms neve
 single-graph result. Node metadata follows the same provenance: each station's payload
 comes from the graph that supplied the hop arriving at it, so a `--to-image` digest always
 matches the channel that hop runs on, and a graph only the lower-risk route uses never
-supplies one. **Multi-graph stitches return the primary path only**; waypoint alternates are
+supplies one. Metadata is kept per visit, not per version: a stop can route through one
+version twice, arriving on two channels with two digests. **Multi-graph stitches return the primary path only**; waypoint alternates are
 single-graph, because the cheap concatenation trick that makes them nearly free stops
 holding once a real channel boundary is crossed. Every worked example in this document
 resolves within one graph, so this affects only the long-range cases (`4.17.x → 4.21.x`).
@@ -423,8 +424,8 @@ dimmed" *in the graph*. They render instead as a subordinate panel of lane-colou
 below the map. Branching lane geometry for paths of differing lengths is real layout work
 and was traded away; the alternates still use the same lane-colour language.
 
-**Channel-membership badges are suppressed on multi-graph stitches.** `nodeInfo` merges
-`GraphNode`s across source graphs, but carries no per-source `channelNames` table — so a
+**Channel-membership badges are suppressed on multi-graph stitches.** `stations` mixes
+`GraphNode`s from several source graphs, but carries no per-source `channelNames` table — so a
 node's `channels` indices cannot be safely resolved against the *selected* channel's table
 once more than one graph was fetched. The station panel says so rather than risking a
 mislabelled channel. Fixing this means carrying the name table per source graph through

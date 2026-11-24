@@ -87,8 +87,8 @@ export function PathResult({
     );
   }
 
-  const { primary, alternates, stitch, nodeInfo, riskComparison } = result.value;
-  const commands = buildHopCommands(primary, channel, nodeInfo, {
+  const { primary, alternates, stitch, stations, riskComparison } = result.value;
+  const commands = buildHopCommands(primary, channel, stations, {
     channelNames,
     multiGraph: stitch.multiGraph,
   });
@@ -106,7 +106,7 @@ export function PathResult({
 
       <UpgradeMap
         path={primary}
-        nodeInfo={nodeInfo}
+        stations={stations}
         commands={commands}
         pinnedStops={pinnedStops}
         selectedHopIndex={selectedHop}
@@ -125,7 +125,7 @@ export function PathResult({
           {selectedStation !== null && (
             <NodeDetail
               version={primary.versions[selectedStation] as Version}
-              node={nodeInfo.get(primary.versions[selectedStation] as Version)}
+              node={stations[selectedStation]}
               channelNames={channelNames}
               multiGraph={stitch.multiGraph}
             />

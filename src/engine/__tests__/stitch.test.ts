@@ -70,7 +70,7 @@ describe('stitchAndFindPath — single-graph fast path', () => {
         expect(result.value.stitch).toEqual({ channelsUsed: ['stable-4.20'], classFallbacks: [], multiGraph: false });
         expect(result.value.primary.versions).toEqual([v('4.18.0'), v('4.19.20'), v('4.20.0')]); // higher-patch waypoint wins
         expect(result.value.alternates).toHaveLength(1); // the 4.19.10 waypoint
-        expect(result.value.nodeInfo.get(v('4.18.0'))?.payload).toContain('stable420');
+        expect(result.value.stations.find((n) => n.version === '4.18.0')?.payload).toContain('stable420');
         // Per-hop provenance (plan.md §6): every hop of a single-graph path
         // carries the same `sourceChannel` -- there is only one fetched
         // graph -- which is exactly why a single-graph query can never need
@@ -131,9 +131,9 @@ describe('stitchAndFindPath — multi-graph walk-back', () => {
     if (!result.ok) throw result.error;
 
     // 4.19.5 is in stable-4.20 (tag "A") and stable-4.19 (tag "B"); the hop arriving at it runs on stable-4.19.
-    expect(result.value.nodeInfo.get(v('4.18.1'))?.payload).toContain('sha256:B-');
-    expect(result.value.nodeInfo.get(v('4.19.5'))?.payload).toContain('sha256:B-');
-    expect(result.value.nodeInfo.get(v('4.20.1'))?.payload).toContain('sha256:A-');
+    expect(result.value.stations.find((n) => n.version === '4.18.1')?.payload).toContain('sha256:B-');
+    expect(result.value.stations.find((n) => n.version === '4.19.5')?.payload).toContain('sha256:B-');
+    expect(result.value.stations.find((n) => n.version === '4.20.1')?.payload).toContain('sha256:A-');
   });
 
   it('never fabricates a transition: two graphs with NO shared/overlapping version cannot be stitched into a path, even if each individually has usable edges', async () => {
@@ -603,7 +603,7 @@ describe('node metadata follows hop provenance', () => {
     if (!result.ok) throw new Error(result.error.kind);
     expect(result.value.primary.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.22']);
     expect(result.value.riskComparison?.route?.hops.map((h) => h.sourceChannel)).toEqual(['stable-4.21', 'stable-4.23']);
-    const [command] = buildHopCommands(result.value.primary, 'stable-4.20', result.value.nodeInfo, { channelNames: [], multiGraph: true });
+    const [command] = buildHopCommands(result.value.primary, 'stable-4.20', result.value.stations, { channelNames: [], multiGraph: true });
     const digest = stable422.nodes.find((n) => n.version === '4.22.0')?.payload as string;
     expect(digest).not.toBe(stable423.nodes.find((n) => n.version === '4.22.0')?.payload);
     expect(command?.upgradeToImage).toBe(`oc adm upgrade --to-image=${digest} --allow-explicit-upgrade`);
@@ -630,7 +630,7 @@ describe('node metadata follows hop provenance', () => {
     const { primary } = result.value;
     expect(primary.versions).toEqual([v('4.22.20'), v('5.0.0'), v('5.0.0+b'), v('5.0.0'), v('5.0.1')]);
     expect(primary.hops[0]?.sourceChannel).toBe('fast-5.0');
-    const images = buildHopCommands(primary, 'stable-4.22', result.value.nodeInfo, { channelNames: [], multiGraph: true }).map((c) => c.upgradeToImage);
+    const images = buildHopCommands(primary, 'stable-4.22', result.value.stations, { channelNames: [], multiGraph: true }).map((c) => c.upgradeToImage);
     const digestOn = (hop: (typeof primary.hops)[number]) => graphs[hop.sourceChannel as string]?.nodes.find((n) => n.version === hop.to)?.payload;
     expect(images).toEqual(primary.hops.map((hop) => `oc adm upgrade --to-image=${digestOn(hop)} --allow-explicit-upgrade`));
   });

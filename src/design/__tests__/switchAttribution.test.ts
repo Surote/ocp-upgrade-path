@@ -79,7 +79,7 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
       v('4.22.9'),
     ]);
 
-    const commands = buildHopCommands(stitched.value.primary, 'eus-4.20', stitched.value.nodeInfo, {
+    const commands = buildHopCommands(stitched.value.primary, 'eus-4.20', stitched.value.stations, {
       channelNames: [],
       multiGraph: stitched.value.stitch.multiGraph,
     });
@@ -134,7 +134,7 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
     expect(stitched.ok).toBe(true);
     if (!stitched.ok) return;
 
-    const commands = buildHopCommands(stitched.value.primary, 'stable-4.20', stitched.value.nodeInfo, {
+    const commands = buildHopCommands(stitched.value.primary, 'stable-4.20', stitched.value.stations, {
       channelNames: [],
       multiGraph: stitched.value.stitch.multiGraph,
     });
@@ -168,7 +168,7 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
     expect(stitched.ok).toBe(true);
     if (!stitched.ok) return;
     const { primary } = stitched.value;
-    const commands = buildHopCommands(primary, 'eus-4.20', stitched.value.nodeInfo, { channelNames: [], multiGraph: true });
+    const commands = buildHopCommands(primary, 'eus-4.20', stitched.value.stations, { channelNames: [], multiGraph: true });
 
     let channel = 'eus-4.20';
     const shownVsInEffect = commands.map((command, i) => {
@@ -208,7 +208,7 @@ describe('channel-switch attribution — engine + commands, end to end (plan.md 
     expect(stitched.value.stitch.multiGraph).toBe(false);
     expect(stitched.value.primary.hops).toHaveLength(3);
 
-    const commands = buildHopCommands(stitched.value.primary, 'stable-4.20', stitched.value.nodeInfo, {
+    const commands = buildHopCommands(stitched.value.primary, 'stable-4.20', stitched.value.stations, {
       channelNames: [],
       multiGraph: false,
     });

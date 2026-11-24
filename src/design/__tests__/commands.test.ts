@@ -26,24 +26,25 @@ const PATH: Path = {
 // target is a member of both (indices [0, 1]), matching the verified table.
 const CHANNEL_NAMES = ['stable-4.20', 'eus-4.20'];
 
-const NODE_INFO = new Map<Version, GraphNode>([
-  ['4.18.50' as Version, node('4.18.50', 'quay.io/openshift-release-dev/ocp-release@sha256:aaa', [0, 1])],
-  ['4.19.40' as Version, node('4.19.40', 'quay.io/openshift-release-dev/ocp-release@sha256:bbb', [0, 1])],
-  ['4.20.32' as Version, node('4.20.32', 'quay.io/openshift-release-dev/ocp-release@sha256:ccc', [0, 1])],
-]);
+const STATIONS: readonly GraphNode[] = [
+  node('4.18.2', 'quay.io/openshift-release-dev/ocp-release@sha256:000', [0, 1]),
+  node('4.18.50', 'quay.io/openshift-release-dev/ocp-release@sha256:aaa', [0, 1]),
+  node('4.19.40', 'quay.io/openshift-release-dev/ocp-release@sha256:bbb', [0, 1]),
+  node('4.20.32', 'quay.io/openshift-release-dev/ocp-release@sha256:ccc', [0, 1]),
+];
 
 const SINGLE_GRAPH: ChannelContext = { channelNames: CHANNEL_NAMES, multiGraph: false };
 
 describe('buildHopCommands', () => {
   it('emits zero channel-switch commands for the verified single-channel path (plan.md §6)', () => {
-    const commands = buildHopCommands(PATH, 'stable-4.20', NODE_INFO, SINGLE_GRAPH);
+    const commands = buildHopCommands(PATH, 'stable-4.20', STATIONS, SINGLE_GRAPH);
     expect(commands).toHaveLength(3);
     expect(commands.every((c) => c.channelSwitch === undefined)).toBe(true);
     expect(commands.every((c) => c.channelSwitchTo === undefined)).toBe(true);
   });
 
   it('never names an odd-minor EUS channel for an eus-4.20 selection over the same path', () => {
-    const commands = buildHopCommands(PATH, 'eus-4.20', NODE_INFO, SINGLE_GRAPH);
+    const commands = buildHopCommands(PATH, 'eus-4.20', STATIONS, SINGLE_GRAPH);
     expect(commands.every((c) => c.channelSwitch === undefined)).toBe(true);
     // Defect 1(a): eus-4.19 does not exist (EUS channels are even-minor
     // only) and must never appear anywhere in the emitted output.
@@ -67,13 +68,14 @@ describe('buildHopCommands', () => {
       riskSummary: [],
     };
     const channelNames = ['stable-4.19', 'stable-4.20', 'fast-4.20', 'candidate-4.20'];
-    const nodeInfo = new Map<Version, GraphNode>([
-      ['4.19.9' as Version, node('4.19.9', 'sha:1', [0])], // stable-4.19 only
-      ['4.20.1' as Version, node('4.20.1', 'sha:2', [2, 3])], // fast-4.20, candidate-4.20 -- no stable-4.20
-      ['4.20.9' as Version, node('4.20.9', 'sha:3', [2])], // fast-4.20 only
-    ]);
+    const stations = [
+      node('4.19.5', 'sha:0', [0]),
+      node('4.19.9', 'sha:1', [0]), // stable-4.19 only
+      node('4.20.1', 'sha:2', [2, 3]), // fast-4.20, candidate-4.20 -- no stable-4.20
+      node('4.20.9', 'sha:3', [2]), // fast-4.20 only
+    ];
 
-    const commands = buildHopCommands(path, 'stable-4.19', nodeInfo, { channelNames, multiGraph: false });
+    const commands = buildHopCommands(path, 'stable-4.19', stations, { channelNames, multiGraph: false });
 
     expect(commands[0]?.channelSwitch).toBeUndefined(); // 4.19.9 still on stable-4.19
     expect(commands[1]?.channelSwitchTo).toBe('fast-4.20'); // no stable-4.20 member -> falls back to first real member
@@ -89,14 +91,14 @@ describe('buildHopCommands', () => {
       riskSummary: [],
     };
     const channelNames = ['candidate-4.20', 'stable-4.20'];
-    const nodeInfo = new Map<Version, GraphNode>([['4.20.1' as Version, node('4.20.1', 'sha:1', [0, 1])]]);
+    const stations = [node('4.19.5', 'sha:0'), node('4.20.1', 'sha:1', [0, 1])];
 
-    const commands = buildHopCommands(path, 'stable-4.19', nodeInfo, { channelNames, multiGraph: false });
+    const commands = buildHopCommands(path, 'stable-4.19', stations, { channelNames, multiGraph: false });
     expect(commands[0]?.channelSwitchTo).toBe('stable-4.20');
   });
 
   it('emits the plain --to command for every hop', () => {
-    const commands = buildHopCommands(PATH, 'stable-4.20', NODE_INFO, SINGLE_GRAPH);
+    const commands = buildHopCommands(PATH, 'stable-4.20', STATIONS, SINGLE_GRAPH);
     expect(commands.map((c) => c.upgradeTo)).toEqual([
       'oc adm upgrade --to 4.18.50',
       'oc adm upgrade --to 4.19.40',
@@ -104,20 +106,20 @@ describe('buildHopCommands', () => {
     ]);
   });
 
-  it('emits the digest form from nodeInfo when available', () => {
-    const commands = buildHopCommands(PATH, 'stable-4.20', NODE_INFO, SINGLE_GRAPH);
+  it('emits the digest form from the station node when available', () => {
+    const commands = buildHopCommands(PATH, 'stable-4.20', STATIONS, SINGLE_GRAPH);
     expect(commands[0]?.upgradeToImage).toBe(
       'oc adm upgrade --to-image=quay.io/openshift-release-dev/ocp-release@sha256:aaa --allow-explicit-upgrade',
     );
   });
 
-  it('omits the digest line when nodeInfo has no entry for the hop target', () => {
-    const commands = buildHopCommands(PATH, 'stable-4.20', new Map(), SINGLE_GRAPH);
+  it('omits the digest line when there is no node for the hop target', () => {
+    const commands = buildHopCommands(PATH, 'stable-4.20', [], SINGLE_GRAPH);
     expect(commands.every((c) => c.upgradeToImage === undefined)).toBe(true);
   });
 
   it('omits channel switches entirely when no channel is known', () => {
-    const commands = buildHopCommands(PATH, undefined, NODE_INFO, SINGLE_GRAPH);
+    const commands = buildHopCommands(PATH, undefined, STATIONS, SINGLE_GRAPH);
     expect(commands.every((c) => c.channelSwitch === undefined)).toBe(true);
   });
 
@@ -132,7 +134,7 @@ describe('buildHopCommands', () => {
   // skipped for multi-graph (design/commands.ts doc) -- that part of the old
   // assumption still holds and is re-asserted here under its new name.
   it('the membership fallback still emits no switch for a multi-graph context when hops carry no sourceChannel', () => {
-    const commands = buildHopCommands(PATH, 'stable-4.20', NODE_INFO, { channelNames: CHANNEL_NAMES, multiGraph: true });
+    const commands = buildHopCommands(PATH, 'stable-4.20', STATIONS, { channelNames: CHANNEL_NAMES, multiGraph: true });
     expect(commands.every((c) => c.channelSwitch === undefined)).toBe(true);
     expect(commands.every((c) => c.channelSwitchTo === undefined)).toBe(true);
   });
@@ -148,7 +150,7 @@ describe('buildHopCommands', () => {
       cost: { hops: 3, riskWeight: 0, tieBreak: 0 },
       riskSummary: [],
     };
-    const commands = buildHopCommands(path, 'eus-4.20', new Map(), { channelNames: [], multiGraph: true });
+    const commands = buildHopCommands(path, 'eus-4.20', [], { channelNames: [], multiGraph: true });
 
     expect(commands[0]?.channelSwitch).toBeUndefined();
     expect(commands[1]?.channelSwitch).toBeUndefined();
@@ -163,7 +165,7 @@ describe('buildHopCommands', () => {
       cost: { hops: 1, riskWeight: 0, tieBreak: 0 },
       riskSummary: [],
     };
-    const commands = buildHopCommands(path, 'eus-4.20', new Map(), { channelNames: [], multiGraph: true });
+    const commands = buildHopCommands(path, 'eus-4.20', [], { channelNames: [], multiGraph: true });
     expect(commands[0]?.channelSwitch).toBeUndefined();
   });
 
@@ -177,7 +179,7 @@ describe('buildHopCommands', () => {
       cost: { hops: 2, riskWeight: 0, tieBreak: 0 },
       riskSummary: [],
     };
-    const commands = buildHopCommands(path, 'eus-4.20', new Map(), { channelNames: [], multiGraph: true });
+    const commands = buildHopCommands(path, 'eus-4.20', [], { channelNames: [], multiGraph: true });
     expect(commands[0]?.channelSwitchTo).toBe('stable-4.21'); // the eus -> stable fallback drop
     expect(commands[1]?.channelSwitchTo).toBe('eus-4.22'); // judged against stable-4.21, not the original eus-4.20 selection
   });
@@ -185,7 +187,7 @@ describe('buildHopCommands', () => {
 
 describe('buildScript', () => {
   it('joins commands into a script with no switch lines for the verified single-channel path', () => {
-    const commands = buildHopCommands(PATH, 'stable-4.20', NODE_INFO, SINGLE_GRAPH);
+    const commands = buildHopCommands(PATH, 'stable-4.20', STATIONS, SINGLE_GRAPH);
     expect(buildScript(commands)).toBe(
       ['oc adm upgrade --to 4.18.50', 'oc adm upgrade --to 4.19.40', 'oc adm upgrade --to 4.20.32'].join('\n'),
     );
@@ -199,8 +201,8 @@ describe('buildScript', () => {
       riskSummary: [],
     };
     const channelNames = ['fast-4.20'];
-    const nodeInfo = new Map<Version, GraphNode>([['4.20.1' as Version, node('4.20.1', 'sha:1', [0])]]);
-    const commands = buildHopCommands(path, 'stable-4.19', nodeInfo, { channelNames, multiGraph: false });
+    const stations = [node('4.19.5', 'sha:0'), node('4.20.1', 'sha:1', [0])];
+    const commands = buildHopCommands(path, 'stable-4.19', stations, { channelNames, multiGraph: false });
 
     expect(buildScript(commands)).toBe(
       ['oc adm upgrade channel fast-4.20  # destination isn\'t on the current channel', 'oc adm upgrade --to 4.20.1'].join('\n'),
