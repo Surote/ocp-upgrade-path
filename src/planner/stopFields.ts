@@ -6,14 +6,17 @@ import type { Version } from '../graph/types';
 /**
  * One stop's standing against the current selection:
  *  - `blank`: added but not chosen yet; not a constraint.
- *  - `pending`: start, target or look-ahead discovery isn't settled, so the
- *    stop can't be judged yet (a permalink restores before discovery ends).
+ *  - `awaitingEndpoints`: start or target isn't chosen, so there is no route
+ *    to judge the stop against until the operator picks one.
+ *  - `pending`: look-ahead discovery isn't settled, so the stop can't be
+ *    judged yet (a permalink restores before discovery ends).
  *  - `invalid`: not a release in these channels, or not on any route that
  *    honors the other stops; the route is withheld until it is fixed.
  *  - `valid`: offered for its position, so the route search can pin it.
  */
 export type StopCheck =
   | { readonly kind: 'blank' }
+  | { readonly kind: 'awaitingEndpoints' }
   | { readonly kind: 'pending' }
   | { readonly kind: 'invalid'; readonly message: string }
   | { readonly kind: 'valid'; readonly version: Version };
@@ -49,7 +52,8 @@ function findRelease(segments: readonly ChannelSegment[], raw: string): Version 
 export function checkStops(raws: readonly string[], context: StopContext): readonly StopRow[] {
   const { segments, start, target, discovered } = context;
   if (!start || !target || !discovered) {
-    return raws.map((raw) => ({ raw, check: raw ? { kind: 'pending' } : { kind: 'blank' }, options: [] }));
+    const waiting: StopCheck = !start || !target ? { kind: 'awaitingEndpoints' } : { kind: 'pending' };
+    return raws.map((raw) => ({ raw, check: raw ? waiting : { kind: 'blank' }, options: [] }));
   }
 
   const releases = raws.map((raw) => (raw ? findRelease(segments, raw) : undefined));

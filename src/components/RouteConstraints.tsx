@@ -26,7 +26,12 @@ function StopField({ index, model, selectedChannel }: { readonly index: number; 
           onChange={(e) => model.onChange(e.target.value)}
         >
           <option value="">Select a stop…</option>
-          {model.value && !offered && <option value={model.value}>{model.value} (not offered)</option>}
+          {model.value && !offered && (
+            <option value={model.value}>
+              {model.value}
+              {model.error ? ' (not offered)' : ''}
+            </option>
+          )}
           {model.groups.map((group) => (
             <optgroup key={group.stream} label={group.stream}>
               {group.options.map((option) => (
