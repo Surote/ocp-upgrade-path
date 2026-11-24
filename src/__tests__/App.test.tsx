@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 import App from '../App';
 import { GraphClient } from '../graph/client';
 import { fakeFetch, fakeJsonResponse } from '../test-utils/fakeFetch';
@@ -32,6 +32,8 @@ function makeClient(): GraphClient {
   });
   return new GraphClient({ storage: new FakeStorage(), fetchImpl });
 }
+
+afterEach(cleanup);
 
 describe('App', () => {
   it('renders the cascading form and walks channel -> arch -> start -> target -> a real path result', async () => {
@@ -69,5 +71,33 @@ describe('App', () => {
     expect(list).toHaveTextContent('4.18.2');
     expect(list).toHaveTextContent('4.19.40');
     expect(list).toHaveTextContent('4.20.32');
+  });
+
+  it('shows hop/station detail only once something on the map is selected', async () => {
+    render(<App graphClient={makeClient()} />);
+
+    await waitFor(() => expect(screen.getByRole('option', { name: 'demo-4.21' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'demo-4.21' } });
+    await waitFor(() => expect(screen.getByRole('option', { name: '4.18.2' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Start version'), { target: { value: '4.18.2' } });
+    await waitFor(() => expect(within(screen.getByLabelText('Target version')).getByRole('option', { name: '4.20.32' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Target version'), { target: { value: '4.20.32' } });
+
+    const hint = await screen.findByText(/Select a station or hop on the map/);
+    expect(screen.queryByRole('heading', { name: /^Hop 1 of 2/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Station / })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Hop 1 of 2:/ }));
+    expect(screen.getByRole('heading', { name: 'Hop 1 of 2: 4.18.2 → 4.19.40' })).toBeInTheDocument();
+    expect(hint).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Station 4\.20\.32,/ }));
+    expect(screen.getByRole('heading', { name: 'Station 4.20.32' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Hop 1 of 2:/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Station 4\.20\.32,/ }));
+    expect(screen.queryByRole('heading', { name: /^Hop 1 of 2/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Station / })).not.toBeInTheDocument();
+    expect(screen.getByText(/Select a station or hop on the map/)).toBeInTheDocument();
   });
 });

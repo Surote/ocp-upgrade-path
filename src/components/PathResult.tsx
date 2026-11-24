@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { buildHopCommands } from '../design/commands';
-import type { StitchedPathResult, StitchError } from '../engine/types';
+import type { PathHop, StitchedPathResult, StitchError } from '../engine/types';
 import type { Version } from '../graph/types';
 import { describeStitchError } from '../planner/describeStitchError';
 import type { AsyncResult } from '../planner/useAsyncResult';
@@ -90,15 +90,23 @@ export function PathResult({
         onSelectStation={toggleStation}
       />
 
-      <div className="detail-grid">
-        <HopDetail hop={selectedHop !== null ? primary.hops[selectedHop] : undefined} command={selectedHop !== null ? commands[selectedHop] : undefined} index={selectedHop} total={primary.hops.length} />
-        <NodeDetail
-          version={selectedStation !== null ? (primary.versions[selectedStation] as Version) : undefined}
-          node={selectedStation !== null ? nodeInfo.get(primary.versions[selectedStation] as Version) : undefined}
-          channelNames={channelNames}
-          multiGraph={stitch.multiGraph}
-        />
-      </div>
+      {selectedHop === null && selectedStation === null ? (
+        <p className="map-hint">Select a station or hop on the map for its advisory, commands and risks.</p>
+      ) : (
+        <div className="detail-grid">
+          {selectedHop !== null && (
+            <HopDetail hop={primary.hops[selectedHop] as PathHop} command={commands[selectedHop]} index={selectedHop} total={primary.hops.length} />
+          )}
+          {selectedStation !== null && (
+            <NodeDetail
+              version={primary.versions[selectedStation] as Version}
+              node={nodeInfo.get(primary.versions[selectedStation] as Version)}
+              channelNames={channelNames}
+              multiGraph={stitch.multiGraph}
+            />
+          )}
+        </div>
+      )}
 
       <CommandScript commands={commands} />
       <RiskSummary riskSummary={primary.riskSummary} />
