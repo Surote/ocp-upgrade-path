@@ -7,7 +7,7 @@ import { ARCHES, type Arch, type Version } from '../graph/types';
 import { parseUrlState, resolveUrlArch, syncUrlState } from '../url/urlState';
 import type { AsyncResult } from './useAsyncResult';
 import { groupByStream, type StreamGroup } from './groupByStream';
-import { useLookaheadSegments } from './lookaheadTargets';
+import { type LookaheadSegment, useLookaheadSegments } from './lookaheadTargets';
 import { channelStream } from './sortChannels';
 import { buildStartOptions, buildTargetOptions, type TargetOption, versionStream } from './targetOptions';
 import { useChannelCatalog } from './useChannelCatalog';
@@ -15,6 +15,7 @@ import { useGraphForSelection } from './useGraphForSelection';
 import { usePathSearch } from './usePathSearch';
 
 const DEFAULT_ARCH: Arch = 'amd64';
+const NO_SEGMENTS: readonly LookaheadSegment[] = [];
 
 export interface ChannelFieldViewModel {
   readonly value: string;
@@ -128,7 +129,7 @@ export function usePlanner(client: GraphClient): PlannerViewModel {
   // channels exist beyond the anchor, only to later decide which of their
   // versions are reachable (buildTargetOptions below).
   const lookahead = useLookaheadSegments(client, channel, arch);
-  const lookaheadSegments = lookahead.status === 'success' ? lookahead.value : [];
+  const lookaheadSegments = lookahead.status === 'success' ? lookahead.value : NO_SEGMENTS;
   const lookaheadLoading = lookahead.status === 'loading';
 
   const resolvedStart = useMemo(() => (graph && startRaw ? resolveVersion(graph, startRaw) : undefined), [graph, startRaw]);
