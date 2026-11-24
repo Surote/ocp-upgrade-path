@@ -1,6 +1,7 @@
 import { reachableFrom } from '../engine/reachability';
-import { compareVersions } from '../engine/version';
+import { compareVersions, formatStream, streamOf } from '../engine/version';
 import type { Graph, Version } from '../graph/types';
+import type { LookaheadSegment } from './lookaheadTargets';
 
 /** Newest-first version list for the start dropdown (plan.md §6 / Q7 -- "sorted with compareVersions, newest first"). */
 export function buildStartOptions(graph: Graph): readonly Version[] {
@@ -9,35 +10,52 @@ export function buildStartOptions(graph: Graph): readonly Version[] {
 
 export interface TargetOption {
   readonly version: Version;
-  readonly disabled: boolean;
-  /** Present whenever `disabled` is true -- the reason a screen reader (and a sighted user) sees, not conveyed by styling alone (plan.md §6). */
-  readonly reason?: string;
+  /** Unreachable targets stay listed, disabled, rather than omitted (plan.md §6). */
+  readonly reachable: boolean;
+  /** Present when the version lives only beyond the selected channel, so choosing it means a channel change. */
+  readonly via?: { readonly channel: string; readonly classFallback: boolean };
 }
 
 /**
- * Builds the target dropdown's option list for one already-fetched `Graph`,
- * given the selected `start` version: every other version in the graph,
- * newest first, each marked reachable or not. Uses `reachableFrom` (a single
- * O(V+E) traversal) rather than calling `findPathsInGraph` once per
- * candidate -- see engine/reachability.ts.
+ * One newest-first list of every version newer than `start`, across the
+ * selected (anchor) channel and its look-ahead segments. A version in the
+ * anchor wins over the same version in a segment.
  *
- * Per plan.md §6, unreachable targets are *disabled with the reason
- * attached*, not omitted from the list -- so this always returns one entry
- * per other node in the graph.
+ * Reachability carries a frontier from `start` through the anchor and then
+ * each segment in turn, walking only that graph's own edges (plan.md §4:
+ * never union edges across graphs). The frontier is the union over every
+ * earlier graph, because successor streams can be siblings (4.23 and 5.0
+ * both follow 4.22) rather than a chain.
  */
-export function buildTargetOptions(graph: Graph, start: Version): readonly TargetOption[] {
-  const reachable = reachableFrom(graph, start);
-  const versions = [...graph.nodes.map((n) => n.version)]
-    .filter((ver) => ver !== start)
-    .sort((a, b) => compareVersions(b, a));
+export function buildTargetOptions(
+  anchor: Graph,
+  start: Version,
+  segments: readonly LookaheadSegment[],
+): readonly TargetOption[] {
+  const sources = [
+    { graph: anchor, via: undefined },
+    ...segments.map((s) => ({ graph: s.graph, via: { channel: s.channel, classFallback: s.classFallback } })),
+  ];
+  const seen = new Set<Version>();
+  let frontier: ReadonlySet<Version> = new Set([start]);
+  const options: TargetOption[] = [];
 
-  return versions.map((version) => {
-    if (compareVersions(version, start) < 0) {
-      return { version, disabled: true, reason: 'older than the selected start version' };
+  for (const { graph, via } of sources) {
+    const reachable = new Set<Version>();
+    for (const { version } of graph.nodes) {
+      if (frontier.has(version)) for (const next of reachableFrom(graph, version)) reachable.add(next);
     }
-    if (!reachable.has(version)) {
-      return { version, disabled: true, reason: 'not reachable from the selected start version in this channel' };
+    for (const { version } of graph.nodes) {
+      if (seen.has(version)) continue;
+      seen.add(version);
+      if (compareVersions(version, start) > 0) options.push({ version, reachable: reachable.has(version), via });
     }
-    return { version, disabled: false };
-  });
+    frontier = new Set([...frontier, ...reachable]);
+  }
+
+  return options.sort((a, b) => compareVersions(b.version, a.version));
+}
+
+export function versionStream(version: Version): string {
+  return formatStream(streamOf(version));
 }

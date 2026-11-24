@@ -12,10 +12,14 @@ export function StartSelect({ id, model }: { readonly id: string; readonly model
       <label htmlFor={id}>Start version</label>
       <select id={id} value={model.value} disabled={model.disabled || model.loading} onChange={(e) => model.onChange(e.target.value)}>
         <option value="">Select a start version…</option>
-        {model.options.map((version) => (
-          <option key={version} value={version}>
-            {version}
-          </option>
+        {model.groups.map((group) => (
+          <optgroup key={group.stream} label={group.stream}>
+            {group.options.map((version) => (
+              <option key={version} value={version}>
+                {version}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
       {model.loading && <span>Loading versions…</span>}

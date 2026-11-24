@@ -23,20 +23,24 @@ describe('marking a plan that relies on a candidate channel', () => {
     expect(screen.getByRole('alert')).not.toHaveTextContent(/candidate/);
   });
 
-  it('the target dropdown names the class a look-ahead target drops to', () => {
+  it('the target dropdown names the channel a look-ahead target needs and flags the class change', () => {
     render(
       <TargetSelect
         id="target"
         model={{
           value: '',
-          options: [],
-          lookaheadOptions: [{ version: '5.0.0-rc.8' as Version, disabled: false, viaChannel: 'candidate-5.0', classFallback: true }],
+          groups: [
+            {
+              stream: '5.0',
+              options: [{ version: '5.0.0-rc.8' as Version, reachable: true, via: { channel: 'candidate-5.0', classFallback: true } }],
+            },
+          ],
           lookaheadLoading: false,
           disabled: false,
           onChange: () => {},
         }}
       />,
     );
-    expect(screen.getByRole('option', { name: /5\.0\.0-rc\.8/ })).toHaveTextContent('5.0.0-rc.8 — via candidate-5.0 (drops to candidate)');
+    expect(screen.getByRole('option', { name: /5\.0\.0-rc\.8/ })).toHaveTextContent('5.0.0-rc.8 · via candidate-5.0 (class change)');
   });
 });

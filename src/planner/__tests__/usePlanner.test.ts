@@ -107,10 +107,21 @@ describe('usePlanner — URL restore on load', () => {
 
     const { result } = renderHook(() => usePlanner(client));
 
-    await waitFor(() => expect(result.current.start.options.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current.start.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
     expect(result.current.notices.some((n) => n.includes('9.9.9') && n.includes('not found'))).toBe(true);
     // Because start never resolved, target resolution is never attempted -- no false "target not found" notice.
     expect(result.current.notices.some((n) => n.includes('4.20.32'))).toBe(false);
+  });
+
+  it('a target param older than the start is not offered and gets a notice', async () => {
+    setUrl('?channel=stable-4.20&start=4.20.32&target=4.18.2');
+    const graph = rawGraphJson(['4.18.2', '4.20.32'], [[0, 1]], 'stable-4.20');
+    const client = makeClient(withSeed(new Map([['stable-4.20|amd64', jsonHandler(graph)]])));
+
+    const { result } = renderHook(() => usePlanner(client));
+
+    await waitFor(() => expect(result.current.notices.some((n) => n.includes('4.18.2') && n.includes('not newer'))).toBe(true));
+    expect(result.current.target.groups.flatMap((g) => g.options)).toEqual([]);
   });
 
   it('an unknown/garbage channel param never crashes and surfaces a named fetch error', async () => {
@@ -140,7 +151,7 @@ describe('usePlanner — cascade invalidation (Q7/Q8)', () => {
     const { result } = renderHook(() => usePlanner(client));
 
     act(() => result.current.channel.onChange('chan-a'));
-    await waitFor(() => expect(result.current.start.options.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current.start.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
     act(() => result.current.start.onChange('4.18.2'));
     expect(result.current.start.value).toBe('4.18.2');
 
@@ -148,7 +159,7 @@ describe('usePlanner — cascade invalidation (Q7/Q8)', () => {
     expect(result.current.start.value).toBe('');
     expect(result.current.target.value).toBe('');
 
-    await waitFor(() => expect(result.current.start.options.map((o) => o)).toContain('4.20.0'));
+    await waitFor(() => expect(result.current.start.groups.flatMap((g) => g.options)).toContain('4.20.0'));
   });
 
   it('changing arch clears start and target', async () => {
@@ -164,7 +175,7 @@ describe('usePlanner — cascade invalidation (Q7/Q8)', () => {
 
     const { result } = renderHook(() => usePlanner(client));
     act(() => result.current.channel.onChange('chan-a'));
-    await waitFor(() => expect(result.current.start.options.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current.start.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
     act(() => result.current.start.onChange('4.18.2'));
     expect(result.current.start.value).toBe('4.18.2');
 
@@ -179,10 +190,10 @@ describe('usePlanner — cascade invalidation (Q7/Q8)', () => {
 
     const { result } = renderHook(() => usePlanner(client));
     act(() => result.current.channel.onChange('chan-a'));
-    await waitFor(() => expect(result.current.start.options.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current.start.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
 
     act(() => result.current.start.onChange('4.18.2'));
-    await waitFor(() => expect(result.current.target.options.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current.target.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
     act(() => result.current.target.onChange('4.20.32'));
     expect(result.current.target.value).toBe('4.20.32');
 
@@ -197,14 +208,13 @@ describe('usePlanner — cascade invalidation (Q7/Q8)', () => {
 
     const { result } = renderHook(() => usePlanner(client));
     act(() => result.current.channel.onChange('chan-a'));
-    await waitFor(() => expect(result.current.start.options.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current.start.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
     act(() => result.current.start.onChange('4.18.2'));
 
-    await waitFor(() => expect(result.current.target.options.length).toBeGreaterThan(0));
-    const unreachable = result.current.target.options.find((o) => o.version === '4.20.32');
+    await waitFor(() => expect(result.current.target.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
+    const unreachable = result.current.target.groups.flatMap((g) => g.options).find((o) => o.version === '4.20.32');
     expect(unreachable).toBeDefined();
-    expect(unreachable?.disabled).toBe(true);
-    expect(unreachable?.reason).toBeTruthy();
+    expect(unreachable?.reachable).toBe(false);
   });
 });
 
@@ -233,7 +243,7 @@ describe('usePlanner — stale response guarding (Q30)', () => {
 
     // Switch away before the slow request resolves.
     act(() => result.current.channel.onChange('chan-fast'));
-    await waitFor(() => expect(result.current.start.options).toContain('4.21.0'));
+    await waitFor(() => expect(result.current.start.groups.flatMap((g) => g.options)).toContain('4.21.0'));
 
     // Now let the stale request resolve.
     await act(async () => {
@@ -243,7 +253,7 @@ describe('usePlanner — stale response guarding (Q30)', () => {
 
     // The stale chan-slow response must not have overwritten the current selection's options.
     expect(result.current.channel.value).toBe('chan-fast');
-    expect(result.current.start.options).toEqual(['4.21.0', '4.20.0']);
+    expect(result.current.start.groups.flatMap((g) => g.options)).toEqual(['4.21.0', '4.20.0']);
   });
 });
 
@@ -291,11 +301,11 @@ describe('usePlanner — look-ahead targets (plan.md §6)', () => {
 
     // The dropdown itself must have offered 4.22.9 as a look-ahead target,
     // clearly marked with the real channel it lives in.
-    await waitFor(() => expect(result.current.target.lookaheadOptions.length).toBeGreaterThan(0));
-    const lookaheadTarget = result.current.target.lookaheadOptions.find((o) => o.version === '4.22.9');
+    await waitFor(() => expect(result.current.target.groups.flatMap((g) => g.options).length).toBeGreaterThan(0));
+    const lookaheadTarget = result.current.target.groups.flatMap((g) => g.options).find((o) => o.version === '4.22.9');
     expect(lookaheadTarget).toBeDefined();
-    expect(lookaheadTarget?.disabled).toBe(false);
-    expect(lookaheadTarget?.viaChannel).toBe('eus-4.22');
+    expect(lookaheadTarget?.reachable).toBe(true);
+    expect(lookaheadTarget?.via?.channel).toBe('eus-4.22');
   });
 });
 

@@ -1,10 +1,9 @@
 import { useCallback } from 'react';
 import { parseChannelName } from '../design/channels';
 import { candidateChannelsForStream } from '../design/forwardChannel';
-import { reachableFrom } from '../engine/reachability';
-import { compareStreams, compareVersions, formatStream, type Stream } from '../engine/version';
+import { compareStreams, formatStream, type Stream } from '../engine/version';
 import type { GraphClient } from '../graph/client';
-import type { Arch, Graph, Version } from '../graph/types';
+import type { Arch, Graph } from '../graph/types';
 import { ok, type Result } from '../lib/result';
 import { type AsyncResult, useAsyncResult } from './useAsyncResult';
 
@@ -94,71 +93,6 @@ function lowestNewerStream(channelNames: ReadonlySet<string>, than: Stream, excl
     if (!lowest || compareStreams(parsed, lowest) < 0) lowest = { major: parsed.major, minor: parsed.minor };
   }
   return lowest;
-}
-
-export interface LookaheadTargetOption {
-  readonly version: Version;
-  readonly disabled: boolean;
-  readonly reason?: string;
-  /** The channel this candidate was actually found in -- always beyond the anchor's own graph, so choosing it requires a real channel switch. */
-  readonly viaChannel: string;
-  /** True when `viaChannel` is a different class than the anchor's (plan.md §6) -- surfaced so the UI can call it out explicitly, per requirement 5. */
-  readonly classFallback: boolean;
-}
-
-/**
- * Builds look-ahead target options from already-discovered `segments`
- * (ascending-stream order, as `discoverLookaheadSegments` returns them):
- * every version in a segment's graph not already present in `anchorGraph`,
- * marked reachable/unreachable by carrying a "reachable so far" frontier
- * from `start` through the anchor and then into each segment in turn,
- * using only that segment's own edges at each step. The frontier is the
- * union over every earlier segment, not just the previous one, because
- * successor streams can be siblings (4.23 and 5.0 both follow 4.22) rather
- * than a chain. This mirrors the
- * stitcher's "never union edges across graphs" rule (plan.md §4) rather than
- * assuming every listed version is reachable just because a channel exists.
- */
-export function buildLookaheadTargetOptions(
-  anchorGraph: Graph,
-  start: Version,
-  segments: readonly LookaheadSegment[],
-): readonly LookaheadTargetOption[] {
-  const seen = new Set<Version>(anchorGraph.nodes.map((n) => n.version));
-  let frontier = reachableFrom(anchorGraph, start);
-
-  const options: LookaheadTargetOption[] = [];
-
-  for (const segment of segments) {
-    const segmentVersions = new Set(segment.graph.nodes.map((n) => n.version));
-
-    const entry = new Set<Version>();
-    for (const ver of frontier) {
-      if (segmentVersions.has(ver)) entry.add(ver);
-    }
-
-    const reachableInSegment = new Set<Version>();
-    for (const e of entry) {
-      for (const ver of reachableFrom(segment.graph, e)) reachableInSegment.add(ver);
-    }
-
-    for (const node of segment.graph.nodes) {
-      if (seen.has(node.version)) continue;
-      seen.add(node.version);
-      const disabled = !reachableInSegment.has(node.version);
-      options.push({
-        version: node.version,
-        disabled,
-        reason: disabled ? 'not reachable from the selected start version through the discovered forward channels' : undefined,
-        viaChannel: segment.channel,
-        classFallback: segment.classFallback,
-      });
-    }
-
-    frontier = new Set([...frontier, ...reachableInSegment]);
-  }
-
-  return [...options].sort((a, b) => compareVersions(b.version, a.version));
 }
 
 /**
