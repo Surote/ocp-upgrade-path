@@ -78,22 +78,49 @@ export async function discoverLookahead(
   const failedChannels = new Set<string>();
   let failure: LookaheadDiscovery['failure'];
 
-  // The walk takes channels one at a time, in priority order, recomputing the
-  // frontier after each, so near the cap a graph that names an earlier
-  // stream's channel is fetched before a later one. The rest of the frontier
-  // the budget still covers is prefetched meanwhile; when the cap does not
-  // bind, every prefetched channel is eventually taken.
-  const pending = new Map<string, ReturnType<GraphLoader>>();
-  const limit = concurrencyLimiter(LOOKAHEAD_CONCURRENCY);
+  // Fetching runs ahead of the walk: every channel any loaded graph names is
+  // fetched as soon as a slot frees, so one slow channel never holds back
+  // what its siblings named. The walk below still takes channels one at a
+  // time in priority order from the loaded results, so it takes the channels
+  // a serial walk would, unless the cap binds (see the break below).
+  const named = new Set(anchorGraph.channelNames);
+  const loaded = new Map<string, LoadResult>();
+  const started = new Set<string>();
+  const inFlight = new Map<string, Promise<void>>();
+  const request = (channel: string) => {
+    started.add(channel);
+    const settled = loader(channel, arch).then((result) => {
+      loaded.set(channel, result);
+      if (result.ok) for (const name of result.value.channelNames) named.add(name);
+      inFlight.delete(channel);
+    });
+    inFlight.set(channel, settled);
+  };
+  const requestAhead = (next: string) => {
+    if (!started.has(next) && inFlight.size < LOOKAHEAD_CONCURRENCY) request(next);
+    // Once the named channels reach the cap the walk may not take them all,
+    // and a fetch it does not take spends a request it needs.
+    if (untriedChannels(named, anchor, []).length >= MAX_LOOKAHEAD_FETCHES) return;
+    for (const { channel } of untriedChannels(named, anchor, [...started])) {
+      if (inFlight.size >= LOOKAHEAD_CONCURRENCY || started.size >= MAX_LOOKAHEAD_FETCHES) return;
+      request(channel);
+    }
+  };
+
   while (channelsTried.length < MAX_LOOKAHEAD_FETCHES) {
-    const frontier = untriedChannels(attested, anchor, channelsTried);
-    const next = frontier[0];
+    const next = untriedChannels(attested, anchor, channelsTried)[0];
     if (!next) break;
-    for (const { channel } of frontier.slice(0, MAX_LOOKAHEAD_FETCHES - channelsTried.length)) {
-      if (!pending.has(channel)) pending.set(channel, limit(() => loader(channel, arch)));
+    const result = loaded.get(next.channel);
+    if (!result) {
+      // Fetches started before one graph named enough earlier channels to
+      // push them past the cap spent requests the walk needed. Stopping keeps
+      // the cap; what the walk took is still a serial walk's first channels.
+      if (!started.has(next.channel) && started.size >= MAX_LOOKAHEAD_FETCHES) break;
+      requestAhead(next.channel);
+      await Promise.race(inFlight.values());
+      continue;
     }
     channelsTried.push(next.channel);
-    const result = await (pending.get(next.channel) as ReturnType<GraphLoader>);
     if (!result.ok) {
       if (result.error.kind === 'empty') {
         emptyChannels.add(next.channel);
@@ -117,6 +144,8 @@ export async function discoverLookahead(
   });
   return { segments, channelsTried, failure };
 }
+
+type LoadResult = Awaited<ReturnType<GraphLoader>>;
 
 interface Candidate {
   readonly channel: string;
@@ -144,24 +173,4 @@ function untriedChannels(
     if (rank >= 0) candidates.push({ channel: name, stream, rank });
   }
   return candidates.sort((a, b) => compareStreams(a.stream, b.stream) || a.rank - b.rank);
-}
-
-/** Wraps tasks so at most `limit` run at once, started in call order. */
-function concurrencyLimiter(limit: number) {
-  let active = 0;
-  const queued: Array<() => void> = [];
-  return <R>(task: () => Promise<R>): Promise<R> =>
-    new Promise<R>((resolve, reject) => {
-      const run = () => {
-        active += 1;
-        task()
-          .then(resolve, reject)
-          .finally(() => {
-            active -= 1;
-            queued.shift()?.();
-          });
-      };
-      if (active < limit) run();
-      else queued.push(run);
-    });
 }

@@ -181,29 +181,37 @@ describe('GraphClient — two-tier caching', () => {
 });
 
 /**
- * Holds the first gzip stream of `name` constructed after this call until
- * `release`, so a cache read or write is still pending while a refresh runs.
+ * Holds each of the first `count` gzip streams of `name` constructed after
+ * this call until its `release`, so a cache read or write is still pending
+ * while a refresh runs. Later streams run freely.
  */
-function holdFirstStream(name: 'CompressionStream' | 'DecompressionStream') {
+function holdStreams(name: 'CompressionStream' | 'DecompressionStream', count: number) {
   const Real = globalThis[name];
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  let markStarted!: () => void;
-  const started = new Promise<void>((resolve) => (markStarted = resolve));
-  let held = false;
+  const gates = Array.from({ length: count }, () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => (markStarted = resolve));
+    return { gate, release, started, markStarted };
+  });
+  let constructed = 0;
   class Held {
     readonly writable: WritableStream;
     readonly readable: ReadableStream;
     constructor(format: CompressionFormat) {
       const real = new Real(format);
+      const held = gates[constructed++];
       this.writable = real.writable;
-      this.readable = held ? real.readable : real.readable.pipeThrough(new TransformStream({ start: () => gate }));
-      if (!held) markStarted();
-      held = true;
+      this.readable = held ? real.readable.pipeThrough(new TransformStream({ start: () => held.gate })) : real.readable;
+      held?.markStarted();
     }
   }
   vi.stubGlobal(name, Held);
-  return { release, started };
+  return gates.map(({ release, started }) => ({ release, started }));
+}
+
+function holdFirstStream(name: 'CompressionStream' | 'DecompressionStream') {
+  return holdStreams(name, 1)[0] as { release: () => void; started: Promise<void> };
 }
 
 describe('GraphClient — a refresh is never undone by an older cache operation', () => {
@@ -249,5 +257,39 @@ describe('GraphClient — a refresh is never undone by an older cache operation'
     const reloaded = await makeClient(sequenceFetch('stable-4.21.json'), storage).getGraph(PARAMS);
     expect(refreshed.ok && refreshed.value.graph.nodes.length).not.toBe(OLD_NODES);
     expect(reloaded.ok && reloaded.value.graph.nodes.length).toBe(refreshed.ok && refreshed.value.graph.nodes.length);
+  });
+
+  it('a disk read retried after a forced refresh began does not put the old graph back', async () => {
+    const storage = new FakeStorage();
+    await makeClient(sequenceFetch('stable-4.20.json'), storage).getGraph(PARAMS);
+    let openNetwork!: () => void;
+    const network = new Promise<void>((resolve) => (openNetwork = resolve));
+    let fetches = 0;
+    let markRetriedOnNetwork!: () => void;
+    const retriedOnNetwork = new Promise<void>((resolve) => (markRetriedOnNetwork = resolve));
+    const fetchImpl = fakeFetch(async () => {
+      if (++fetches === 2) markRetriedOnNetwork();
+      await network;
+      return fakeJsonResponse(loadFixture('stable-4.19.json'));
+    });
+    const client = makeClient(fetchImpl, storage);
+    const [firstRead, retriedRead] = holdStreams('DecompressionStream', 2) as [
+      { release: () => void; started: Promise<void> },
+      { release: () => void; started: Promise<void> },
+    ];
+
+    const staleRead = client.getGraph(PARAMS);
+    await firstRead.started;
+    const refresh = client.getGraph(PARAMS, { forceRefresh: true });
+    firstRead.release();
+    await Promise.race([retriedRead.started, retriedOnNetwork]);
+    openNetwork();
+    const refreshed = await refresh;
+    retriedRead.release();
+    await staleRead;
+
+    const after = await client.getGraph(PARAMS);
+    expect(refreshed.ok && refreshed.value.graph.nodes.length).not.toBe(OLD_NODES);
+    expect(after.ok && after.value.graph.nodes.length).toBe(refreshed.ok && refreshed.value.graph.nodes.length);
   });
 });

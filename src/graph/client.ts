@@ -24,7 +24,7 @@ export interface GraphParams {
 }
 
 export interface FetchGraphOptions {
-  /** Skip both cache tiers and go straight to the network -- the manual refresh path. */
+  /** Drop this key from both cache tiers and go straight to the network -- the manual refresh path. */
   readonly forceRefresh?: boolean;
   readonly signal?: AbortSignal;
 }
@@ -65,7 +65,9 @@ export class GraphClient {
 
   async getGraph(params: GraphParams, options: FetchGraphOptions = {}): Promise<Result<GraphResult, GraphError>> {
     const key = makeCacheKey(params.channel, params.arch);
-    if (options.forceRefresh) this.bumpGeneration(key);
+    // Dropping the entries, not just skipping them, keeps a read that the
+    // refresh overtook from rereading the old entry when it retries.
+    if (options.forceRefresh) this.invalidate(params);
     const generation = this.generationOf(key);
     const isCurrent = () => this.generationOf(key) === generation;
 
