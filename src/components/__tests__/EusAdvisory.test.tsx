@@ -110,6 +110,22 @@ describe('copying a leg\'s commands', () => {
   });
 });
 
+describe('the pause checkpoint', () => {
+  it('pauses workers only once the switch to eus-4.(E+2) has succeeded', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    try {
+      renderAdvisory(route('4.16.33', '4.17.59', '4.18.59'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy leg 1 pause' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      expect(writeText).toHaveBeenCalledWith(`oc adm upgrade channel eus-4.18 && oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('the pool check after a leg', () => {
   it('waits for every pool the operator paused, custom pools included, not just worker', () => {
     renderAdvisory(route('4.16.33', '4.17.59', '4.18.59'));

@@ -222,7 +222,7 @@ describe('legCheckpoints', () => {
   it("pauses as Red Hat's CLI procedure does: pools settled, then the switch to eus-4.(E+2), then the pause", () => {
     expect(pause).toMatchObject({
       kind: 'pause',
-      commands: ['oc adm upgrade channel eus-4.18', `oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`],
+      commands: [`oc adm upgrade channel eus-4.18 && oc patch mcp/worker --type merge --patch '{"spec":{"paused":true}}'`],
     });
     expect(pause?.when).toMatch(/^At 4\.16\.33, before oc adm upgrade --to 4\.17\.59/);
     expect(pause?.when).toMatch(/oc get mcp.*UPDATED=True and UPDATING=False/);
