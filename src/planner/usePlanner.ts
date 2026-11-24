@@ -93,7 +93,7 @@ export interface RouteConstraintsViewModel {
  */
 export interface RiskApplicabilityViewModel {
   readonly notApplicable: ReadonlySet<RiskId>;
-  readonly onChange: (name: RiskId, notApplicable: boolean) => void;
+  readonly onChange: (id: RiskId, notApplicable: boolean) => void;
 }
 
 /** Why no route is searched although start and target are set. */
