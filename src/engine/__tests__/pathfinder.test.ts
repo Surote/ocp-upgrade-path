@@ -305,6 +305,16 @@ describe('findPathsInGraph — trivial and edge cases', () => {
     expect(result.value.alternates).toEqual([]);
   });
 
+  it('never routes through a downgrade edge', () => {
+    const graph = buildGraph(['4.20.1', '4.20.10', '4.20.5', '4.22.1'], [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+    ]);
+    const result = findPathsInGraph(graph, v('4.20.1'), v('4.22.1'));
+    expect(result.ok ? result.value.primary.versions : result.error.kind).toBe('unreachable');
+  });
+
   it('stays correct in the presence of a cycle rather than assuming a DAG', () => {
     // 1.0.0 -> 1.1.0 -> 1.0.0 (cycle) and 1.1.0 -> 2.0.0.
     const graph = buildGraph(['1.0.0', '1.1.0', '2.0.0'], [

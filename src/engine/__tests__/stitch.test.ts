@@ -430,6 +430,27 @@ describe('stitchAndFindPath — failure modes', () => {
     });
   });
 
+  it('never joins two channels through a downgrade, even when that is the only shared release', async () => {
+    const anchor = rawGraph(['4.20.1', '4.20.10'], [[0, 1]], 'ANCHOR', ['stable-4.20', 'stable-4.22']);
+    // The only release stable-4.22 shares with the anchor's route is 4.20.10,
+    // and its only way on starts by stepping back to 4.20.5.
+    const forward = rawGraph(['4.20.10', '4.20.5', '4.22.1'], [[0, 1], [1, 2]], 'FWD');
+    const loader: GraphLoader = async (channel) => {
+      if (channel === 'stable-4.20') return ok(anchor);
+      if (channel === 'stable-4.22') return ok(forward);
+      return err({ kind: 'empty', channel, arch: 'amd64' });
+    };
+
+    const result = await stitchAndFindPath(loader, {
+      targetChannel: 'stable-4.20',
+      arch: 'amd64',
+      start: v('4.20.1'),
+      target: v('4.22.1'),
+    });
+
+    expect(result.ok ? result.value.primary.versions : result.error.kind).toBe('unreachable');
+  });
+
   it('gives up as startNeverFound once a walked-back channel holds nothing older to step back to', async () => {
     const graph418 = rawGraph(['4.0.0', '4.1.0'], [[0, 1]], 'X');
     const graph417 = rawGraph(['4.0.0'], [], 'Y');
