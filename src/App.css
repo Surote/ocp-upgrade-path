@@ -793,6 +793,26 @@ main {
   margin: 8px 0 0;
 }
 
+.cpo-leg-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cpo-leg-list h3 {
+  font-size: 0.95rem;
+  margin: 0 0 4px;
+}
+
+.cpo-leg-command {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin: 8px 0 0;
+}
+
 .admin-acks-unknown {
   color: var(--risk-always);
   margin: 4px 0;
