@@ -236,9 +236,13 @@ answers "where does it enter".
   three at a time, skipping any name a fetched graph already named. The dropdown grows
   when answers land; there is no button and nothing blocks. Membership names older than
   4.14 (a 4.14 graph names 4.12 channels) stay out of the list, though 4.12 and 4.13
-  releases inside those graphs remain selectable starts. Found names and empty probes are
-  cached for a day under their own `localStorage` key, outside the graph LRU, so a warm
-  load probes nothing. A failed probe is retried once and never recorded as absent.
+  releases inside those graphs remain selectable starts. A saved link that selects an
+  older channel (`?channel=stable-4.13`) still lists that one channel, under its legacy
+  label, once its graph loads, so the select never reads blank while routing on it. Found
+  names and empty probes are cached for a day under their own `localStorage` key, outside
+  the graph LRU, so a warm load probes nothing. The cache is read again when the seed
+  lands, and every name the sweep skips as cached is listed, including names another tab
+  recorded meanwhile. A failed probe is retried once and never recorded as absent.
   Measured Nov 2026: a cold load probes 3–4 channels and lists every 4.14–4.17 channel
   about 3 s after navigation (seed ~2.2 s, probes ~0.8 s); a warm load sends no probe.
 - **Legacy streams.** Streams older than 4.18 are labelled legacy: their channel
@@ -679,19 +683,31 @@ route. Source: [Performing a Control Plane Only update](https://docs.redhat.com/
 docs.redhat.com returns 403 to scripted fetches).
 
 **Cincinnati does not encode this.** `controlPlaneOnlyLegs` (`design/eus.ts`) reads the
-route's actual versions, after stops and avoids, and groups them into stream runs. Each
-contiguous 4.E → 4.E+1 → 4.E+2 run with 4.E an EUS minor is one leg. Legs chain at their
-shared EUS stream, so 4.14 → 4.22 yields 4.14→4.16, 4.16→4.18, 4.18→4.20 and 4.20→4.22. A
-route entering at an odd minor starts at the next EUS stream. A trailing 4.E → 4.E+1 is not
-a leg. The major boundary (4.22 → 5.0) is never a leg, and no EUS rule is assumed for 5.x.
+route's actual hops, after stops and avoids, and groups their versions into stream runs.
+Each contiguous 4.E → 4.E+1 → 4.E+2 run with 4.E an EUS minor is one leg. Legs chain at
+their shared EUS stream, so 4.14 → 4.22 yields 4.14→4.16, 4.16→4.18, 4.18→4.20 and
+4.20→4.22. A route entering at an odd minor starts at the next EUS stream. A trailing
+4.E → 4.E+1 is not a leg. The major boundary (4.22 → 5.0) is never a leg, and no EUS rule is
+assumed for 5.x.
 
-Each leg pauses `mcp/worker` on the last route version in 4.E, right before the first hop
-into 4.E+1, and unpauses on the last route version in 4.E+2, followed by `oc get mcp` until
-the worker pool reports `UPDATED=True` before the route leaves that stream. The `oc patch`
-commands are Red Hat's verbatim. The doc link uses the leg's destination stream. The UI
-(`EusAdvisory`) shows one flat list, for example "Leg 1: 4.16 → 4.18 (pause workers before
-4.17, unpause at 4.18)", with the leg's commands and a copy button, labelled as guidance.
-A route with no complete leg renders nothing.
+**A leg is available only over eus and stable hops.** Red Hat offers a Control Plane Only
+update "only after updates between all versions involved have been made available in
+`stable` channels", and runs it on `eus-<4.y+2>`, which receives each release when stable
+does. A minor sequence alone is not proof. Each leg therefore checks the `sourceChannel` of
+every hop from its pause point to its unpause point. If any came from a fast or candidate
+graph (or has no recorded source), the leg is `unavailable`: the panel names that hop and
+its channel, says a Control Plane Only update isn't available for the leg on this route, and
+gives no pause steps.
+
+Each available leg pauses `mcp/worker` on the last route version in 4.E, right before the
+first hop into 4.E+1, and unpauses on the last route version in 4.E+2. Then `oc get mcp`
+until every pool the operator paused reports `UPDATED=True` and `UPDATING=False`, before
+the route leaves that stream. The `oc patch` commands are Red Hat's verbatim. The doc link
+uses the leg's destination stream. The UI (`EusAdvisory`) shows one flat list, for example
+"Leg 1: 4.16 → 4.18 (pause workers before 4.17, unpause at 4.18)", labelled as guidance.
+Each checkpoint (pause, unpause, pool check) is its own block with its own copy button:
+they run at different points in the route, so no single copy may hold both the pause and
+the unpause. A route with no complete leg renders nothing.
 
 **No 60-day limit.** Earlier versions of this tool said to finish within 60 days. Red Hat's
 procedure states no such limit, and the 4.16.42 release notes call the web console's
