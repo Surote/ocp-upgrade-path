@@ -15,7 +15,7 @@ async function serialWalk(loader: GraphLoader, anchorGraph: Graph): Promise<stri
   const anchor = parseChannelName('stable-4.5') as NonNullable<ReturnType<typeof parseChannelName>>;
   const rank = (name: string) => {
     const parsed = parseChannelName(name);
-    return parsed && compareStreams(parsed, anchor) > 0 ? candidateChannelsForStream('stable', parsed).indexOf(name) : -1;
+    return parsed && compareStreams(parsed, anchor) > 0 ? candidateChannelsForStream('stable', { major: parsed.major, minor: parsed.minor }).indexOf(name) : -1;
   };
   const attested = new Set(anchorGraph.channelNames);
   const tried: string[] = [];
@@ -35,8 +35,10 @@ function prng(seed: number) {
   return () => (state = (state * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
 }
 
-function delayed(loader: GraphLoader, delayFor: (channel: string) => number): GraphLoader {
+/** `calls` records each call when it is made, before its delay. */
+function delayed(loader: GraphLoader, delayFor: (channel: string) => number, calls: string[] = []): GraphLoader {
   return async (channel, arch) => {
+    calls.push(channel);
     await new Promise((resolve) => setTimeout(resolve, delayFor(channel)));
     return loader(channel, arch);
   };
@@ -63,7 +65,7 @@ describe('look-ahead discovery does not depend on response timing', () => {
       for (const schedule of [0, 1, 2]) {
         const fetched: string[] = [];
         const jitter = prng(trial * 3 + schedule + 1);
-        const discovery = await discoverLookahead(delayed(loaderFor(graphs, fetched), () => jitter() * 4), 'stable-4.5', anchor, 'amd64');
+        const discovery = await discoverLookahead(delayed(loaderFor(graphs), () => jitter() * 4, fetched), 'stable-4.5', anchor, 'amd64');
         expect(fetched.length).toBeLessThanOrEqual(CAP);
         runs.push({ tried: discovery.channelsTried, segments: discovery.segments.map((s) => s.channel), fetched: [...fetched].sort() });
       }
@@ -87,7 +89,7 @@ describe('look-ahead discovery does not depend on response timing', () => {
 
     const fast = await discoverLookahead(delayed(loaderFor(graphs), () => 1), 'stable-4.5', anchor, 'amd64');
     const fetched: string[] = [];
-    const slow = await discoverLookahead(delayed(loaderFor(graphs, fetched), (c) => (c === 'stable-4.6' ? 30 : 1)), 'stable-4.5', anchor, 'amd64');
+    const slow = await discoverLookahead(delayed(loaderFor(graphs), (c) => (c === 'stable-4.6' ? 30 : 1), fetched), 'stable-4.5', anchor, 'amd64');
 
     expect(fast.channelsTried.slice(0, 3)).toEqual(['stable-4.6', 'fast-4.6', 'candidate-4.6']);
     expect(fast.segments).toHaveLength(CAP);
