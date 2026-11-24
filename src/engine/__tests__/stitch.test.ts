@@ -225,13 +225,11 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
       'ANCHOR',
       ['eus-4.20', 'eus-4.22'],
     );
-    // eus-4.22: lists the same three 4.20.x releases as real members (so
-    // they're genuinely reachable channel switch targets), but its own
-    // edges only start from the last one, 4.20.9 -- exactly the shape that
-    // forces the DP's own boundary later than the true earliest member.
+    // eus-4.22 publishes the same 4.20.x hops, so the route search keeps the
+    // anchor's equal-cost route to 4.20.9 and lands its boundary there.
     const forward = rawGraph(
       ['4.20.0', '4.20.5', '4.20.9', '4.21.0', '4.22.0'],
-      [[2, 3], [3, 4]],
+      [[0, 1], [1, 2], [2, 3], [3, 4]],
       'FWD',
     );
     const loader: GraphLoader = async (channel) => {
@@ -259,14 +257,7 @@ describe('stitchAndFindPath — forward walk (look-ahead targets)', () => {
       v('4.22.0'),
     ]);
 
-    // The switch is attributed to 4.20.0 -- the earliest shared station --
-    // even though the DP itself could only actually walk the 4.20.0 -> 4.20.5
-    // -> 4.20.9 hops using eus-4.20's own edges (eus-4.22 has none starting
-    // there). A regression to "the DP's own boundary" (4.20.9) or to "one
-    // station earlier than the old bug" (still 4.20.9 here, since the DP's
-    // boundary and the old off-by-one-arrival station coincide only when
-    // there's a single shared station -- this fixture deliberately has
-    // three) would fail this assertion.
+    // The switch moves back to 4.20.0, the earliest station from which eus-4.22 publishes every remaining hop.
     const sourceChannels = result.value.primary.hops.map((h) => h.sourceChannel);
     expect(sourceChannels).toEqual(['eus-4.20', 'eus-4.20', 'eus-4.22', 'eus-4.22', 'eus-4.22', 'eus-4.22']);
   });

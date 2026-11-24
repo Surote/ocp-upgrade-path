@@ -32,8 +32,7 @@ export function HopDetail({
             ⇄
           </span>
           Switch to <span className="mono">{command.channelSwitchTo}</span> while standing on{' '}
-          <span className="mono">{hop.from}</span>, before upgrading to {hop.to} -- {hop.from} is the earliest release on
-          this path already in that channel.
+          <span className="mono">{hop.from}</span>, before upgrading to {hop.to}.
         </p>
       )}
 

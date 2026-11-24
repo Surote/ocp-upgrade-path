@@ -16,8 +16,9 @@ export interface HopCommand {
    * **Attribution**: when present, the switch belongs to this hop's `from`
    * -- the station the cluster is standing on right before taking this hop
    * -- never `to` (plan.md §6 "Where the switch is attributed matters").
-   * `sourceChannel` is already reattributed by the engine (earliest member
-   * station, or the latest one when joining a class-fallback channel), so
+   * `sourceChannel` is already reattributed by the engine (the earliest
+   * station from which the new channel publishes every remaining hop, or the
+   * latest one when joining a class-fallback channel), so
    * `from` here is exactly that station; a caller placing a marker (the map's ring, `HopDetail`'s note) must anchor it on `from`.
    */
   readonly channelSwitch?: string;

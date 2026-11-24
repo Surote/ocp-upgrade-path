@@ -413,9 +413,11 @@ indexing `Graph.channelNames`):
 > to — never to a name assembled from a class and a minor.
 
 **Where the switch is attributed matters.** The command runs while the cluster is standing
-on a release, so the switch belongs to **the earliest station on the path that is already a
-member of the destination channel** — not to the destination of the hop that leaves the old
-channel.
+on a release, so the switch belongs to **the earliest station on the path from which the
+destination channel publishes every remaining hop it takes over** — not to the destination
+of the hop that leaves the old channel. Membership alone is not enough: once the cluster is on
+channel X, each `oc adm upgrade --to` must be an edge X publishes, and a channel can list
+both releases of a hop without publishing the edge between them.
 
 Worked example, `eus-4.20` → `4.22.9`:
 
@@ -446,11 +448,11 @@ data or from the set of channels the stitcher actually fetched.
 > availability, not for early attribution -- so on a path where several *consecutive*
 > stations all belong to the destination channel, the DP's own boundary can legitimately
 > land later than the earliest one (see `stitch.test.ts`'s "several consecutive shared
-> stations" case, where the forward channel's own edges only start from the *last* of three
+> stations" case, where an equal-cost tie keeps the anchor's route up to the *last* of three
 > shared 4.20.x stations). `reattributeSwitches` (engine/stitch.ts) runs immediately
-> after the DP and relabels `PathHop.sourceChannel` to the earliest station on the path that
-> is a real member of the channel about to be used, checked directly against each fetched
-> segment's own node list (`versionsOf`, never a constructed name) -- a pure relabelling
+> after the DP and relabels `PathHop.sourceChannel` back to the earliest station from which
+> the channel about to be used publishes every hop moved onto it, checked against that
+> fetched segment's own edges (never a constructed name) -- a pure relabelling
 > pass that never changes which versions or edges are on the path. It's applied per
 > crossing independently, so a path through three-or-more channels gets each boundary
 > corrected on its own. `design/commands.ts` was already comparing consecutive hops'

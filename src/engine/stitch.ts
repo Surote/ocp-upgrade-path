@@ -205,70 +205,61 @@ export function routeAcrossSegments(segments: readonly ChannelSegment[], start: 
   return routes;
 }
 
+function publishedEdges(graph: Graph): ReadonlySet<string> {
+  return new Set(graph.edges.map(([from, to]) => edgeKey(graph.nodes[from]?.version, graph.nodes[to]?.version)));
+}
+
+function edgeKey(from: Version | undefined, to: Version | undefined): string {
+  return `${from} ${to}`;
+}
+
 /**
- * Re-attributes each hop's `sourceChannel` to the *earliest* station on the
- * path that is genuinely a member of the channel about to be used -- plan.md
- * §6 "Where the switch is attributed matters": the `oc adm upgrade channel`
- * command runs while the cluster is standing on a release, so it belongs to
- * the earliest point the destination channel becomes available, not
- * wherever `routeAcrossSegments`'s layered DP happened to land its
- * boundary (which optimises for path cost/edge availability, not early
- * attribution -- see that function's doc).
+ * Re-attributes hops so each channel switch happens as early as it safely
+ * can -- plan.md §6 "Where the switch is attributed matters": the
+ * `oc adm upgrade channel` command runs while the cluster is standing on a
+ * release, so it belongs to the earliest point the destination channel can
+ * take over, not wherever `routeAcrossSegments` happened to land its
+ * boundary.
  *
- * Applied independently per crossing, per plan.md §6 ("Where a path crosses
- * more than two channels, apply the same rule independently to each
- * crossing"): each transition between two distinct consecutive
- * `sourceChannel` values is handled on its own, scanning only the stations
- * visited while the *previous* segment was current for the earliest one
- * that is a real member of the *next* segment's own fetched graph -- a
- * direct node lookup against `segment.graph.nodes` (`versionsOf`), never a
- * constructed channel name and never a guess. If none of those earlier
- * stations qualify, the DP's own boundary is used unchanged (the scan always
- * finds *at least* that one, since it's guaranteed to be a member of the
- * destination segment by construction).
+ * Each crossing between two consecutive `sourceChannel` values is handled on
+ * its own (plan.md §6: "apply the same rule independently to each
+ * crossing"). The switch moves back over the previous run's hops only while
+ * the destination's own graph publishes every hop moved onto it: once the
+ * cluster is on channel X, each `oc adm upgrade --to` must be an edge X
+ * publishes. Membership alone is not enough -- a channel can list both
+ * releases of a hop and still not publish the edge between them.
  *
- * Except a crossing *into* a class-fallback segment, which keeps the DP's
- * boundary: switching early there moves the cluster off its own class
- * (e.g. onto `candidate`) sooner than the path needs to.
+ * A crossing *into* a class-fallback segment keeps the route's boundary:
+ * switching early there moves the cluster off its own class (e.g. onto
+ * `candidate`) sooner than the path needs to.
  *
- * Purely a relabelling pass: it never changes which versions are visited,
- * which edges were walked, or the path's cost -- only which fetched channel
- * each hop is attributed to for switch-command purposes.
+ * Purely a relabelling pass: it never changes which versions are visited or
+ * the path's cost.
  */
-function reattributeSwitches(
-  versions: readonly Version[],
-  hops: readonly PathHop[],
-  segments: readonly ChannelSegment[],
-): readonly PathHop[] {
+function reattributeSwitches(hops: readonly PathHop[], segments: readonly ChannelSegment[]): readonly PathHop[] {
   if (segments.length <= 1 || hops.length === 0) return hops;
 
   const segIndexByChannel = new Map(segments.map((s, idx) => [s.channel, idx] as const));
-  const memberSets = segments.map((s) => versionsOf(s.graph));
-  const dpSeg = hops.map((h) => (h.sourceChannel ? (segIndexByChannel.get(h.sourceChannel) ?? 0) : 0));
+  const routeSeg = hops.map((h) => (h.sourceChannel ? (segIndexByChannel.get(h.sourceChannel) ?? 0) : 0));
+  const effectiveSeg = [...routeSeg];
+  const edgesBySeg = new Map<number, ReadonlySet<string>>();
+  let runStart = 0;
 
-  const effectiveSeg = [...dpSeg];
-  let runStartStation = 0; // station index (into `versions`) where the current DP-assigned run began
-
-  for (let i = 0; i < hops.length; i += 1) {
-    if (i > 0 && dpSeg[i] !== dpSeg[i - 1]) {
-      const destSegIdx = dpSeg[i] as number;
-      if (segments[destSegIdx]?.classFallback) {
-        runStartStation = i;
-        continue;
+  for (let i = 1; i < hops.length; i += 1) {
+    const dest = routeSeg[i] as number;
+    if (dest === routeSeg[i - 1]) continue;
+    const destSegment = segments[dest] as ChannelSegment;
+    if (!destSegment.classFallback) {
+      let edges = edgesBySeg.get(dest);
+      if (!edges) {
+        edges = publishedEdges(destSegment.graph);
+        edgesBySeg.set(dest, edges);
       }
-      const destMembers = memberSets[destSegIdx] as ReadonlySet<Version>;
-
-      let earliestStation = i; // fallback: the DP's own junction (this hop's `.from`)
-      for (let s = runStartStation; s <= i; s += 1) {
-        if (destMembers.has(versions[s] as Version)) {
-          earliestStation = s;
-          break;
-        }
-      }
-      for (let k = earliestStation; k < i; k += 1) effectiveSeg[k] = destSegIdx;
-
-      runStartStation = i; // the next crossing (if any) scans forward from here
+      let earliest = i;
+      while (earliest > runStart && edges.has(edgeKey(hops[earliest - 1]?.from, hops[earliest - 1]?.to))) earliest -= 1;
+      for (let k = earliest; k < i; k += 1) effectiveSeg[k] = dest;
     }
+    runStart = i;
   }
 
   return hops.map((h, i) => ({ ...h, sourceChannel: segments[effectiveSeg[i] as number]?.channel ?? h.sourceChannel }));
@@ -340,7 +331,7 @@ export async function stitchAndFindPath(
   const usedLookahead = lookahead.filter((segment) => routedChannels.has(segment.channel));
   const anchorSideFirst = [...backward].reverse();
   const versions = [start, ...route.hops.map((h) => h.to)];
-  const hops = reattributeSwitches(versions, route.hops, chain);
+  const hops = reattributeSwitches(route.hops, chain);
 
   return ok({
     primary: { versions, hops, cost: route.cost, riskSummary: dedupeRisks(hops.map((h) => h.risks)) },
